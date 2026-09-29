@@ -1,6 +1,6 @@
 import { esc, icon, refreshIcons } from './utils.js';
 
-/* Deteksi URL media (download) di dalam respons JSON.
+/* Deteksi URL media oke (download) di dalam respons JSON.
    Thumbnail / cover / avatar / banner sengaja diabaikan: yang dipreview adalah URL download aslinya. */
 
 const EXT = {
