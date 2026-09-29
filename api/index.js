@@ -56,6 +56,135 @@ async function ensureJsonBody(req) {
     req.body = {};
   }
 }
+//media
+async function handleMediaDownload(req, res) {
+  const host = req.headers?.host || "localhost";
+  const requestUrl = new URL(req.url, `http://${host}`);
+
+  const mediaUrl = requestUrl.searchParams.get("url");
+  const requestedFilename = requestUrl.searchParams.get("filename");
+
+  if (!mediaUrl) {
+    return res.status(400).json({
+      status: false,
+      message: "URL media wajib diisi."
+    });
+  }
+
+  let target;
+
+  try {
+    target = new URL(mediaUrl);
+  } catch {
+    return res.status(400).json({
+      status: false,
+      message: "URL media tidak valid."
+    });
+  }
+
+  if (!["http:", "https:"].includes(target.protocol)) {
+    return res.status(400).json({
+      status: false,
+      message: "Protocol URL tidak didukung."
+    });
+  }
+
+  const hostname = target.hostname.toLowerCase();
+
+  const blocked = [
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+    "::1",
+    "metadata.google.internal",
+    "metadata.google.com"
+  ];
+
+  if (
+    blocked.includes(hostname) ||
+    hostname.endsWith(".localhost") ||
+    hostname.endsWith(".local")
+  ) {
+    return res.status(403).json({
+      status: false,
+      message: "Host media tidak diizinkan."
+    });
+  }
+
+  try {
+    const upstream = await fetch(target.toString(), {
+      redirect: "follow",
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "*/*"
+      }
+    });
+
+    if (!upstream.ok) {
+      return res.status(502).json({
+        status: false,
+        message: "Gagal mengambil media.",
+        upstreamStatus: upstream.status
+      });
+    }
+
+    const contentType =
+      upstream.headers.get("content-type") ||
+      "application/octet-stream";
+
+    const filename = (
+      requestedFilename || "media.bin"
+    )
+      .replace(/[\/\"\r\n]/g, "_")
+      .slice(0, 180);
+
+    res.setHeader(
+      "Content-Type",
+      contentType
+    );
+
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${filename}"`
+    );
+
+    res.setHeader(
+      "Cache-Control",
+      "no-store"
+    );
+
+    const length =
+      upstream.headers.get("content-length");
+
+    if (length) {
+      res.setHeader(
+        "Content-Length",
+        length
+      );
+    }
+
+    const buffer = Buffer.from(
+      await upstream.arrayBuffer()
+    );
+
+    return res.status(200).send(buffer);
+
+  } catch (error) {
+
+    console.error(
+      "MEDIA DOWNLOAD ERROR:",
+      error
+    );
+
+    return res.status(502).json({
+      status: false,
+      message: "Gagal mengunduh media.",
+      error:
+        error?.message ||
+        "Network error"
+    });
+  }
+}
 //twiter
 const twitterVideoBaseUrl = "https://twmate.com/id2/?";
 
@@ -5874,6 +6003,8 @@ case "lyrics":
   return handleLyrics(req, res);
   case "instagram":
   return handleInstagram(req, res);
+  case "media-download":
+  return handleMediaDownload(req, res);
 case "ai-image":
       return handleAiImage(req, res);
     case "tempmail":
