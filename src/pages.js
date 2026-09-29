@@ -1,76 +1,178 @@
 import { apiDefinitions, getApiBySlug, getCategories } from './apis/registry.js';
-import { navigate } from './router.js';
-import { BASE_URL, esc, icon, refreshIcons, copyText } from './utils.js';
-import { renderApiCard, bindApiCards } from './components.js';
+import { esc, icon, refreshIcons, copyText } from './utils.js';
+import { renderApiCard } from './components.js';
+import { observeReveals } from './motion.js';
 
 /* =========================================================
-   AUTO DOMAIN
+   HELPERS
    ========================================================= */
 
 function getCurrentApiUrl(endpoint) {
   if (!endpoint) return '';
-
   try {
     const url = new URL(endpoint);
-
     return `${window.location.origin}${url.pathname}${url.search}${url.hash}`;
   } catch {
     return endpoint;
   }
 }
 
+const methodBadge = (m) => `<span class="badge ${m === 'GET' ? 'badge-get' : 'badge-post'}">${esc(m)}</span>`;
+
+/** Typewriter span: width animates in `ch` steps, so it must be monospace. */
+const typed = (text, delay, dur, cls = '') =>
+  `<span class="tw ${cls}" style="--n:${text.length};--d:${delay}s;--dur:${dur}s">${esc(text)}</span>`;
+
+const reveal = (html, d = 0, tag = 'div', cls = '') => `<${tag} class="reveal ${cls}" style="--d:${d}ms">${html}</${tag}>`;
+
 /* =========================================================
    HOME
    ========================================================= */
 
 export function renderHome() {
-  return `<main><section class="relative overflow-hidden border-b border-slate-200 dark:border-slate-800"><div class="absolute inset-0 dot-grid opacity-70 dark:opacity-40"></div><div class="absolute left-1/2 top-[-240px] h-[560px] w-[900px] -translate-x-1/2 rounded-full bg-cyan-100/60 blur-3xl dark:bg-cyan-950/20"></div><div class="relative mx-auto max-w-7xl px-6 pb-20 pt-20 sm:px-8 sm:pb-28 sm:pt-28"><div class="mx-auto max-w-4xl text-center"><div class="mb-7 inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50/80 px-3.5 py-1.5 text-xs font-semibold text-cyan-700 dark:border-cyan-900/70 dark:bg-cyan-950/30 dark:text-cyan-400">${icon('Sparkles','h-3.5 w-3.5')} Build faster with SamApi ${icon('ChevronRight','h-3 w-3')}</div><h1 class="text-balance text-5xl font-bold leading-[1.08] tracking-[-0.055em] text-slate-950 sm:text-7xl dark:text-white">Powerful APIs.<br><span class="text-cyan-500">Simple to use.</span></h1><p class="mx-auto mt-7 max-w-2xl text-base leading-7 text-slate-500 sm:text-lg dark:text-slate-400">A collection of fast, reliable APIs built for modern developers. Download media, generate content, and build something amazing.</p><div class="mt-9 flex flex-col justify-center gap-3 sm:flex-row"><button data-nav="/docs" class="group flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-6 py-3.5 text-sm font-semibold text-white shadow-xl shadow-slate-950/15 transition-all hover:-translate-y-0.5 hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200">Explore the APIs ${icon('ArrowRight','h-4 w-4')}</button><button data-nav="/docs" class="flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-6 py-3.5 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">${icon('BookOpen','h-4 w-4')} Read documentation</button></div></div><div class="mx-auto mt-20 grid max-w-4xl grid-cols-2 divide-x divide-slate-200 border-y border-slate-200 py-6 sm:grid-cols-4 dark:divide-slate-800 dark:border-slate-800"><div class="px-4 text-center"><div class="text-2xl font-bold tracking-tight text-slate-950 dark:text-white">${apiDefinitions.length}+</div><div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Available APIs</div></div><div class="px-4 text-center"><div class="text-2xl font-bold tracking-tight text-emerald-500">100%</div><div class="mt-1 text-xs text-slate-500 dark:text-slate-400">API uptime</div></div><div class="mt-6 border-slate-200 px-4 text-center sm:mt-0 sm:border-l dark:border-slate-800"><div class="text-2xl font-bold tracking-tight text-slate-950 dark:text-white">&lt;120ms</div><div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Avg. response</div></div><div class="mt-6 border-slate-200 px-4 text-center sm:mt-0 dark:border-slate-800"><div class="text-2xl font-bold tracking-tight text-slate-950 dark:text-white">99.9%</div><div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Reliability</div></div></div></div></section>
-  <section class="mx-auto max-w-7xl px-6 py-20 sm:px-8 sm:py-28"><div class="mb-10 flex flex-col justify-between gap-5 sm:flex-row sm:items-end"><div><div class="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-cyan-600 dark:text-cyan-400">${icon('Layers3','h-3.5 w-3.5')} Explore our APIs</div><h2 class="text-3xl font-bold tracking-[-0.04em] text-slate-950 sm:text-4xl dark:text-white">Everything you need to build.</h2><p class="mt-3 max-w-lg text-sm leading-6 text-slate-500 dark:text-slate-400">Production-ready endpoints with clear documentation and predictable responses.</p></div><div class="relative w-full sm:w-64">${icon('Search','h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400')}<input id="home-search" placeholder="Search APIs..." class="h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 text-sm outline-none transition-colors placeholder:text-slate-400 focus:border-cyan-400 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:focus:border-cyan-700"></div></div><div id="api-grid" class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">${apiDefinitions.map(renderApiCard).join('')}</div><div id="no-apis" class="hidden rounded-2xl border border-dashed border-slate-300 py-16 text-center dark:border-slate-700">${icon('Search','h-8 w-8 mx-auto text-slate-300')}<p class="mt-3 text-sm font-medium text-slate-600 dark:text-slate-300">No APIs found</p><p class="mt-1 text-xs text-slate-400">Try a different search term.</p></div><div class="mt-10 text-center"><button data-nav="/docs" class="inline-flex items-center gap-2 text-sm font-semibold text-cyan-600 transition-colors hover:text-cyan-700 dark:text-cyan-400">View all documentation ${icon('ArrowRight','h-4 w-4')}</button></div></section>
-  <section class="border-y border-slate-200 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-900/30"><div class="mx-auto grid max-w-7xl gap-10 px-6 py-20 sm:px-8 sm:py-24 lg:grid-cols-2 lg:items-center"><div><div class="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-cyan-600 dark:text-cyan-400">${icon('Zap','h-3.5 w-3.5 fill-current')} Developer first</div><h2 class="max-w-lg text-3xl font-bold tracking-[-0.04em] text-slate-950 sm:text-4xl dark:text-white">The fastest way from idea to API.</h2><p class="mt-5 max-w-lg text-sm leading-7 text-slate-500 dark:text-slate-400">Built with developers in mind. Every endpoint is designed to be intuitive, documented, and ready to ship.</p><div class="mt-7 grid gap-4 sm:grid-cols-2"><div class="flex gap-3"><span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400">${icon('Gauge','h-4 w-4')}</span><div><div class="text-sm font-semibold text-slate-800 dark:text-slate-200">Blazing fast</div><div class="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">Low latency, every request.</div></div></div><div class="flex gap-3"><span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cyan-100 text-cyan-600 dark:bg-cyan-950/50 dark:text-cyan-400">${icon('ShieldCheck','h-4 w-4')}</span><div><div class="text-sm font-semibold text-slate-800 dark:text-slate-200">Reliable by default</div><div class="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">99.9% uptime SLA.</div></div></div><div class="flex gap-3"><span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400">${icon('Database','h-4 w-4')}</span><div><div class="text-sm font-semibold text-slate-800 dark:text-slate-200">Simple responses</div><div class="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">Predictable JSON outputs.</div></div></div><div class="flex gap-3"><span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300">${icon('BookOpen','h-4 w-4')}</span><div><div class="text-sm font-semibold text-slate-800 dark:text-slate-200">Clear docs</div><div class="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">Start building in minutes.</div></div></div></div></div><div class="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 p-6 shadow-2xl shadow-slate-950/15 dark:border-slate-700"><div class="mb-6 flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-red-400"></span><span class="h-2.5 w-2.5 rounded-full bg-amber-400"></span><span class="h-2.5 w-2.5 rounded-full bg-emerald-400"></span><span class="ml-auto font-mono text-[10px] text-slate-500">request.js</span></div><pre class="overflow-x-auto font-mono text-[12px] leading-6 text-slate-300"><code><span class="text-pink-400">const</span> response = <span class="text-pink-400">await</span> fetch(<span class="text-emerald-400">\`https://samapi.com/api/instagram\`</span> +<br>  <span class="text-emerald-400">\`?url=&#36;{postUrl}\`</span>);<br><br><span class="text-pink-400">const</span> { data } = <span class="text-pink-400">await</span> response.json();<br><br><span class="text-slate-500">// Ready to use.</span><br>console.log(data.media[<span class="text-amber-300">0</span>].url);</code></pre><button id="copy-base-url" class="mt-7 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-700 py-2.5 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800">${icon('Copy','h-3.5 w-3.5')} Copy base URL</button></div></div></section>
-  <section class="mx-auto max-w-7xl px-6 py-20 text-center sm:px-8 sm:py-28"><p class="text-sm font-semibold text-cyan-600 dark:text-cyan-400">Ready to build?</p><h2 class="mt-3 text-3xl font-bold tracking-[-0.04em] text-slate-950 sm:text-4xl dark:text-white">Your next project starts here.</h2><p class="mx-auto mt-4 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">Explore our APIs and bring your ideas to life with just a few lines of code.</p><button data-nav="/docs" class="mt-7 inline-flex items-center gap-2 rounded-xl bg-slate-950 px-6 py-3.5 text-sm font-semibold text-white transition-all hover:-translate-y-0.5 hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200">Start building ${icon('ArrowRight','h-4 w-4')}</button></section></main>`;
+  const cats = getCategories();
+  const demo = getApiBySlug('instagram') || apiDefinitions[0];
+  const demoPath = `${demo?.endpoint || '/api/instagram'}?url=https://instagram.com/p/Cx1a`;
+  const names = apiDefinitions.map((a) => `<span class="glass flex items-center gap-2.5 rounded-full px-4 py-2.5 text-sm font-semibold text-muted">${icon(a.icon, 'h-4 w-4 text-gold')}${esc(a.name)}</span>`).join('');
+
+  const stat = (value, label, attrs = '') => `<div class="px-3 py-2 text-center sm:px-6"><div class="font-display text-4xl sm:text-5xl" ${attrs}>${value}</div><div class="mt-2 text-xs font-semibold text-dim">${label}</div></div>`;
+
+  return `<main>
+  <section class="relative overflow-hidden pb-16 pt-[calc(var(--nav-h)+48px)] sm:pb-24 sm:pt-[calc(var(--nav-h)+80px)]">
+    <div class="grid-fade absolute inset-0"></div>
+    <div class="parallax pointer-events-none absolute inset-0">
+      <div class="orb -left-40 top-0 h-[520px] w-[520px] bg-gold"></div>
+      <div class="orb -right-32 top-40 h-[440px] w-[440px] bg-[#2f7d78]" style="animation-delay:-8s;animation-duration:30s"></div>
+    </div>
+
+    <div class="relative mx-auto grid grid-cols-[minmax(0,1fr)] max-w-7xl items-center gap-14 px-6 sm:px-8 lg:grid-cols-[1.08fr_0.92fr] lg:gap-10">
+      <div>
+        <div class="seq glass mb-8 inline-flex items-center gap-2.5 rounded-full py-1.5 pl-2 pr-4 text-xs font-bold" style="--d:.1s"><span class="grid h-6 w-6 place-items-center rounded-full bg-gold/15 text-gold">${icon('Sparkles', 'h-3 w-3')}</span><span class="text-muted"><span class="text-fg">${apiDefinitions.length} endpoints</span> live and documented</span></div>
+        <h1 class="text-balance text-[clamp(2.5rem,11.5vw,7rem)] leading-[0.94]">
+          <span class="hl"><span style="--d:.2s">Powerful APIs.</span></span>
+          <span class="hl"><span class="italic text-gold-grad" style="--d:.38s">Simple to use.</span></span>
+        </h1>
+        <p class="seq mt-8 max-w-xl text-base leading-8 text-muted sm:text-lg" style="--d:.7s">A collection of fast, reliable APIs built for modern developers. Download media, generate content, and build something amazing.</p>
+        <div class="seq mt-10 flex flex-col gap-3 sm:flex-row" style="--d:.85s">
+          <button data-nav="/docs" data-magnetic class="btn btn-gold">Explore the APIs ${icon('ArrowRight', 'arr h-4 w-4')}</button>
+          <button data-nav="/docs" class="btn btn-ghost">${icon('BookOpen', 'h-4 w-4')} Read documentation</button>
+        </div>
+      </div>
+
+      <div class="seq float" style="--d:.6s">
+        <div class="code shadow-[0_50px_100px_-40px_rgba(212,175,106,0.35)]">
+          <div class="code-head">
+            <div class="flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-full bg-[#5b5347]"></span><span class="h-2.5 w-2.5 rounded-full bg-[#8a7a58]"></span><span class="h-2.5 w-2.5 rounded-full bg-[#d4af6a]"></span></div>
+            <span class="font-mono text-[10px] tracking-wider text-[#7d766a]">live request</span>
+            <span class="ln flex items-center gap-1.5 font-mono text-[10px] text-emerald-400" style="--d:3.6s"><span class="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>200 · 118ms</span>
+          </div>
+          <pre class="p-5 text-[12px] leading-[1.9] sm:p-6 sm:text-[13px]"><code><span class="tk-k">GET</span> <span class="caret">${typed(demoPath, 1.5, 2.2, 'tk-s')}</span>
+<span class="ln tk-c" style="--d:3.7s">// response</span>
+<span class="ln" style="--d:3.85s">{</span>
+<span class="ln" style="--d:4s">  <span class="tk-p">"success"</span>: <span class="tk-k">true</span>,</span>
+<span class="ln" style="--d:4.15s">  <span class="tk-p">"data"</span>: {</span>
+<span class="ln" style="--d:4.3s">    <span class="tk-p">"media"</span>: [{ <span class="tk-p">"url"</span>: <span class="tk-s">"https://…/video.mp4"</span> }]</span>
+<span class="ln" style="--d:4.45s">  }</span>
+<span class="ln" style="--d:4.6s">}</span></code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="relative mx-auto mt-16 max-w-5xl px-6 sm:mt-24 sm:px-8">
+      <div class="seq glass grid grid-cols-2 gap-y-6 rounded-3xl py-7 sm:grid-cols-4 sm:divide-x sm:divide-fg/10 sm:py-8" style="--d:1s">
+        ${stat('0', 'Available APIs', `data-count="${apiDefinitions.length}" data-suffix="+"`)}
+        ${stat('0', 'API uptime', 'data-count="100" data-suffix="%"')}
+        ${stat('0', 'Avg. response', 'data-count="120" data-prefix="<" data-suffix="ms"')}
+        ${stat('0', 'Reliability', 'data-count="99.9" data-dec="1" data-suffix="%"')}
+      </div>
+    </div>
+  </section>
+
+  <section class="border-y hair py-6" aria-label="Available APIs">
+    <div class="marquee"><div class="marquee-track">${names}</div><div class="marquee-track" aria-hidden="true">${names}</div></div>
+  </section>
+
+  <section class="mx-auto max-w-7xl px-6 py-20 sm:px-8 sm:py-28" id="apis">
+    ${reveal(`<div class="mb-10 flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
+      <div>
+        <h2 class="text-balance max-w-xl text-[2.4rem] leading-[1.05] sm:text-6xl">Everything you need to build.</h2>
+        <p class="mt-4 max-w-lg text-sm leading-7 text-muted">Production-ready endpoints with clear documentation and predictable responses.</p>
+      </div>
+      <div class="relative w-full lg:w-72">${icon('Search', 'pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-dim')}<input id="home-search" placeholder="Search APIs..." aria-label="Search APIs" class="input !rounded-full !pl-11"></div>
+    </div>`)}
+    ${reveal(`<div id="cat-chips" class="mb-9 flex flex-wrap gap-2"><button class="chip is-active" data-cat="">All</button>${cats.map((c) => `<button class="chip" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}</div>`, 80)}
+    <div id="api-grid" class="grid grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2 lg:grid-cols-3">${apiDefinitions.map((a, i) => renderApiCard(a, i)).join('')}</div>
+    <div id="no-apis" class="hidden rounded-3xl border border-dashed border-fg/20 py-20 text-center">${icon('Search', 'mx-auto h-8 w-8 text-dim')}<p class="mt-4 text-sm font-bold">No APIs found</p><p class="mt-1 text-xs text-dim">Try a different search term or category.</p></div>
+    ${reveal(`<button data-nav="/docs" class="group inline-flex items-center gap-2 text-sm font-bold text-gold">View all documentation ${icon('ArrowRight', 'h-4 w-4 transition-transform duration-500 group-hover:translate-x-1.5')}</button>`, 0, 'div', 'mt-12 text-center')}
+  </section>
+
+  <section class="relative border-y hair bg-surface/50">
+    <div class="mx-auto grid grid-cols-[minmax(0,1fr)] max-w-7xl gap-14 px-6 py-20 sm:px-8 sm:py-28 lg:grid-cols-2 lg:items-center">
+      ${reveal(`<h2 class="text-balance max-w-lg text-[2.4rem] leading-[1.05] sm:text-6xl">The fastest way from idea to API.</h2>
+      <p class="mt-6 max-w-lg text-sm leading-7 text-muted">Built with developers in mind. Every endpoint is designed to be intuitive, documented, and ready to ship.</p>
+      <div class="mt-10 grid grid-cols-[minmax(0,1fr)] gap-6 sm:grid-cols-2">
+        ${[['Gauge', 'Blazing fast', 'Low latency, every request.'], ['ShieldCheck', 'Reliable by default', '99.9% uptime SLA.'], ['Database', 'Simple responses', 'Predictable JSON outputs.'], ['BookOpen', 'Clear docs', 'Start building in minutes.']].map(([ic, t, d]) => `<div class="group flex gap-4"><span class="iconbox h-11 w-11 shrink-0 transition-transform duration-500 group-hover:-translate-y-1">${icon(ic, 'h-[18px] w-[18px]')}</span><div><div class="text-sm font-extrabold">${t}</div><div class="mt-1 text-xs leading-5 text-muted">${d}</div></div></div>`).join('')}
+      </div>`)}
+      ${reveal(`<div class="code shadow-[0_50px_100px_-50px_rgba(0,0,0,0.7)]">
+        <div class="code-head"><div class="flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-full bg-[#5b5347]"></span><span class="h-2.5 w-2.5 rounded-full bg-[#8a7a58]"></span><span class="h-2.5 w-2.5 rounded-full bg-[#d4af6a]"></span></div><span class="font-mono text-[10px] text-[#7d766a]">request.js</span></div>
+        <pre class="p-6 text-[12px] leading-[1.9]"><code><span class="tk-k">const</span> response = <span class="tk-k">await</span> fetch(<span class="tk-s">"https://samapi.com/api/instagram?url="</span> +
+  postUrl);
+
+<span class="tk-k">const</span> { data } = <span class="tk-k">await</span> response.json();
+
+<span class="tk-c">// Ready to use.</span>
+console.log(data.media[<span class="tk-n">0</span>].url);</code></pre>
+        <div class="p-4 pt-0"><button id="copy-base-url" class="flex w-full items-center justify-center gap-2 rounded-full border border-white/10 py-3 text-xs font-bold text-[#d6d0c4] transition-all duration-500 hover:border-[#d4af6a]/60 hover:bg-[#d4af6a]/10">${icon('Copy', 'h-3.5 w-3.5')} Copy base URL</button></div>
+      </div>`, 160)}
+    </div>
+  </section>
+
+  <section class="relative overflow-hidden">
+    <div class="orb left-1/2 top-1/2 h-[420px] w-[620px] -translate-x-1/2 -translate-y-1/2 bg-gold" style="opacity:.16"></div>
+    <div class="relative mx-auto max-w-4xl px-6 py-24 text-center sm:px-8 sm:py-36">
+      ${reveal(`<p class="text-sm font-bold text-gold">Ready to build?</p>
+      <h2 class="text-balance mt-5 text-[2.8rem] leading-[1] sm:text-7xl">Your next project starts here.</h2>
+      <p class="mx-auto mt-6 max-w-md text-sm leading-7 text-muted">Explore our APIs and bring your ideas to life with just a few lines of code.</p>
+      <button data-nav="/docs" data-magnetic class="btn btn-gold mt-10">Start building ${icon('ArrowRight', 'arr h-4 w-4')}</button>`)}
+    </div>
+  </section>
+</main>`;
 }
 
 export function bindHome() {
-  bindApiCards();
+  const state = { q: '', cat: '' };
+  const grid = document.getElementById('api-grid');
+  const empty = document.getElementById('no-apis');
 
-  document.getElementById('home-search')?.addEventListener('input', (e) => {
-    const q = e.target.value.toLowerCase();
-    const filtered = apiDefinitions.filter((api) =>
+  const paint = () => {
+    const q = state.q.toLowerCase();
+    const list = apiDefinitions.filter((api) =>
+      (!state.cat || api.category === state.cat) &&
       `${api.name} ${api.description} ${api.category}`.toLowerCase().includes(q)
     );
-
-    document.getElementById('api-grid').innerHTML =
-      filtered.map(renderApiCard).join('');
-
-    document.getElementById('no-apis').classList.toggle(
-      'hidden',
-      filtered.length !== 0
-    );
-
-    bindApiCards();
+    grid.innerHTML = list.map((a, i) => renderApiCard(a, i)).join('');
+    empty.classList.toggle('hidden', list.length !== 0);
     refreshIcons();
+    observeReveals();
+  };
+
+  document.getElementById('home-search')?.addEventListener('input', (e) => { state.q = e.target.value; paint(); });
+
+  document.getElementById('cat-chips')?.addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-cat]');
+    if (!chip) return;
+    state.cat = chip.dataset.cat;
+    document.querySelectorAll('#cat-chips .chip').forEach((c) => c.classList.toggle('is-active', c === chip));
+    paint();
   });
 
-  document.getElementById('copy-base-url')?.addEventListener(
-    'click',
-    async (e) => {
-      await copyText(window.location.origin);
-
-      const btn = e.currentTarget;
-
-      btn.innerHTML =
-        `${icon('Check','h-3.5 w-3.5 text-emerald-400')} Base URL copied`;
-
-      refreshIcons();
-
-      setTimeout(() => {
-        btn.innerHTML =
-          `${icon('Copy','h-3.5 w-3.5')} Copy base URL`;
-
-        refreshIcons();
-      }, 1600);
-    }
-  );
+  document.getElementById('copy-base-url')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    try { await copyText(window.location.origin); } catch { return; }
+    btn.innerHTML = `${icon('Check', 'h-3.5 w-3.5 text-emerald-400')} Base URL copied`;
+    refreshIcons();
+    setTimeout(() => { btn.innerHTML = `${icon('Copy', 'h-3.5 w-3.5')} Copy base URL`; refreshIcons(); }, 1600);
+  });
 }
 
 /* =========================================================
@@ -78,7 +180,7 @@ export function bindHome() {
    ========================================================= */
 
 function codeBlock(code, language = 'json') {
-  return `<div class="overflow-hidden rounded-xl border border-slate-800 bg-slate-950"><div class="flex items-center justify-between border-b border-slate-800 px-4 py-2.5"><span class="font-mono text-[10px] uppercase tracking-widest text-slate-500">${esc(language)}</span><button data-code-copy="${encodeURIComponent(code)}" class="flex items-center gap-1.5 text-[10px] font-semibold text-slate-500 transition-colors hover:text-white">${icon('Copy','h-3 w-3')} Copy</button></div><pre class="max-h-96 overflow-auto p-4 font-mono text-[11px] leading-5 text-slate-300"><code>${esc(code)}</code></pre></div>`;
+  return `<div class="code"><div class="code-head"><span class="font-mono text-[10px] uppercase tracking-widest text-[#7d766a]">${esc(language)}</span><button data-code-copy="${encodeURIComponent(code)}" class="flex items-center gap-1.5 text-[10px] font-bold text-[#7d766a] transition-colors hover:text-white">${icon('Copy', 'h-3 w-3')} Copy</button></div><pre class="max-h-96 p-5 text-[11.5px] leading-6"><code>${esc(code)}</code></pre></div>`;
 }
 
 /* =========================================================
@@ -86,17 +188,21 @@ function codeBlock(code, language = 'json') {
    ========================================================= */
 
 function tryPanel(api) {
-  const inputs = api.parameters
-    .map(
-      (p) =>
-        `<label class="block"><span class="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">${esc(p.name)} ${p.required ? '<span class="text-red-500">*</span>' : ''}</span><input data-param="${esc(p.name)}" placeholder="${esc(p.example || '')}" class="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs outline-none focus:border-cyan-400 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-cyan-700"></label>`
-    )
-    .join('');
+  const inputs = api.parameters.map((p) =>
+    `<label class="block"><span class="mb-2 block text-xs font-bold">${esc(p.name)} ${p.required ? '<span class="text-red-400">*</span>' : ''}</span><input data-param="${esc(p.name)}" placeholder="${esc(p.example || '')}" class="input font-mono !text-xs"></label>`
+  ).join('');
+  const initialUrl = `${window.location.origin}${api.endpoint}`;
 
-  const initialUrl =
-    `${window.location.origin}${api.endpoint}`;
-
-  return `<div class="mt-8 rounded-2xl border border-cyan-200 bg-cyan-50/50 p-5 dark:border-cyan-900/60 dark:bg-cyan-950/20"><div class="mb-4 flex items-center gap-2">${icon('Play','h-4 w-4 text-cyan-600 dark:text-cyan-400')}<h3 class="text-sm font-bold text-slate-900 dark:text-white">Try this API</h3></div><div class="space-y-3">${inputs}</div><div class="mt-4 flex flex-col gap-2 sm:flex-row"><button id="send-request" class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-cyan-600 py-2.5 text-xs font-bold text-white transition-colors hover:bg-cyan-700">${icon('Play','h-3.5 w-3.5')}<span>Send request</span></button><button id="copy-url" class="flex items-center justify-center gap-2 rounded-lg border border-cyan-200 bg-white px-4 py-2.5 text-xs font-semibold text-cyan-700 dark:border-cyan-900 dark:bg-slate-900 dark:text-cyan-400">${icon('Copy','h-3.5 w-3.5')} Copy URL</button></div><div id="try-url" class="mt-3 break-all rounded-lg bg-slate-950 px-3 py-2.5 font-mono text-[10px] leading-5 text-slate-400">${esc(api.method)} ${esc(initialUrl)}</div><div id="try-response" class="mt-3 hidden"></div></div>`;
+  return `<section id="try-panel" class="card mt-14 !overflow-visible p-4 sm:p-8" style="border-color:rgb(var(--gold)/.3)">
+    <div class="mb-6 flex items-center gap-3"><span class="iconbox h-10 w-10">${icon('Play', 'h-4 w-4')}</span><div><h3 class="text-base font-extrabold">Try this API</h3><p class="text-xs text-muted">Send a real request and inspect the response.</p></div></div>
+    <div class="grid grid-cols-[minmax(0,1fr)] gap-4 ${api.parameters.length > 1 ? 'sm:grid-cols-2' : ''}">${inputs || '<p class="text-xs text-muted">This endpoint takes no parameters.</p>'}</div>
+    <div class="mt-6 flex flex-col gap-2.5 sm:flex-row">
+      <button id="send-request" class="btn btn-gold btn-sm flex-1">${icon('Play', 'h-3.5 w-3.5')}<span>Send request</span></button>
+      <button id="copy-url" class="btn btn-ghost btn-sm">${icon('Copy', 'h-3.5 w-3.5')}<span>Copy URL</span></button>
+    </div>
+    <div id="try-url" class="mt-4 break-all rounded-2xl bg-[#0d0c0b] px-4 py-3 font-mono text-[11px] leading-5 text-[#a8a094]">${esc(api.method)} ${esc(initialUrl)}</div>
+    <div id="try-response" class="mt-4 hidden"></div>
+  </section>`;
 }
 
 /* =========================================================
@@ -104,29 +210,41 @@ function tryPanel(api) {
    ========================================================= */
 
 export function renderDocs(path) {
-  const selectedSlug = path.startsWith('/docs/')
-    ? path.split('/')[2]?.split('?')[0]
-    : undefined;
-
-  const selected = selectedSlug
-    ? getApiBySlug(selectedSlug)
-    : undefined;
-
+  const selectedSlug = path.startsWith('/docs/') ? path.split('/')[2]?.split('?')[0] : undefined;
+  const selected = selectedSlug ? getApiBySlug(selectedSlug) : undefined;
   const categories = getCategories();
 
-  return `<div class="flex min-h-[calc(100vh-72px)]"><aside id="docs-sidebar" class="fixed inset-y-0 left-0 z-30 mt-[72px] w-72 shrink-0 -translate-x-full border-r border-slate-200 bg-white transition-transform dark:border-slate-800 dark:bg-slate-950 lg:sticky lg:top-[72px] lg:mt-0 lg:block lg:h-[calc(100vh-72px)] lg:translate-x-0"><div class="flex h-full flex-col"><div class="flex items-center justify-between border-b border-slate-100 px-6 py-5 dark:border-slate-800 lg:block"><div class="mb-4 flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">${icon('BookOpen','h-4 w-4 text-cyan-500')} API Reference</div><button id="close-sidebar" class="text-slate-400 lg:hidden">${icon('X','h-5 w-5')}</button><div class="relative">${icon('Search','h-3.5 w-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400')}<input id="docs-search" placeholder="Search endpoints" class="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-xs outline-none focus:border-cyan-400 dark:border-slate-700 dark:bg-slate-900 dark:text-white"></div></div><nav id="docs-nav" class="flex-1 overflow-auto px-3 py-4">${categories.map((cat) => `<div class="mb-4" data-category="${esc(cat)}"><button data-category-toggle class="mb-1 flex w-full items-center justify-between px-2 text-[10px] font-bold uppercase tracking-widest text-slate-400"><span>${esc(cat)}</span>${icon('ChevronDown','h-3 w-3')}</button><div data-category-items>${apiDefinitions.filter((a) => a.category === cat).map((api) => docNavItem(api, selected)).join('')}</div></div>`).join('')}</nav><div class="border-t border-slate-100 p-4 dark:border-slate-800"><div class="rounded-xl bg-slate-50 p-3 dark:bg-slate-900"><div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-emerald-500"></span><span class="text-xs font-semibold text-slate-700 dark:text-slate-300">All systems operational</span></div><div class="mt-2 text-[10px] text-slate-400">Last checked just now</div></div></div></div></aside><button id="open-sidebar" class="fixed bottom-5 left-5 z-20 flex items-center gap-2 rounded-full bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white shadow-xl lg:hidden dark:bg-white dark:text-slate-950">${icon('Menu','h-4 w-4')} API menu</button><main class="min-w-0 flex-1 px-6 py-12 sm:px-8 lg:px-14 lg:py-16">${selected ? renderApiDetail(selected) : renderDocsIndex()}</main></div>`;
+  return `<div class="mx-auto flex max-w-[92rem] gap-8 px-5 pt-[calc(var(--nav-h)+20px)] sm:px-6 lg:px-8">
+    <div id="scrim" class="scrim"></div>
+    <aside id="docs-sidebar" class="sidebar" aria-label="API reference">
+      <div class="flex h-full flex-col">
+        <div class="px-5 pb-4 pt-5">
+          <div class="mb-4 flex items-center justify-between"><div class="flex items-center gap-2 text-sm font-extrabold">${icon('BookOpen', 'h-4 w-4 text-gold')} API Reference</div><button id="close-sidebar" class="iconbtn !h-8 !w-8 lg:hidden" aria-label="Close menu">${icon('X', 'h-4 w-4')}</button></div>
+          <div class="relative">${icon('Search', 'pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-dim')}<input id="docs-search" placeholder="Search endpoints" aria-label="Search endpoints" class="input !h-10 !rounded-full !pl-10 !text-xs"></div>
+        </div>
+        <nav id="docs-nav" class="flex-1 overflow-auto px-3 pb-4">${categories.map((cat) => `<div class="mb-3" data-category="${esc(cat)}"><button data-category-toggle class="mb-1 flex w-full items-center justify-between px-2 py-1 text-[10px] font-extrabold uppercase tracking-[0.18em] text-dim transition-colors hover:text-gold"><span>${esc(cat)}</span>${icon('ChevronDown', 'chev h-3 w-3')}</button><div class="fold"><div data-category-items>${apiDefinitions.filter((a) => a.category === cat).map((api) => docNavItem(api, selected)).join('')}</div></div></div>`).join('')}</nav>
+        <div class="border-t hair p-4"><div class="flex items-center gap-2.5 rounded-2xl bg-fg/5 p-3.5"><span class="relative flex h-2 w-2"><span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-ok opacity-70"></span><span class="relative inline-flex h-2 w-2 rounded-full bg-ok"></span></span><div><div class="text-xs font-bold">All systems operational</div><div class="text-[10px] text-dim">Last checked just now</div></div></div></div>
+      </div>
+    </aside>
+    <div id="docs-top" class="docs-top lg:hidden"><div class="docs-top-in"><button id="open-sidebar" class="btn btn-gold docs-top-btn" aria-label="Buka menu API">${icon('Menu', 'h-[18px] w-[18px]')} API menu</button><div class="docs-top-now glass" aria-live="polite"><span class="truncate">${selected ? esc(selected.name) : 'All APIs'}</span>${selected ? `<span class="badge ${selected.method === 'GET' ? 'badge-get' : 'badge-post'}">${esc(selected.method)}</span>` : ''}</div></div></div>
+    <main class="min-w-0 flex-1 px-1 pb-16 pt-14 sm:px-4 sm:pt-16 lg:px-8 lg:pt-10">${selected ? renderApiDetail(selected) : renderDocsIndex()}</main>
+  </div>`;
 }
 
 function docNavItem(api, selected) {
-  const active =
-    selected?.slug === api.slug ||
-    (!selected && api === apiDefinitions[0]);
-
-  return `<button data-nav="/docs/${encodeURIComponent(api.slug)}" data-doc-api="${esc(api.slug)}" class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition-colors ${active ? 'bg-cyan-50 font-semibold text-cyan-700 dark:bg-cyan-950/30 dark:text-cyan-400' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-white'}">${icon(api.icon,'h-4 w-4')}<span class="flex-1 truncate">${esc(api.name)}</span><span class="text-[9px] font-bold ${api.method === 'GET' ? 'text-emerald-500' : 'text-amber-500'}">${esc(api.method)}</span></button>`;
+  const active = selected?.slug === api.slug;
+  return `<button data-nav="/docs/${encodeURIComponent(api.slug)}" data-doc-api="${esc(api.slug)}" class="navitem ${active ? 'is-active' : ''}">${icon(api.icon, 'h-4 w-4')}<span class="flex-1 truncate">${esc(api.name)}</span><span class="text-[9px] font-extrabold ${api.method === 'GET' ? 'text-ok' : 'text-warn'}">${esc(api.method)}</span></button>`;
 }
 
 function renderDocsIndex() {
-  return `<div class="max-w-3xl"><div class="mb-10"><div class="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-cyan-600 dark:text-cyan-400">${icon('BookOpen','h-3.5 w-3.5')} Documentation</div><h1 class="text-4xl font-bold tracking-[-0.05em] text-slate-950 sm:text-5xl dark:text-white">API Reference</h1><p class="mt-4 max-w-xl text-[15px] leading-7 text-slate-500 dark:text-slate-400">Everything you need to integrate SamApi into your project. Pick an endpoint from the menu to get started.</p></div><div id="docs-cards" class="grid gap-4 sm:grid-cols-2">${apiDefinitions.map((api) => `<button data-nav="/docs/${encodeURIComponent(api.slug)}" class="group flex items-center gap-4 rounded-xl border border-slate-200 bg-white p-4 text-left transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900/50 dark:hover:border-slate-700"><span class="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">${icon(api.icon,'h-4 w-4')}</span><span class="min-w-0 flex-1"><span class="block truncate text-sm font-bold text-slate-800 dark:text-white">${esc(api.name)}</span><span class="mt-1 block truncate font-mono text-[10px] text-slate-400">${esc(api.method)} ${esc(api.endpoint)}</span></span>${icon('ChevronRight','h-4 w-4 text-slate-300 transition-transform group-hover:translate-x-1 dark:text-slate-600')}</button>`).join('')}</div></div>`;
+  return `<div class="max-w-4xl">
+    <div class="mb-12">
+      <p class="seq text-sm font-bold text-gold" style="--d:.05s">Documentation</p>
+      <h1 class="mt-3 text-[clamp(2.6rem,10vw,5.5rem)] leading-[0.96]"><span class="hl"><span style="--d:.12s">API Reference</span></span></h1>
+      <p class="seq mt-6 max-w-xl text-[15px] leading-8 text-muted" style="--d:.35s">Everything you need to integrate SamApi into your project. Pick an endpoint from the menu to get started.</p>
+    </div>
+    <div id="docs-cards" class="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2">${apiDefinitions.map((api, i) => reveal(`<button data-nav="/docs/${encodeURIComponent(api.slug)}" class="card group flex w-full items-center gap-4 p-4 text-left"><span class="iconbox h-11 w-11 shrink-0">${icon(api.icon, 'h-4 w-4')}</span><span class="min-w-0 flex-1"><span class="block truncate text-sm font-extrabold">${esc(api.name)}</span><span class="mt-1 block truncate font-mono text-[10px] text-dim">${esc(api.method)} ${esc(api.endpoint)}</span></span>${icon('ChevronRight', 'h-4 w-4 text-dim transition-all duration-500 group-hover:translate-x-1.5 group-hover:text-gold')}</button>`, (i % 2) * 90)).join('')}</div>
+  </div>`;
 }
 
 /* =========================================================
@@ -134,24 +252,33 @@ function renderDocsIndex() {
    ========================================================= */
 
 function renderApiDetail(api) {
-  const params = api.parameters
-    .map(
-      (p) =>
-        `<div class="grid gap-2 border-b border-slate-100 px-4 py-4 last:border-0 sm:grid-cols-[1fr_100px_2fr] sm:items-center dark:border-slate-800"><div class="flex items-center gap-2"><code class="font-mono text-xs font-semibold text-cyan-700 dark:text-cyan-400">${esc(p.name)}</code>${p.required ? '<span class="text-[9px] font-bold uppercase text-red-500">required</span>' : ''}</div><code class="font-mono text-[11px] text-slate-400">${esc(p.type)}</code><p class="text-xs leading-5 text-slate-500 dark:text-slate-400">${esc(p.description)}</p></div>`
-    )
-    .join('');
+  const params = api.parameters.map((p) =>
+    `<div class="row-hover grid gap-2 border-b hair px-5 py-4 last:border-0 sm:grid-cols-[1fr_100px_2fr] sm:items-center"><div class="flex items-center gap-2"><code class="font-mono text-xs font-bold text-gold">${esc(p.name)}</code>${p.required ? '<span class="text-[9px] font-extrabold uppercase text-red-400">required</span>' : ''}</div><code class="font-mono text-[11px] text-dim">${esc(p.type)}</code><p class="text-xs leading-5 text-muted">${esc(p.description)}</p></div>`
+  ).join('') || '<div class="px-5 py-5 text-xs text-muted">No parameters.</div>';
 
-  const fields = api.responseFields
-    .map(
-      (f) =>
-        `<div class="flex flex-col gap-1 border-b border-slate-100 px-4 py-3 last:border-0 sm:flex-row sm:items-center dark:border-slate-800"><code class="w-48 shrink-0 font-mono text-xs text-cyan-700 dark:text-cyan-400">${esc(f.name)}</code><code class="w-20 shrink-0 font-mono text-[11px] text-slate-400">${esc(f.type)}</code><span class="text-xs text-slate-500 dark:text-slate-400">${esc(f.description)}</span></div>`
-    )
-    .join('');
+  const fields = api.responseFields.map((f) =>
+    `<div class="row-hover flex flex-col gap-1 border-b hair px-5 py-3.5 last:border-0 sm:flex-row sm:items-center"><code class="w-48 shrink-0 font-mono text-xs text-gold">${esc(f.name)}</code><code class="w-20 shrink-0 font-mono text-[11px] text-dim">${esc(f.type)}</code><span class="text-xs text-muted">${esc(f.description)}</span></div>`
+  ).join('');
 
-  const currentEndpoint =
-    `${window.location.origin}${api.endpoint}`;
+  const currentEndpoint = `${window.location.origin}${api.endpoint}`;
+  const h2 = (t) => `<h2 class="mb-5 text-3xl">${t}</h2>`;
 
-  return `<div class="max-w-3xl"><div class="mb-8 flex items-start gap-4"><div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-white">${icon(api.icon,'h-6 w-6')}</div><div><div class="mb-2 flex items-center gap-2"><span class="rounded-md bg-cyan-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-400">${esc(api.category)}</span><span class="text-xs text-slate-400">Updated recently</span></div><h1 class="text-3xl font-bold tracking-[-0.04em] text-slate-950 sm:text-4xl dark:text-white">${esc(api.name)}</h1></div></div><p class="mb-8 text-[15px] leading-7 text-slate-500 dark:text-slate-400">${esc(api.description)}</p><div class="mb-10 flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900/60"><span class="rounded-md px-2 py-1 text-[10px] font-bold ${api.method === 'GET' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400' : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'}">${esc(api.method)}</span><code class="flex-1 overflow-x-auto whitespace-nowrap font-mono text-xs text-slate-600 dark:text-slate-300">${esc(currentEndpoint)}</code><button data-copy="${esc(currentEndpoint)}" class="detail-copy text-slate-400 hover:text-slate-900 dark:hover:text-white">${icon('Copy','h-3.5 w-3.5')}</button></div><section class="mb-10"><h2 class="mb-4 text-lg font-bold tracking-[-0.02em] text-slate-950 dark:text-white">Parameters</h2><div class="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800"><div class="hidden grid-cols-[1fr_100px_2fr] border-b border-slate-200 bg-slate-50 px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 sm:grid dark:border-slate-800 dark:bg-slate-900"><span>Name</span><span>Type</span><span>Description</span></div>${params}</div></section><section class="mb-10"><h2 class="mb-4 text-lg font-bold tracking-[-0.02em] text-slate-950 dark:text-white">Example request</h2>${codeBlock(getCurrentApiUrl(api.exampleRequest), api.method === 'POST' ? 'http' : 'url')}</section><section><h2 class="mb-4 text-lg font-bold tracking-[-0.02em] text-slate-950 dark:text-white">Example response</h2>${codeBlock(JSON.stringify(api.responseExample, null, 2))}<div class="mt-6 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800"><div class="border-b border-slate-200 bg-slate-50 px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:border-slate-800 dark:bg-slate-900">Response fields</div>${fields}</div></section>${tryPanel(api)}</div>`;
+  return `<div class="max-w-3xl">
+    <div class="mb-8 flex items-start gap-5">
+      <div class="seq iconbox h-16 w-16 shrink-0" style="--d:.05s">${icon(api.icon, 'h-7 w-7')}</div>
+      <div class="min-w-0">
+        <div class="seq mb-3 flex flex-wrap items-center gap-2.5" style="--d:.1s"><span class="badge badge-cat">${esc(api.category)}</span><span class="text-xs text-dim">Updated recently</span></div>
+        <h1 class="text-balance text-[clamp(2rem,8vw,4.25rem)] leading-[0.98]"><span class="hl"><span style="--d:.15s">${esc(api.name)}</span></span></h1>
+      </div>
+    </div>
+    <p class="seq mb-8 text-[15px] leading-8 text-muted" style="--d:.4s">${esc(api.description)}</p>
+    <div class="seq glass mb-12 flex items-center gap-3 rounded-2xl px-4 py-3" style="--d:.5s">${methodBadge(api.method)}<code class="flex-1 overflow-x-auto whitespace-nowrap font-mono text-xs text-muted">${esc(currentEndpoint)}</code><button data-copy="${esc(currentEndpoint)}" class="iconbtn !h-8 !w-8" aria-label="Copy endpoint">${icon('Copy', 'h-3.5 w-3.5')}</button></div>
+
+    ${reveal(`${h2('Parameters')}<div class="card !rounded-2xl"><div class="hidden grid-cols-[1fr_100px_2fr] border-b hair bg-fg/[0.03] px-5 py-3 text-[10px] font-extrabold uppercase tracking-wider text-dim sm:grid"><span>Name</span><span>Type</span><span>Description</span></div>${params}</div>`, 0, 'section', 'mb-12')}
+    ${reveal(`${h2('Example request')}${codeBlock(getCurrentApiUrl(api.exampleRequest), api.method === 'POST' ? 'http' : 'url')}`, 0, 'section', 'mb-12')}
+    ${reveal(`${h2('Example response')}${codeBlock(JSON.stringify(api.responseExample, null, 2))}${fields ? `<div class="card mt-6 !rounded-2xl"><div class="border-b hair bg-fg/[0.03] px-5 py-3.5 text-[10px] font-extrabold uppercase tracking-wider text-dim">Response fields</div>${fields}</div>` : ''}`, 0, 'section')}
+    ${reveal(tryPanel(api), 0, 'div')}
+  </div>`;
 }
 
 /* =========================================================
@@ -159,256 +286,107 @@ function renderApiDetail(api) {
    ========================================================= */
 
 export function bindDocs(api) {
-  document
-    .querySelectorAll('[data-nav]')
-    .forEach((el) =>
-      el.addEventListener('click', () => navigate(el.dataset.nav))
+  const sidebar = document.getElementById('docs-sidebar');
+  const scrim = document.getElementById('scrim');
+  const setSidebar = (open) => {
+    sidebar?.toggleAttribute('data-open', open);
+    scrim?.toggleAttribute('data-open', open);
+    document.documentElement.classList.toggle('menu-open', open);
+  };
+  document.getElementById('open-sidebar')?.addEventListener('click', () => setSidebar(true));
+  document.getElementById('close-sidebar')?.addEventListener('click', () => setSidebar(false));
+  scrim?.addEventListener('click', () => setSidebar(false));
+
+  document.querySelectorAll('[data-category-toggle]').forEach((btn) =>
+    btn.addEventListener('click', () => btn.closest('[data-category]').toggleAttribute('data-collapsed'))
+  );
+
+  document.getElementById('docs-search')?.addEventListener('input', (e) => {
+    const q = e.target.value.toLowerCase();
+    document.querySelectorAll('[data-doc-api]').forEach((el) =>
+      el.classList.toggle('hidden', !`${el.textContent} ${el.dataset.docApi}`.toLowerCase().includes(q))
     );
-
-  document
-    .getElementById('open-sidebar')
-    ?.addEventListener('click', () =>
-      document.getElementById('docs-sidebar').classList.add('translate-x-0')
-    );
-
-  document
-    .getElementById('close-sidebar')
-    ?.addEventListener('click', () =>
-      document.getElementById('docs-sidebar').classList.remove('translate-x-0')
-    );
-
-  document
-    .querySelectorAll('[data-category-toggle]')
-    .forEach((btn) =>
-      btn.addEventListener('click', () => {
-        const items = btn.nextElementSibling;
-        items.classList.toggle('hidden');
-
-        btn
-          .querySelector('[data-lucide="chevron-down"]')
-          ?.classList.toggle('-rotate-90');
-      })
-    );
-
-  document
-    .getElementById('docs-search')
-    ?.addEventListener('input', (e) => {
-      const q = e.target.value.toLowerCase();
-
-      document.querySelectorAll('[data-doc-api]').forEach((el) =>
-        el.classList.toggle(
-          'hidden',
-          !`${el.textContent} ${el.dataset.docApi}`
-            .toLowerCase()
-            .includes(q)
-        )
-      );
-
-      document.querySelectorAll('[data-category]').forEach((cat) =>
-        cat.classList.toggle(
-          'hidden',
-          !cat.querySelector('[data-doc-api]:not(.hidden)')
-        )
-      );
+    document.querySelectorAll('[data-category]').forEach((cat) => {
+      const has = !!cat.querySelector('[data-doc-api]:not(.hidden)');
+      cat.classList.toggle('hidden', !has);
+      if (q && has) cat.removeAttribute('data-collapsed');
     });
+  });
 
-  document.querySelectorAll('[data-copy]').forEach((el) =>
-    el.addEventListener('click', async () => {
-      await copyText(el.dataset.copy);
+  if (!api) return;
 
-      const old = el.innerHTML;
+  const fieldValue = (name) => document.querySelector(`[data-param="${CSS.escape(name)}"]`)?.value;
+  const buildUrl = () => {
+    const query = api.parameters.filter((p) => fieldValue(p.name)).map((p) => `${p.name}=${encodeURIComponent(fieldValue(p.name))}`).join('&');
+    return `${window.location.origin}${api.endpoint}${query ? '?' + query : ''}`;
+  };
 
-      el.innerHTML = icon(
-        'Check',
-        'h-3.5 w-3.5 text-emerald-500'
-      );
-
-      refreshIcons();
-
-      setTimeout(() => {
-        el.innerHTML = old;
-        refreshIcons();
-      }, 1600);
-    })
+  document.querySelectorAll('[data-param]').forEach((el) =>
+    el.addEventListener('input', () => { document.getElementById('try-url').textContent = `${api.method} ${buildUrl()}`; })
   );
 
-  document.querySelectorAll('[data-code-copy]').forEach((el) =>
-    el.addEventListener('click', async () => {
-      await copyText(decodeURIComponent(el.dataset.codeCopy));
+  document.getElementById('copy-url')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    try { await copyText(buildUrl()); } catch { return; }
+    const old = btn.innerHTML;
+    btn.innerHTML = `${icon('Check', 'h-3.5 w-3.5')}<span>Copied</span>`;
+    refreshIcons();
+    setTimeout(() => { btn.innerHTML = old; refreshIcons(); }, 1600);
+  });
 
-      const old = el.innerHTML;
+  document.getElementById('send-request')?.addEventListener('click', async () => {
+    const btn = document.getElementById('send-request');
+    const box = document.getElementById('try-response');
+    const requestUrl = buildUrl();
+    const t0 = performance.now();
 
-      el.innerHTML =
-        `${icon('Check','h-3 w-3 text-emerald-400')} Copied`;
+    btn.disabled = true;
+    btn.innerHTML = `${icon('LoaderCircle', 'h-3.5 w-3.5 animate-spin')}<span>Sending...</span>`;
+    refreshIcons();
 
+    box.classList.remove('hidden');
+    box.innerHTML = `<div class="code p-5"><div class="skeleton mb-3 h-3 w-2/5"></div><div class="skeleton mb-3 h-3 w-4/5"></div><div class="skeleton h-3 w-3/5"></div></div>`;
+
+    const showText = (output, status) => {
+      box.innerHTML = `${status ? `<div class="mb-2 flex items-center gap-2 text-[11px] font-bold ${status.ok ? 'text-ok' : 'text-red-400'}"><span class="h-1.5 w-1.5 rounded-full bg-current"></span>${esc(status.label)} · ${Math.round(performance.now() - t0)}ms</div>` : ''}${codeBlock(output)}`;
       refreshIcons();
-
-      setTimeout(() => {
-        el.innerHTML = old;
-        refreshIcons();
-      }, 1600);
-    })
-  );
-
-  if (api) {
-    const buildUrl = () => {
-      const query = api.parameters
-        .filter(
-          (p) =>
-            document.querySelector(
-              `[data-param="${CSS.escape(p.name)}"]`
-            )?.value
-        )
-        .map(
-          (p) =>
-            `${p.name}=${encodeURIComponent(
-              document.querySelector(
-                `[data-param="${CSS.escape(p.name)}"]`
-              ).value
-            )}`
-        )
-        .join('&');
-
-      return `${window.location.origin}${api.endpoint}${
-        query ? '?' + query : ''
-      }`;
     };
 
-    document
-      .querySelectorAll('[data-param]')
-      .forEach((el) =>
-        el.addEventListener('input', () => {
-          document.getElementById('try-url').textContent =
-            `${api.method} ${buildUrl()}`;
-        })
-      );
+    try {
+      const response = await fetch(requestUrl, { method: api.method, headers: { Accept: 'application/json' } });
+      const contentType = response.headers.get('content-type') || '';
+      const status = { ok: response.ok, label: `${response.status} ${response.statusText || (response.ok ? 'OK' : 'Error')}` };
 
-    document
-      .getElementById('copy-url')
-      ?.addEventListener('click', async () => {
-        await copyText(buildUrl());
-      });
+      if (contentType.startsWith('image/')) {
+        const blob = await response.blob();
+        const imageUrl = URL.createObjectURL(blob);
+        box.innerHTML = `<div class="card !rounded-2xl p-5"><div class="mb-3 text-xs font-bold text-muted">Response • ${esc(contentType)} • ${Math.round(performance.now() - t0)}ms</div><div class="flex justify-center rounded-xl bg-white p-4"><img src="${imageUrl}" alt="API Response" class="max-w-full rounded-lg" style="max-height:500px"></div><a href="${imageUrl}" download="qrcode.png" class="btn btn-gold btn-sm mt-4 w-full">Download Image</a></div>`;
+      } else {
+        const result = contentType.includes('application/json') ? await response.json() : await response.text();
+        showText(typeof result === 'string' ? result : JSON.stringify(result, null, 2), status);
+      }
 
-    document
-      .getElementById('send-request')
-      ?.addEventListener('click', async () => {
-        const btn = document.getElementById('send-request');
-        const box = document.getElementById('try-response');
-
-        const requestUrl = buildUrl();
-
-        btn.disabled = true;
-
-        btn.innerHTML =
-          `${icon('LoaderCircle','h-3.5 w-3.5 animate-spin')}<span>Sending...</span>`;
-
+      btn.innerHTML = `${icon(response.ok ? 'Check' : 'AlertCircle', 'h-3.5 w-3.5')}<span>${response.ok ? 'Request sent' : 'Request failed'}</span>`;
+    } catch (error) {
+      showText(JSON.stringify({ status: false, message: error?.message || 'Request failed' }, null, 2), { ok: false, label: 'Network error' });
+      btn.innerHTML = `${icon('AlertCircle', 'h-3.5 w-3.5')}<span>Request failed</span>`;
+    } finally {
+      refreshIcons();
+      setTimeout(() => {
+        btn.disabled = false;
+        btn.innerHTML = `${icon('Play', 'h-3.5 w-3.5')}<span>Send request</span>`;
         refreshIcons();
+      }, 2500);
+    }
+  });
 
-        box.classList.remove('hidden');
-        box.innerHTML = codeBlock('Loading...');
-
-        try {
-          const response = await fetch(requestUrl, {
-            method: api.method,
-            headers: {
-              Accept: 'application/json'
-            }
-          });
-
-          const contentType =
-            response.headers.get('content-type') || '';
-
-          if (contentType.startsWith('image/')) {
-            const blob = await response.blob();
-            const imageUrl = URL.createObjectURL(blob);
-
-            box.innerHTML = `
-              <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
-                <div class="mb-3 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Response • ${contentType}
-                </div>
-
-                <div class="flex justify-center rounded-lg bg-white p-4">
-                  <img
-                    src="${imageUrl}"
-                    alt="API Response"
-                    class="max-w-full rounded-lg"
-                    style="max-height:500px"
-                  />
-                </div>
-
-                <a
-                  href="${imageUrl}"
-                  download="qrcode.png"
-                  class="mt-4 flex items-center justify-center rounded-lg bg-cyan-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-cyan-700"
-                >
-                  Download Image
-                </a>
-              </div>
-            `;
-          } else {
-            const result = contentType.includes('application/json')
-              ? await response.json()
-              : await response.text();
-
-            const output =
-              typeof result === 'string'
-                ? result
-                : JSON.stringify(result, null, 2);
-
-            box.innerHTML = codeBlock(output);
-
-            box
-              .querySelector('[data-code-copy]')
-              ?.addEventListener(
-                'click',
-                async () => {
-                  await copyText(output);
-                }
-              );
-          }
-
-          btn.innerHTML =
-            `${icon(response.ok ? 'Check' : 'AlertCircle','h-3.5 w-3.5')}<span>${response.ok ? 'Request sent' : 'Request failed'}</span>`;
-
-          refreshIcons();
-        } catch (error) {
-          const output = JSON.stringify(
-            {
-              status: false,
-              message:
-                error?.message || 'Request failed'
-            },
-            null,
-            2
-          );
-
-          box.innerHTML = codeBlock(output);
-
-          box
-            .querySelector('[data-code-copy]')
-            ?.addEventListener(
-              'click',
-              async () => {
-                await copyText(output);
-              }
-            );
-
-          btn.innerHTML =
-            `${icon('AlertCircle','h-3.5 w-3.5')}<span>Request failed</span>`;
-
-          refreshIcons();
-        } finally {
-          setTimeout(() => {
-            btn.disabled = false;
-
-            btn.innerHTML =
-              `${icon('Play','h-3.5 w-3.5')}<span>Send request</span>`;
-
-            refreshIcons();
-          }, 2500);
-        }
-      });
+  // "Try API" shortcut from cards: jump to the panel and focus the first field
+  if (/[?&]try=true/.test(window.location.hash)) {
+    setTimeout(() => {
+      const panel = document.getElementById('try-panel');
+      panel?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(() => panel?.querySelector('[data-param]')?.focus({ preventScroll: true }), 700);
+    }, 1200);
   }
 }
 
@@ -417,9 +395,23 @@ export function bindDocs(api) {
    ========================================================= */
 
 export function renderError(type) {
-  if (type === '500') {
-    return `<main class="flex min-h-[calc(100vh-72px)] items-center justify-center px-6"><div class="text-center"><div class="relative mx-auto mb-8 flex h-28 w-28 items-center justify-center"><div class="absolute inset-0 rounded-full bg-red-100 dark:bg-red-950/40"></div><div class="relative flex h-20 w-20 items-center justify-center rounded-full border border-red-200 bg-white text-red-500 shadow-xl dark:border-red-900 dark:bg-slate-900">${icon('ServerCrash','h-8 w-8')}</div></div><p class="font-mono text-xs font-bold uppercase tracking-[0.2em] text-red-500">Error 500</p><h1 class="mt-3 text-4xl font-bold tracking-[-0.05em] text-slate-950 sm:text-5xl dark:text-white">Something went wrong</h1><p class="mx-auto mt-4 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">Our servers ran into an unexpected issue. Your request was not completed, but our team has been notified.</p><div class="mt-8 flex justify-center gap-3"><button id="retry" class="flex items-center gap-2 rounded-xl bg-slate-950 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-slate-800 dark:bg-white dark:text-slate-950">${icon('RefreshCw','h-4 w-4')} Try again</button><button data-nav="/" class="flex items-center gap-2 rounded-xl border border-slate-300 px-6 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">${icon('ArrowLeft','h-4 w-4')} Go back</button></div><div class="mt-10 flex items-center justify-center gap-2 text-xs text-slate-400">${icon('AlertTriangle','h-3.5 w-3.5')} API status: <span class="font-semibold text-emerald-500">Operational</span></div></div></main>`;
-  }
-
-  return `<main class="flex min-h-[calc(100vh-72px)] items-center justify-center px-6"><div class="text-center"><div class="relative mx-auto mb-8 flex h-28 w-28 items-center justify-center"><div class="absolute inset-0 animate-pulse rounded-full bg-cyan-100 dark:bg-cyan-950/50"></div><div class="relative flex h-20 w-20 items-center justify-center rounded-full border border-cyan-200 bg-white text-cyan-500 shadow-xl dark:border-cyan-900 dark:bg-slate-900">${icon('WifiOff','h-8 w-8')}</div></div><p class="font-mono text-xs font-bold uppercase tracking-[0.2em] text-cyan-600 dark:text-cyan-400">Error 404</p><h1 class="mt-3 text-4xl font-bold tracking-[-0.05em] text-slate-950 sm:text-5xl dark:text-white">Endpoint not found</h1><p class="mx-auto mt-4 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">The endpoint you are looking for doesn't exist or may have been moved. Check the URL and try again.</p><div class="mt-8 flex justify-center gap-3"><button data-nav="/" class="flex items-center gap-2 rounded-xl bg-slate-950 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-slate-800 dark:bg-white dark:text-slate-950">${icon('Home','h-4 w-4')} Homepage</button><button data-nav="/docs" class="flex items-center gap-2 rounded-xl border border-slate-300 px-6 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">${icon('BookOpen','h-4 w-4')} Documentation</button></div></div></main>`;
+  const is500 = type === '500';
+  const t = is500
+    ? { text: 'text-red-400', pulse: 'bg-red-400/15' }
+    : { text: 'text-gold', pulse: 'bg-gold/15' };
+  return `<main class="relative flex min-h-screen items-center justify-center overflow-hidden px-5 pt-[var(--nav-h)]">
+    <div class="orb left-1/2 top-1/2 h-[420px] w-[420px] -translate-x-1/2 -translate-y-1/2 ${is500 ? 'bg-red-500' : 'bg-gold'}" style="opacity:.16"></div>
+    <div class="relative text-center">
+      <div class="seq relative mx-auto mb-10 grid h-28 w-28 place-items-center" style="--d:.05s"><div class="absolute inset-0 animate-pulse rounded-full ${t.pulse}"></div><div class="glass relative grid h-20 w-20 place-items-center rounded-full ${t.text}">${icon(is500 ? 'ServerCrash' : 'WifiOff', 'h-8 w-8')}</div></div>
+      <p class="seq font-mono text-xs font-bold tracking-[0.3em] ${t.text}" style="--d:.15s">ERROR ${type}</p>
+      <h1 class="text-balance mt-4 text-[clamp(2.3rem,10vw,5.5rem)] leading-[0.98]"><span class="hl"><span style="--d:.25s">${is500 ? 'Something went wrong' : 'Endpoint not found'}</span></span></h1>
+      <p class="seq mx-auto mt-5 max-w-md text-sm leading-7 text-muted" style="--d:.55s">${is500 ? 'Our servers ran into an unexpected issue. Your request was not completed, but our team has been notified.' : "The endpoint you are looking for doesn't exist or may have been moved. Check the URL and try again."}</p>
+      <div class="seq mt-10 flex flex-col justify-center gap-3 sm:flex-row" style="--d:.7s">
+        ${is500
+          ? `<button id="retry" class="btn btn-gold">${icon('RefreshCw', 'h-4 w-4')} Try again</button><button data-nav="/" class="btn btn-ghost">${icon('ArrowLeft', 'h-4 w-4')} Go back</button>`
+          : `<button data-nav="/" class="btn btn-gold">${icon('Home', 'h-4 w-4')} Homepage</button><button data-nav="/docs" class="btn btn-ghost">${icon('BookOpen', 'h-4 w-4')} Documentation</button>`}
+      </div>
+      ${is500 ? `<div class="seq mt-10 flex items-center justify-center gap-2 text-xs text-dim" style="--d:.85s">${icon('AlertTriangle', 'h-3.5 w-3.5')} API status: <span class="font-bold text-ok">Operational</span></div>` : ''}
+    </div>
+  </main>`;
 }
