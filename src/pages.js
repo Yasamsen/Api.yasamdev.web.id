@@ -45,7 +45,7 @@ export function renderHome() {
       <div class="orb -right-32 top-40 h-[440px] w-[440px] bg-[#2f7d78]" style="animation-delay:-8s;animation-duration:30s"></div>
     </div>
 
-    <div class="relative mx-auto grid grid-cols-[minmax(0,1fr)] max-w-7xl items-center gap-14 px-5 sm:px-8 lg:grid-cols-[1.08fr_0.92fr] lg:gap-10">
+    <div class="relative mx-auto grid grid-cols-[minmax(0,1fr)] max-w-7xl items-center gap-14 px-4 sm:px-8 lg:grid-cols-[1.08fr_0.92fr] lg:gap-10">
       <div>
         <div class="seq glass mb-8 inline-flex items-center gap-2.5 rounded-full py-1.5 pl-2 pr-4 text-xs font-bold" style="--d:.1s"><span class="grid h-6 w-6 place-items-center rounded-full bg-gold/15 text-gold">${icon('Sparkles', 'h-3 w-3')}</span><span class="text-muted"><span class="text-fg">${apiDefinitions.length} endpoints</span> live and documented</span></div>
         <h1 class="text-balance text-[clamp(2.5rem,11.5vw,7rem)] leading-[0.94]">
@@ -92,7 +92,7 @@ export function renderHome() {
     <div class="marquee"><div class="marquee-track">${names}</div><div class="marquee-track" aria-hidden="true">${names}</div></div>
   </section>
 
-  <section class="mx-auto max-w-7xl px-5 py-20 sm:px-8 sm:py-28" id="apis">
+  <section class="mx-auto max-w-7xl px-4 py-20 sm:px-8 sm:py-28" id="apis">
     ${reveal(`<div class="mb-10 flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
       <div>
         <h2 class="text-balance max-w-xl text-[2.4rem] leading-[1.05] sm:text-6xl">Everything you need to build.</h2>
@@ -107,7 +107,7 @@ export function renderHome() {
   </section>
 
   <section class="relative border-y hair bg-surface/50">
-    <div class="mx-auto grid grid-cols-[minmax(0,1fr)] max-w-7xl gap-14 px-5 py-20 sm:px-8 sm:py-28 lg:grid-cols-2 lg:items-center">
+    <div class="mx-auto grid grid-cols-[minmax(0,1fr)] max-w-7xl gap-14 px-4 py-20 sm:px-8 sm:py-28 lg:grid-cols-2 lg:items-center">
       ${reveal(`<h2 class="text-balance max-w-lg text-[2.4rem] leading-[1.05] sm:text-6xl">The fastest way from idea to API.</h2>
       <p class="mt-6 max-w-lg text-sm leading-7 text-muted">Built with developers in mind. Every endpoint is designed to be intuitive, documented, and ready to ship.</p>
       <div class="mt-10 grid grid-cols-[minmax(0,1fr)] gap-6 sm:grid-cols-2">
@@ -129,7 +129,7 @@ console.log(data.media[<span class="tk-n">0</span>].url);</code></pre>
 
   <section class="relative overflow-hidden">
     <div class="orb left-1/2 top-1/2 h-[420px] w-[620px] -translate-x-1/2 -translate-y-1/2 bg-gold" style="opacity:.16"></div>
-    <div class="relative mx-auto max-w-4xl px-5 py-24 text-center sm:px-8 sm:py-36">
+    <div class="relative mx-auto max-w-4xl px-4 py-24 text-center sm:px-8 sm:py-36">
       ${reveal(`<p class="text-sm font-bold text-gold">Ready to build?</p>
       <h2 class="text-balance mt-5 text-[2.8rem] leading-[1] sm:text-7xl">Your next project starts here.</h2>
       <p class="mx-auto mt-6 max-w-md text-sm leading-7 text-muted">Explore our APIs and bring your ideas to life with just a few lines of code.</p>
@@ -193,7 +193,7 @@ function tryPanel(api) {
   ).join('');
   const initialUrl = `${window.location.origin}${api.endpoint}`;
 
-  return `<section id="try-panel" class="card mt-14 !overflow-visible p-6 sm:p-8" style="border-color:rgb(var(--gold)/.3)">
+  return `<section id="try-panel" class="card mt-14 !overflow-visible p-4 sm:p-8" style="border-color:rgb(var(--gold)/.3)">
     <div class="mb-6 flex items-center gap-3"><span class="iconbox h-10 w-10">${icon('Play', 'h-4 w-4')}</span><div><h3 class="text-base font-extrabold">Try this API</h3><p class="text-xs text-muted">Send a real request and inspect the response.</p></div></div>
     <div class="grid grid-cols-[minmax(0,1fr)] gap-4 ${api.parameters.length > 1 ? 'sm:grid-cols-2' : ''}">${inputs || '<p class="text-xs text-muted">This endpoint takes no parameters.</p>'}</div>
     <div class="mt-6 flex flex-col gap-2.5 sm:flex-row">
