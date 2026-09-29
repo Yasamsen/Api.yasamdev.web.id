@@ -34,7 +34,7 @@
 }
 
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; max-width: 100%; }
 body {
   margin: 0; min-width: 320px; overflow-x: hidden; overflow-x: clip;
   background: rgb(var(--bg)); color: rgb(var(--fg));
@@ -132,6 +132,7 @@ html.silent .tw { width: calc(var(--n) * 1ch) !important; }
 .nav-in .nav-shell { animation: navIn 1.2s var(--ease) 0.15s backwards; }
 html.scrolled .nav-shell { padding-top: 8px; }
 .nav-bar {
+  max-width: 100%;
   background: rgb(var(--bg) / 0.5); backdrop-filter: blur(18px) saturate(1.5); -webkit-backdrop-filter: blur(18px) saturate(1.5);
   border: 1px solid rgb(var(--fg) / 0.09); transition: background 0.5s, box-shadow 0.6s var(--ease), border-color 0.5s;
 }
