@@ -2,6 +2,7 @@ import { apiDefinitions, getApiBySlug, getCategories } from './apis/registry.js'
 import { esc, icon, refreshIcons, copyText } from './utils.js';
 import { renderApiCard } from './components.js';
 import { observeReveals } from './motion.js';
+import { extractMedia, mediaFromBlob, renderResponse } from './response-view.js';
 
 /* =========================================================
    HELPERS
@@ -354,9 +355,9 @@ export function bindDocs(api) {
     box.classList.remove('hidden');
     box.innerHTML = `<div class="code p-5"><div class="skeleton mb-3 h-3 w-2/5"></div><div class="skeleton mb-3 h-3 w-4/5"></div><div class="skeleton h-3 w-3/5"></div></div>`;
 
-    const showText = (output, status) => {
-      box.innerHTML = `${status ? `<div class="mb-2 flex items-center gap-2 text-[11px] font-bold ${status.ok ? 'text-ok' : 'text-red-400'}"><span class="h-1.5 w-1.5 rounded-full bg-current"></span>${esc(status.label)} · ${Math.round(performance.now() - t0)}ms</div>` : ''}${codeBlock(output)}`;
-      refreshIcons();
+    const statusLine = (status) => status ? `<div class="mb-2 flex items-center gap-2 text-[11px] font-bold ${status.ok ? 'text-ok' : 'text-red-400'}"><span class="h-1.5 w-1.5 rounded-full bg-current"></span>${esc(status.label)} · ${Math.round(performance.now() - t0)}ms</div>` : '';
+    const showText = (output, status, media = []) => {
+      renderResponse(box, { statusHtml: statusLine(status), jsonHtml: codeBlock(output), media });
     };
 
     try {
@@ -364,13 +365,15 @@ export function bindDocs(api) {
       const contentType = response.headers.get('content-type') || '';
       const status = { ok: response.ok, label: `${response.status} ${response.statusText || (response.ok ? 'OK' : 'Error')}` };
 
-      if (contentType.startsWith('image/')) {
+      const binary = /^(image|video|audio)\//.test(contentType);
+      if (binary) {
         const blob = await response.blob();
-        const imageUrl = URL.createObjectURL(blob);
-        box.innerHTML = `<div class="card !rounded-2xl p-5"><div class="mb-3 text-xs font-bold text-muted">Response • ${esc(contentType)} • ${Math.round(performance.now() - t0)}ms</div><div class="flex justify-center rounded-xl bg-white p-4"><img src="${imageUrl}" alt="API Response" class="max-w-full rounded-lg" style="max-height:500px"></div><a href="${imageUrl}" download="qrcode.png" class="btn btn-gold btn-sm mt-4 w-full">Download Image</a></div>`;
+        const item = mediaFromBlob(URL.createObjectURL(blob), contentType);
+        renderResponse(box, { statusHtml: statusLine(status), media: [item], mediaOnly: true });
       } else {
         const result = contentType.includes('application/json') ? await response.json() : await response.text();
-        showText(typeof result === 'string' ? result : JSON.stringify(result, null, 2), status);
+        const media = typeof result === 'string' ? [] : extractMedia(result);
+        showText(typeof result === 'string' ? result : JSON.stringify(result, null, 2), status, media);
       }
 
       btn.innerHTML = `${icon(response.ok ? 'Check' : 'AlertCircle', 'h-3.5 w-3.5')}<span>${response.ok ? 'Request sent' : 'Request failed'}</span>`;
