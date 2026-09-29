@@ -113,12 +113,16 @@ async function handleMediaDownload(req, res) {
 
   try {
     const upstream = await fetch(target.toString(), {
-      redirect: "follow",
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "*/*"
-      }
-    });
+  redirect: "follow",
+  headers: {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36",
+    "Accept":
+      "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+    "Referer": "https://www.bmkg.go.id/",
+    "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7"
+  }
+});
 
     if (!upstream.ok) {
       return res.status(502).json({
