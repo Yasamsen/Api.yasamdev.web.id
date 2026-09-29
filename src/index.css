@@ -251,6 +251,7 @@ html.menu-open { overflow: hidden; }
   .code pre { font-size: 11px; }
   #mobile-menu { overflow-y: auto; }
 }
+@media (max-width: 1023px) { html, body { overflow-x: hidden; max-width: 100%; } }
 img, svg, video { max-width: 100%; }
 pre, code { overflow-wrap: normal; }
 
