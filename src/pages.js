@@ -226,7 +226,7 @@ export function renderDocs(path) {
         <div class="border-t hair p-4"><div class="flex items-center gap-2.5 rounded-2xl bg-fg/5 p-3.5"><span class="relative flex h-2 w-2"><span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-ok opacity-70"></span><span class="relative inline-flex h-2 w-2 rounded-full bg-ok"></span></span><div><div class="text-xs font-bold">All systems operational</div><div class="text-[10px] text-dim">Last checked just now</div></div></div></div>
       </div>
     </aside>
-    <div class="pointer-events-none fixed inset-x-0 bottom-5 z-30 flex justify-center lg:hidden" style="padding-bottom:env(safe-area-inset-bottom,0px)"><button id="open-sidebar" class="btn btn-gold btn-sm pointer-events-auto shadow-2xl">${icon('Menu', 'h-4 w-4')} API menu</button></div>
+    <div id="fab" class="fab pointer-events-none fixed inset-x-0 bottom-5 z-30 flex justify-center lg:hidden" style="padding-bottom:env(safe-area-inset-bottom,0px)"><button id="open-sidebar" class="btn btn-gold btn-sm pointer-events-auto shadow-2xl">${icon('Menu', 'h-4 w-4')} API menu</button></div>
     <main class="min-w-0 flex-1 px-2 pb-24 pt-6 sm:px-4 lg:px-8 lg:pt-10">${selected ? renderApiDetail(selected) : renderDocsIndex()}</main>
   </div>`;
 }
@@ -296,6 +296,13 @@ export function bindDocs(api) {
   document.getElementById('open-sidebar')?.addEventListener('click', () => setSidebar(true));
   document.getElementById('close-sidebar')?.addEventListener('click', () => setSidebar(false));
   scrim?.addEventListener('click', () => setSidebar(false));
+
+  // sembunyikan tombol "API menu" saat footer terlihat agar tidak menimpa teks footer
+  const fab = document.getElementById('fab');
+  const footer = document.querySelector('footer');
+  if (fab && footer && 'IntersectionObserver' in window) {
+    new IntersectionObserver(([entry]) => fab.toggleAttribute('data-hide', entry.isIntersecting), { threshold: 0 }).observe(footer);
+  }
 
   document.querySelectorAll('[data-category-toggle]').forEach((btn) =>
     btn.addEventListener('click', () => btn.closest('[data-category]').toggleAttribute('data-collapsed'))
