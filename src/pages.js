@@ -45,10 +45,10 @@ export function renderHome() {
       <div class="orb -right-32 top-40 h-[440px] w-[440px] bg-[#2f7d78]" style="animation-delay:-8s;animation-duration:30s"></div>
     </div>
 
-    <div class="relative mx-auto grid max-w-7xl items-center gap-14 px-5 sm:px-8 lg:grid-cols-[1.08fr_0.92fr] lg:gap-10">
+    <div class="relative mx-auto grid grid-cols-[minmax(0,1fr)] max-w-7xl items-center gap-14 px-5 sm:px-8 lg:grid-cols-[1.08fr_0.92fr] lg:gap-10">
       <div>
         <div class="seq glass mb-8 inline-flex items-center gap-2.5 rounded-full py-1.5 pl-2 pr-4 text-xs font-bold" style="--d:.1s"><span class="grid h-6 w-6 place-items-center rounded-full bg-gold/15 text-gold">${icon('Sparkles', 'h-3 w-3')}</span><span class="text-muted"><span class="text-fg">${apiDefinitions.length} endpoints</span> live and documented</span></div>
-        <h1 class="text-balance text-[clamp(3.2rem,9vw,7rem)] leading-[0.94]">
+        <h1 class="text-balance text-[clamp(2.5rem,11.5vw,7rem)] leading-[0.94]">
           <span class="hl"><span style="--d:.2s">Powerful APIs.</span></span>
           <span class="hl"><span class="italic text-gold-grad" style="--d:.38s">Simple to use.</span></span>
         </h1>
@@ -95,22 +95,22 @@ export function renderHome() {
   <section class="mx-auto max-w-7xl px-5 py-20 sm:px-8 sm:py-28" id="apis">
     ${reveal(`<div class="mb-10 flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
       <div>
-        <h2 class="text-balance max-w-xl text-4xl leading-[1.02] sm:text-6xl">Everything you need to build.</h2>
+        <h2 class="text-balance max-w-xl text-[2.4rem] leading-[1.05] sm:text-6xl">Everything you need to build.</h2>
         <p class="mt-4 max-w-lg text-sm leading-7 text-muted">Production-ready endpoints with clear documentation and predictable responses.</p>
       </div>
       <div class="relative w-full lg:w-72">${icon('Search', 'pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-dim')}<input id="home-search" placeholder="Search APIs..." aria-label="Search APIs" class="input !rounded-full !pl-11"></div>
     </div>`)}
     ${reveal(`<div id="cat-chips" class="mb-9 flex flex-wrap gap-2"><button class="chip is-active" data-cat="">All</button>${cats.map((c) => `<button class="chip" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}</div>`, 80)}
-    <div id="api-grid" class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">${apiDefinitions.map((a, i) => renderApiCard(a, i)).join('')}</div>
+    <div id="api-grid" class="grid grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2 lg:grid-cols-3">${apiDefinitions.map((a, i) => renderApiCard(a, i)).join('')}</div>
     <div id="no-apis" class="hidden rounded-3xl border border-dashed border-fg/20 py-20 text-center">${icon('Search', 'mx-auto h-8 w-8 text-dim')}<p class="mt-4 text-sm font-bold">No APIs found</p><p class="mt-1 text-xs text-dim">Try a different search term or category.</p></div>
     ${reveal(`<button data-nav="/docs" class="group inline-flex items-center gap-2 text-sm font-bold text-gold">View all documentation ${icon('ArrowRight', 'h-4 w-4 transition-transform duration-500 group-hover:translate-x-1.5')}</button>`, 0, 'div', 'mt-12 text-center')}
   </section>
 
   <section class="relative border-y hair bg-surface/50">
-    <div class="mx-auto grid max-w-7xl gap-14 px-5 py-20 sm:px-8 sm:py-28 lg:grid-cols-2 lg:items-center">
-      ${reveal(`<h2 class="text-balance max-w-lg text-4xl leading-[1.02] sm:text-6xl">The fastest way from idea to API.</h2>
+    <div class="mx-auto grid grid-cols-[minmax(0,1fr)] max-w-7xl gap-14 px-5 py-20 sm:px-8 sm:py-28 lg:grid-cols-2 lg:items-center">
+      ${reveal(`<h2 class="text-balance max-w-lg text-[2.4rem] leading-[1.05] sm:text-6xl">The fastest way from idea to API.</h2>
       <p class="mt-6 max-w-lg text-sm leading-7 text-muted">Built with developers in mind. Every endpoint is designed to be intuitive, documented, and ready to ship.</p>
-      <div class="mt-10 grid gap-6 sm:grid-cols-2">
+      <div class="mt-10 grid grid-cols-[minmax(0,1fr)] gap-6 sm:grid-cols-2">
         ${[['Gauge', 'Blazing fast', 'Low latency, every request.'], ['ShieldCheck', 'Reliable by default', '99.9% uptime SLA.'], ['Database', 'Simple responses', 'Predictable JSON outputs.'], ['BookOpen', 'Clear docs', 'Start building in minutes.']].map(([ic, t, d]) => `<div class="group flex gap-4"><span class="iconbox h-11 w-11 shrink-0 transition-transform duration-500 group-hover:-translate-y-1">${icon(ic, 'h-[18px] w-[18px]')}</span><div><div class="text-sm font-extrabold">${t}</div><div class="mt-1 text-xs leading-5 text-muted">${d}</div></div></div>`).join('')}
       </div>`)}
       ${reveal(`<div class="code shadow-[0_50px_100px_-50px_rgba(0,0,0,0.7)]">
@@ -131,7 +131,7 @@ console.log(data.media[<span class="tk-n">0</span>].url);</code></pre>
     <div class="orb left-1/2 top-1/2 h-[420px] w-[620px] -translate-x-1/2 -translate-y-1/2 bg-gold" style="opacity:.16"></div>
     <div class="relative mx-auto max-w-4xl px-5 py-24 text-center sm:px-8 sm:py-36">
       ${reveal(`<p class="text-sm font-bold text-gold">Ready to build?</p>
-      <h2 class="text-balance mt-5 text-5xl leading-[0.98] sm:text-7xl">Your next project starts here.</h2>
+      <h2 class="text-balance mt-5 text-[2.8rem] leading-[1] sm:text-7xl">Your next project starts here.</h2>
       <p class="mx-auto mt-6 max-w-md text-sm leading-7 text-muted">Explore our APIs and bring your ideas to life with just a few lines of code.</p>
       <button data-nav="/docs" data-magnetic class="btn btn-gold mt-10">Start building ${icon('ArrowRight', 'arr h-4 w-4')}</button>`)}
     </div>
@@ -195,7 +195,7 @@ function tryPanel(api) {
 
   return `<section id="try-panel" class="card mt-14 !overflow-visible p-6 sm:p-8" style="border-color:rgb(var(--gold)/.3)">
     <div class="mb-6 flex items-center gap-3"><span class="iconbox h-10 w-10">${icon('Play', 'h-4 w-4')}</span><div><h3 class="text-base font-extrabold">Try this API</h3><p class="text-xs text-muted">Send a real request and inspect the response.</p></div></div>
-    <div class="grid gap-4 ${api.parameters.length > 1 ? 'sm:grid-cols-2' : ''}">${inputs || '<p class="text-xs text-muted">This endpoint takes no parameters.</p>'}</div>
+    <div class="grid grid-cols-[minmax(0,1fr)] gap-4 ${api.parameters.length > 1 ? 'sm:grid-cols-2' : ''}">${inputs || '<p class="text-xs text-muted">This endpoint takes no parameters.</p>'}</div>
     <div class="mt-6 flex flex-col gap-2.5 sm:flex-row">
       <button id="send-request" class="btn btn-gold btn-sm flex-1">${icon('Play', 'h-3.5 w-3.5')}<span>Send request</span></button>
       <button id="copy-url" class="btn btn-ghost btn-sm">${icon('Copy', 'h-3.5 w-3.5')}<span>Copy URL</span></button>
@@ -222,11 +222,11 @@ export function renderDocs(path) {
           <div class="mb-4 flex items-center justify-between"><div class="flex items-center gap-2 text-sm font-extrabold">${icon('BookOpen', 'h-4 w-4 text-gold')} API Reference</div><button id="close-sidebar" class="iconbtn !h-8 !w-8 lg:hidden" aria-label="Close menu">${icon('X', 'h-4 w-4')}</button></div>
           <div class="relative">${icon('Search', 'pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-dim')}<input id="docs-search" placeholder="Search endpoints" aria-label="Search endpoints" class="input !h-10 !rounded-full !pl-10 !text-xs"></div>
         </div>
-        <nav id="docs-nav" class="flex-1 overflow-auto px-3 pb-4">${categories.map((cat) => `<div class="mb-3" data-category="${esc(cat)}"><button data-category-toggle class="mb-1 flex w-full items-center justify-between px-2 py-1 text-[10px] font-extrabold uppercase tracking-[0.18em] text-dim transition-colors hover:text-gold"><span>${esc(cat)}</span>${icon('ChevronDown', 'chev h-3 w-3')}</button><div class="collapse"><div data-category-items>${apiDefinitions.filter((a) => a.category === cat).map((api) => docNavItem(api, selected)).join('')}</div></div></div>`).join('')}</nav>
+        <nav id="docs-nav" class="flex-1 overflow-auto px-3 pb-4">${categories.map((cat) => `<div class="mb-3" data-category="${esc(cat)}"><button data-category-toggle class="mb-1 flex w-full items-center justify-between px-2 py-1 text-[10px] font-extrabold uppercase tracking-[0.18em] text-dim transition-colors hover:text-gold"><span>${esc(cat)}</span>${icon('ChevronDown', 'chev h-3 w-3')}</button><div class="fold"><div data-category-items>${apiDefinitions.filter((a) => a.category === cat).map((api) => docNavItem(api, selected)).join('')}</div></div></div>`).join('')}</nav>
         <div class="border-t hair p-4"><div class="flex items-center gap-2.5 rounded-2xl bg-fg/5 p-3.5"><span class="relative flex h-2 w-2"><span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-ok opacity-70"></span><span class="relative inline-flex h-2 w-2 rounded-full bg-ok"></span></span><div><div class="text-xs font-bold">All systems operational</div><div class="text-[10px] text-dim">Last checked just now</div></div></div></div>
       </div>
     </aside>
-    <button id="open-sidebar" class="btn btn-gold btn-sm fixed bottom-5 left-1/2 z-30 -translate-x-1/2 shadow-2xl lg:hidden">${icon('Menu', 'h-4 w-4')} API menu</button>
+    <div class="pointer-events-none fixed inset-x-0 bottom-5 z-30 flex justify-center lg:hidden" style="padding-bottom:env(safe-area-inset-bottom,0px)"><button id="open-sidebar" class="btn btn-gold btn-sm pointer-events-auto shadow-2xl">${icon('Menu', 'h-4 w-4')} API menu</button></div>
     <main class="min-w-0 flex-1 px-2 pb-24 pt-6 sm:px-4 lg:px-8 lg:pt-10">${selected ? renderApiDetail(selected) : renderDocsIndex()}</main>
   </div>`;
 }
@@ -240,10 +240,10 @@ function renderDocsIndex() {
   return `<div class="max-w-4xl">
     <div class="mb-12">
       <p class="seq text-sm font-bold text-gold" style="--d:.05s">Documentation</p>
-      <h1 class="mt-3 text-[clamp(3rem,7vw,5.5rem)] leading-[0.96]"><span class="hl"><span style="--d:.12s">API Reference</span></span></h1>
+      <h1 class="mt-3 text-[clamp(2.6rem,10vw,5.5rem)] leading-[0.96]"><span class="hl"><span style="--d:.12s">API Reference</span></span></h1>
       <p class="seq mt-6 max-w-xl text-[15px] leading-8 text-muted" style="--d:.35s">Everything you need to integrate SamApi into your project. Pick an endpoint from the menu to get started.</p>
     </div>
-    <div id="docs-cards" class="grid gap-4 sm:grid-cols-2">${apiDefinitions.map((api, i) => reveal(`<button data-nav="/docs/${encodeURIComponent(api.slug)}" class="card group flex w-full items-center gap-4 p-4 text-left"><span class="iconbox h-11 w-11 shrink-0">${icon(api.icon, 'h-4 w-4')}</span><span class="min-w-0 flex-1"><span class="block truncate text-sm font-extrabold">${esc(api.name)}</span><span class="mt-1 block truncate font-mono text-[10px] text-dim">${esc(api.method)} ${esc(api.endpoint)}</span></span>${icon('ChevronRight', 'h-4 w-4 text-dim transition-all duration-500 group-hover:translate-x-1.5 group-hover:text-gold')}</button>`, (i % 2) * 90)).join('')}</div>
+    <div id="docs-cards" class="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2">${apiDefinitions.map((api, i) => reveal(`<button data-nav="/docs/${encodeURIComponent(api.slug)}" class="card group flex w-full items-center gap-4 p-4 text-left"><span class="iconbox h-11 w-11 shrink-0">${icon(api.icon, 'h-4 w-4')}</span><span class="min-w-0 flex-1"><span class="block truncate text-sm font-extrabold">${esc(api.name)}</span><span class="mt-1 block truncate font-mono text-[10px] text-dim">${esc(api.method)} ${esc(api.endpoint)}</span></span>${icon('ChevronRight', 'h-4 w-4 text-dim transition-all duration-500 group-hover:translate-x-1.5 group-hover:text-gold')}</button>`, (i % 2) * 90)).join('')}</div>
   </div>`;
 }
 
@@ -268,7 +268,7 @@ function renderApiDetail(api) {
       <div class="seq iconbox h-16 w-16 shrink-0" style="--d:.05s">${icon(api.icon, 'h-7 w-7')}</div>
       <div class="min-w-0">
         <div class="seq mb-3 flex flex-wrap items-center gap-2.5" style="--d:.1s"><span class="badge badge-cat">${esc(api.category)}</span><span class="text-xs text-dim">Updated recently</span></div>
-        <h1 class="text-balance text-[clamp(2.4rem,6vw,4.25rem)] leading-[0.98]"><span class="hl"><span style="--d:.15s">${esc(api.name)}</span></span></h1>
+        <h1 class="text-balance text-[clamp(2rem,8vw,4.25rem)] leading-[0.98]"><span class="hl"><span style="--d:.15s">${esc(api.name)}</span></span></h1>
       </div>
     </div>
     <p class="seq mb-8 text-[15px] leading-8 text-muted" style="--d:.4s">${esc(api.description)}</p>
@@ -404,7 +404,7 @@ export function renderError(type) {
     <div class="relative text-center">
       <div class="seq relative mx-auto mb-10 grid h-28 w-28 place-items-center" style="--d:.05s"><div class="absolute inset-0 animate-pulse rounded-full ${t.pulse}"></div><div class="glass relative grid h-20 w-20 place-items-center rounded-full ${t.text}">${icon(is500 ? 'ServerCrash' : 'WifiOff', 'h-8 w-8')}</div></div>
       <p class="seq font-mono text-xs font-bold tracking-[0.3em] ${t.text}" style="--d:.15s">ERROR ${type}</p>
-      <h1 class="text-balance mt-4 text-[clamp(2.8rem,8vw,5.5rem)] leading-[0.98]"><span class="hl"><span style="--d:.25s">${is500 ? 'Something went wrong' : 'Endpoint not found'}</span></span></h1>
+      <h1 class="text-balance mt-4 text-[clamp(2.3rem,10vw,5.5rem)] leading-[0.98]"><span class="hl"><span style="--d:.25s">${is500 ? 'Something went wrong' : 'Endpoint not found'}</span></span></h1>
       <p class="seq mx-auto mt-5 max-w-md text-sm leading-7 text-muted" style="--d:.55s">${is500 ? 'Our servers ran into an unexpected issue. Your request was not completed, but our team has been notified.' : "The endpoint you are looking for doesn't exist or may have been moved. Check the URL and try again."}</p>
       <div class="seq mt-10 flex flex-col justify-center gap-3 sm:flex-row" style="--d:.7s">
         ${is500
