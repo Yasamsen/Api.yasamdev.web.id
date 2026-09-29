@@ -36,7 +36,7 @@
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 body {
-  margin: 0; min-width: 320px; overflow-x: hidden;
+  margin: 0; min-width: 320px; overflow-x: hidden; overflow-x: clip;
   background: rgb(var(--bg)); color: rgb(var(--fg));
   font-family: 'Manrope', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
@@ -228,9 +228,9 @@ html.menu-open { overflow: hidden; }
   .sidebar { position: sticky; top: calc(var(--nav-h) + 8px); z-index: 1; width: 300px; height: calc(100vh - var(--nav-h) - 24px); padding-top: 0; transform: none; border: 1px solid rgb(var(--fg) / 0.09); border-radius: 24px; background: rgb(var(--surface) / 0.6); backdrop-filter: blur(12px); }
   .scrim { display: none; }
 }
-.collapse { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 0.6s var(--ease); }
-.collapse > div { overflow: hidden; }
-[data-collapsed] .collapse { grid-template-rows: 0fr; }
+.fold { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 0.6s var(--ease); }
+.fold > div { overflow: hidden; }
+[data-collapsed] .fold { grid-template-rows: 0fr; }
 .chev { transition: transform 0.5s var(--ease); }
 [data-collapsed] .chev { transform: rotate(-90deg); }
 .navitem { position: relative; display: flex; width: 100%; align-items: center; gap: 0.65rem; border-radius: 12px; padding: 0.55rem 0.7rem; text-align: left; font-size: 0.8rem; color: rgb(var(--muted)); transition: all 0.4s var(--ease); }
@@ -242,7 +242,17 @@ html.menu-open { overflow: hidden; }
 .rule { height: 1px; background: linear-gradient(90deg, transparent, rgb(var(--gold) / 0.5), transparent); }
 .text-gold-grad { background: linear-gradient(110deg, rgb(var(--gold)), rgb(var(--gold2)) 50%, rgb(var(--gold))); -webkit-background-clip: text; background-clip: text; color: transparent; background-size: 200% 100%; animation: shimmer 6s linear infinite; }
 
-@media (max-width: 640px) { :root { --nav-h: 76px; } }
+@media (max-width: 640px) {
+  :root { --nav-h: 76px; }
+  .card:hover { transform: none; }
+  .btn { height: 50px; }
+  .btn-sm { height: 44px; }
+  .orb { filter: blur(70px); }
+  .code pre { font-size: 11px; }
+  #mobile-menu { overflow-y: auto; }
+}
+img, svg, video { max-width: 100%; }
+pre, code { overflow-wrap: normal; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
