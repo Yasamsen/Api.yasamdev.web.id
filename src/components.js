@@ -92,7 +92,7 @@ export function renderFooter() {
   const col = (title, items) => `<div><h4 class="mb-5 text-sm font-bold">${title}</h4><div class="flex flex-col gap-3 text-sm text-muted">${items.map(([label, to]) => `<button ${to ? `data-nav="${to}"` : ''} class="w-fit text-left transition-all duration-300 hover:translate-x-1 hover:text-gold">${label}</button>`).join('')}</div></div>`;
   return `<footer class="relative mt-10 overflow-hidden border-t hair">
     <div class="rule absolute inset-x-0 top-0"></div>
-    <div class="mx-auto max-w-7xl px-5 pb-10 pt-16 sm:px-8">
+    <div class="mx-auto max-w-7xl px-4 pb-10 pt-16 sm:px-8">
       <div class="flex flex-col justify-between gap-12 md:flex-row">
         <div class="max-w-sm">
           <button data-nav="/" class="mb-5 flex items-center gap-3"><span class="grid h-9 w-9 place-items-center rounded-full border border-gold/40 bg-gold/10 text-gold">${icon('Zap', 'h-4 w-4 fill-current')}</span><span class="font-display text-2xl">Sam<span class="text-gold">Api</span></span></button>
@@ -119,7 +119,7 @@ export function apiIcon(api, size = 'md') {
 
 export function renderApiCard(api, i = 0) {
   const get = api.method === 'GET';
-  return `<div class="reveal" style="--d:${(i % 3) * 110}ms"><article class="card flex h-full flex-col p-6">
+  return `<div class="reveal" style="--d:${(i % 3) * 110}ms"><article class="card flex h-full flex-col p-5 sm:p-6">
     <div class="mb-6 flex items-start justify-between"><div class="iconbox h-12 w-12">${apiIcon(api)}</div><span class="badge badge-cat">${esc(api.category)}</span></div>
     <h3 class="mb-2 text-[17px] font-extrabold tracking-[-0.02em]">${esc(api.name)}</h3>
     <p class="mb-6 min-h-[48px] text-sm leading-6 text-muted">${esc(api.description)}</p>
