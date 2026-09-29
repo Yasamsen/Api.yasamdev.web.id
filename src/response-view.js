@@ -75,10 +75,8 @@ function mediaCard(item) {
   return `<div class="card !rounded-2xl p-4" data-media-card>
     <div class="mb-3 flex items-center gap-2 text-[11px] font-bold text-muted">${icon(TYPE_ICON[item.type], 'h-3.5 w-3.5')}<span class="uppercase tracking-wider">${TYPE_LABEL[item.type]}</span><span class="truncate font-mono font-normal text-dim">${esc(item.path)}</span></div>
     ${preview(item)}
-    <div class="mt-3 break-all rounded-xl bg-[#0d0c0b] px-3 py-2 font-mono text-[10.5px] leading-5 text-[#a8a094]">${esc(item.url)}</div>
-    <div class="mt-3 flex gap-2">
-      <a href="${esc(item.url)}" ${download} target="_blank" rel="noopener noreferrer" class="btn btn-gold btn-sm flex-1">${icon('Download', 'h-3.5 w-3.5')}<span>Download</span></a>
-      <button data-copy="${esc(item.url)}" class="btn btn-ghost btn-sm" aria-label="Copy URL">${icon('Copy', 'h-3.5 w-3.5')}</button>
+    <div class="mt-3">
+      <a href="${esc(item.url)}" ${download} class="btn btn-gold btn-sm w-full">${icon('Download', 'h-3.5 w-3.5')}<span>Download</span></a>
     </div>
   </div>`;
 }
