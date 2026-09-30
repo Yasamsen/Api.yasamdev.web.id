@@ -153,36 +153,26 @@ async function handleUpscaleImage(req, res) {
 //wallpaper
 async function handleWallpaper(req, res) {
   try {
-    const { title, page = "1" } = req.query;
+    const { title } = req.query;
 
-    // Validasi title
     if (!title) {
       return res.status(400).json({
         status: false,
         message: "Parameter title wajib diisi.",
-        error:
-          'example: "/api/wallpaper?title=naruto&page=1"'
+        error: 'example: "/api/wallpaper?title=naruto"'
       });
     }
 
-    // Validasi page
-    const currentPage = String(page);
+    // Ambil beberapa halaman secara acak
+    // Angka ini bisa disesuaikan jika BestHDWallpaper
+    // memiliki jumlah halaman yang lebih banyak.
+    const randomPage = Math.floor(Math.random() * 10) + 1;
 
-    if (!/^\d+$/.test(currentPage) || Number(currentPage) < 1) {
-      return res.status(400).json({
-        status: false,
-        message: "Parameter page harus berupa angka mulai dari 1.",
-        error:
-          'example: "/api/wallpaper?title=naruto&page=1"'
-      });
-    }
-
-    // Request ke BestHDWallpaper
     const response = await axios.get(
       "https://www.besthdwallpaper.com/search",
       {
         params: {
-          CurrentPage: currentPage,
+          CurrentPage: randomPage,
           q: title
         },
 
@@ -204,28 +194,23 @@ async function handleWallpaper(req, res) {
       }
     );
 
-    // Parse HTML
     const $ = cheerio.load(response.data);
 
     const hasil = [];
 
-    // Ambil semua wallpaper
     $("div.grid-item").each((index, element) => {
       const item = $(element);
 
-      // Judul
       const titleText = item
         .find("div.info > a > h3")
         .text()
         .trim();
 
-      // Type
       const typeText = item
         .find("div.info > a:nth-child(2)")
         .text()
         .trim();
 
-      // URL halaman wallpaper
       const sourcePath = item
         .find("div > a:nth-child(3)")
         .attr("href");
@@ -237,10 +222,8 @@ async function handleWallpaper(req, res) {
           ).href
         : null;
 
-      // Element gambar
       const imageElement = item.find("picture > img");
 
-      // Ambil semua kemungkinan URL gambar
       const images = [
         imageElement.attr("data-src"),
         imageElement.attr("src"),
@@ -254,11 +237,9 @@ async function handleWallpaper(req, res) {
           .attr("srcset")
       ].filter(Boolean);
 
-      // Hilangkan URL duplikat
       const uniqueImages = [...new Set(images)];
 
-      // Masukkan hasil
-      if (titleText || uniqueImages.length > 0) {
+      if (source && uniqueImages.length > 0) {
         hasil.push({
           title: titleText,
           type: typeText,
@@ -268,36 +249,31 @@ async function handleWallpaper(req, res) {
       }
     });
 
-    // Jika tidak ada hasil
-    if (hasil.length === 0) {
+    if (hasil.length < 2) {
       return res.status(404).json({
         status: false,
         message:
-          "Wallpaper tidak ditemukan untuk kata kunci tersebut.",
-        error: `Tidak ada hasil untuk pencarian: ${title}`
+          "Tidak ditemukan minimal 2 wallpaper.",
+        error:
+          "Hasil dari halaman yang dipilih kurang dari 2."
       });
     }
 
-    // Acak semua hasil
-    const shuffled = hasil
-      .map((item) => ({
-        item,
-        random: Math.random()
-      }))
-      .sort((a, b) => a.random - b.random)
-      .map(({ item }) => item);
+    // Acak hasil
+    const shuffled = [...hasil].sort(
+      () => Math.random() - 0.5
+    );
 
-    // Ambil maksimal 10
-    const randomResults = shuffled.slice(0, 10);
+    // Ambil tepat 2 hasil berbeda
+    const randomResults = shuffled.slice(0, 2);
 
-    // Response
     return res.status(200).json({
       status: true,
       source: "BestHDWallpaper",
 
       data: {
         query: title,
-        page: Number(currentPage),
+        page: randomPage,
         total: randomResults.length,
         results: randomResults
       }
@@ -309,13 +285,12 @@ async function handleWallpaper(req, res) {
       error
     );
 
-    const statusCode =
+    return res.status(
       error.response?.status >= 400 &&
       error.response?.status < 600
         ? error.response.status
-        : 500;
-
-    return res.status(statusCode).json({
+        : 500
+    ).json({
       status: false,
       message:
         "Gagal mengambil data wallpaper.",
