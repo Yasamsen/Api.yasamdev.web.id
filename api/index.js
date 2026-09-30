@@ -281,11 +281,16 @@ async function handleSsweb(req, res) {
 }
 
 //zerochan
+import axios from "axios";
+
+/* =========================
+   ZEROCHAN
+========================= */
 async function handleZerochan(req, res) {
   try {
     const query = req.query.query || req.query.q;
 
-    if (!query) {
+    if (!query || !query.trim()) {
       return res.status(400).json({
         status: false,
         message: "Parameter query wajib diisi.",
@@ -293,26 +298,40 @@ async function handleZerochan(req, res) {
       });
     }
 
-    const tag = encodeURIComponent(query.trim());
+    const searchQuery = query.trim();
 
-    const response = await axios.get(
-      `https://www.zerochan.net/${tag}?json`,
-      {
-        headers: {
-          "User-Agent": "YasamDev-API - Yasamsen",
-          "Accept": "application/json",
-          "Accept-Language": "en-US,en;q=0.9"
-        },
-        timeout: 15000
-      }
-    );
+    const zerochanUrl =
+      `https://www.zerochan.net/search?q=${encodeURIComponent(searchQuery)}&json`;
+
+    const response = await axios.get(zerochanUrl, {
+      headers: {
+        "User-Agent": "YasamDev-API - Yasamsen",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9"
+      },
+      timeout: 15000,
+      validateStatus: (status) => status >= 200 && status < 600
+    });
+
+    /* =========================
+       CEK STATUS ZEROCHAN
+    ========================= */
+
+    if (response.status < 200 || response.status >= 300) {
+      return res.status(response.status).json({
+        status: false,
+        message: "Zerochan gagal memberikan hasil pencarian.",
+        error: `Zerochan mengembalikan HTTP ${response.status}`,
+        upstreamStatus: response.status
+      });
+    }
 
     const zerochanData = response.data;
 
-    /*
-     * API Zerochan bisa mengembalikan array maupun
-     * object tergantung endpoint/format response.
-     */
+    /* =========================
+       NORMALISASI DATA
+    ========================= */
+
     let items = [];
 
     if (Array.isArray(zerochanData)) {
@@ -321,48 +340,91 @@ async function handleZerochan(req, res) {
       items = zerochanData.items;
     } else if (Array.isArray(zerochanData?.data)) {
       items = zerochanData.data;
-    } else {
-      items = [zerochanData];
+    } else if (Array.isArray(zerochanData?.results)) {
+      items = zerochanData.results;
+    } else if (zerochanData && typeof zerochanData === "object") {
+      /*
+       * Beberapa response API dapat memiliki object
+       * yang membungkus array di property tertentu.
+       */
+      const possibleArray = Object.values(zerochanData).find(
+        (value) => Array.isArray(value)
+      );
+
+      if (possibleArray) {
+        items = possibleArray;
+      }
     }
 
-    const result = items.map((item) => {
-      if (typeof item === "string") {
-        return {
-          url: item
-        };
-      }
+    /* =========================
+       FORMAT HASIL
+    ========================= */
 
-      return {
-        id: item.id || null,
-        name: item.name || item.title || null,
-        url:
+    const result = items
+      .map((item) => {
+        if (typeof item === "string") {
+          return {
+            url: item
+          };
+        }
+
+        if (!item || typeof item !== "object") {
+          return null;
+        }
+
+        const id =
+          item.id ||
+          item.imageId ||
+          item.image_id ||
+          null;
+
+        const name =
+          item.name ||
+          item.title ||
+          item.tag ||
+          null;
+
+        const url =
           item.url ||
           item.image ||
           item.full ||
+          item.fullUrl ||
+          item.full_url ||
           item.src ||
-          null,
-        thumbnail:
+          null;
+
+        const thumbnail =
           item.thumbnail ||
           item.thumbnailUrl ||
+          item.thumbnail_url ||
           item.thumb ||
-          null
-      };
-    }).filter((item) => item.url || item.thumbnail);
+          null;
+
+        return {
+          id,
+          name,
+          url,
+          thumbnail
+        };
+      })
+      .filter((item) => item && (item.url || item.thumbnail));
+
+    /* =========================
+       RESPONSE
+    ========================= */
 
     return res.status(200).json({
       status: true,
       source: "Zerochan",
       data: {
-        query: query.trim(),
+        query: searchQuery,
         total: result.length,
         result
       }
     });
 
   } catch (error) {
-    const upstreamStatus = error.response?.status;
-
-    return res.status(upstreamStatus >= 400 && upstreamStatus < 600 ? upstreamStatus : 500).json({
+    return res.status(500).json({
       status: false,
       message: "Gagal mengambil data dari Zerochan.",
       error: error.message
