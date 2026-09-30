@@ -297,6 +297,150 @@ async function handleWallpaper(req, res) {
     });
   }
 }
+//question 
+async function handleQuotesAnimeEndpoint(req, res) {
+  try {
+    // ==============================
+    // METHOD VALIDATION
+    // ==============================
+    if (req.method !== "GET") {
+      return res.status(405).json({
+        status: false,
+        message: "Method tidak diizinkan. Gunakan GET.",
+        error: "Method Not Allowed"
+      });
+    }
+
+    // ==============================
+    // RANDOM PAGE
+    // ==============================
+    const quotesAnimeEndpointPage = Math.floor(
+      Math.random() * 184
+    );
+
+    const quotesAnimeEndpointUrl =
+      `https://otakotaku.com/quote/feed/${quotesAnimeEndpointPage}`;
+
+    // ==============================
+    // REQUEST
+    // ==============================
+    const quotesAnimeEndpointResponse = await axios.get(
+      quotesAnimeEndpointUrl,
+      {
+        timeout: 15000,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          "Accept":
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language":
+            "en-US,en;q=0.9"
+        }
+      }
+    );
+
+    // ==============================
+    // PARSE HTML
+    // ==============================
+    const quotesAnimeEndpoint$ = cheerio.load(
+      quotesAnimeEndpointResponse.data
+    );
+
+    // Ambil item pertama saja
+    const quotesAnimeEndpointElement =
+      quotesAnimeEndpoint$(
+        "div.kotodama-list"
+      ).first();
+
+    // ==============================
+    // VALIDASI
+    // ==============================
+    if (!quotesAnimeEndpointElement.length) {
+      return res.status(404).json({
+        status: false,
+        message: "Quote anime tidak ditemukan.",
+        error: "Empty result"
+      });
+    }
+
+    // ==============================
+    // SCRAPE DATA
+    // ==============================
+    const quotesAnimeEndpointData = {
+      link:
+        quotesAnimeEndpointElement
+          .find("a")
+          .attr("href") || "",
+
+      gambar:
+        quotesAnimeEndpointElement
+          .find("img")
+          .attr("data-src") ||
+        quotesAnimeEndpointElement
+          .find("img")
+          .attr("src") ||
+        "",
+
+      karakter:
+        quotesAnimeEndpointElement
+          .find("div.char-name")
+          .text()
+          .trim(),
+
+      anime:
+        quotesAnimeEndpointElement
+          .find("div.anime-title")
+          .text()
+          .trim(),
+
+      episode:
+        quotesAnimeEndpointElement
+          .find("div.meta")
+          .text()
+          .trim(),
+
+      up_at:
+        quotesAnimeEndpointElement
+          .find("small.meta")
+          .text()
+          .trim(),
+
+      quotes:
+        quotesAnimeEndpointElement
+          .find("div.quote")
+          .text()
+          .trim()
+    };
+
+    // ==============================
+    // SUCCESS RESPONSE
+    // ==============================
+    return res.status(200).json({
+      status: true,
+      source: "OtakuOtaku",
+      data: quotesAnimeEndpointData
+    });
+
+  } catch (error) {
+    console.error(
+      "Quotes Anime Endpoint Error:",
+      error
+    );
+
+    const quotesAnimeEndpointStatus =
+      error.response?.status &&
+      error.response.status >= 400 &&
+      error.response.status < 600
+        ? error.response.status
+        : 500;
+
+    return res.status(quotesAnimeEndpointStatus).json({
+      status: false,
+      message: "Gagal mengambil quote anime dari sumber.",
+      error: error.message
+    });
+  }
+}
 //porno
 async function handleTaiEndpoint(req, res) {
   try {
@@ -331,8 +475,10 @@ async function handleTaiEndpoint(req, res) {
         headers: {
           "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+
           "Accept":
             "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+
           "Accept-Language":
             "en-US,en;q=0.9"
         }
@@ -346,85 +492,83 @@ async function handleTaiEndpoint(req, res) {
       taiEndpointResponse.data
     );
 
-    const taiEndpointData = [];
-
     // ==============================
-    // SCRAPE ARTICLE
+    // AMBIL ARTICLE PERTAMA SAJA
     // ==============================
-    taiEndpoint$(
+    const taiEndpointElement = taiEndpoint$(
       "#primary > div > div > ul > li > article"
-    ).each(function (index, element) {
-
-      taiEndpointData.push({
-        title:
-          taiEndpoint$(element)
-            .find("header > h2")
-            .text()
-            .trim(),
-
-        link:
-          taiEndpoint$(element)
-            .find("header > h2 > a")
-            .attr("href") || "",
-
-        category:
-          taiEndpoint$(element)
-            .find(
-              "header > div.entry-before-title > span > span"
-            )
-            .text()
-            .replace("in ", "")
-            .trim(),
-
-        share_count:
-          taiEndpoint$(element)
-            .find(
-              "header > div.entry-after-title > p > span.entry-shares"
-            )
-            .text()
-            .trim(),
-
-        views_count:
-          taiEndpoint$(element)
-            .find(
-              "header > div.entry-after-title > p > span.entry-views"
-            )
-            .text()
-            .trim(),
-
-        type:
-          taiEndpoint$(element)
-            .find("source")
-            .attr("type") ||
-          "image/jpeg",
-
-        video_1:
-          taiEndpoint$(element)
-            .find("source")
-            .attr("src") ||
-          taiEndpoint$(element)
-            .find("img")
-            .attr("data-src") ||
-          "",
-
-        video_2:
-          taiEndpoint$(element)
-            .find("video > a")
-            .attr("href") ||
-          ""
-      });
-    });
+    ).first();
 
     // ==============================
     // VALIDASI HASIL
     // ==============================
-    if (taiEndpointData.length === 0) {
+    if (!taiEndpointElement.length) {
       return res.status(404).json({
         status: false,
         message: "Tidak ada data yang ditemukan pada halaman.",
         error: "Empty result"
       });
     }
+
+    // ==============================
+    // SCRAPE 1 ARTICLE
+    // ==============================
+    const taiEndpointData = {
+      title:
+        taiEndpointElement
+          .find("header > h2")
+          .text()
+          .trim(),
+
+      link:
+        taiEndpointElement
+          .find("header > h2 > a")
+          .attr("href") || "",
+
+      category:
+        taiEndpointElement
+          .find(
+            "header > div.entry-before-title > span > span"
+          )
+          .text()
+          .replace("in ", "")
+          .trim(),
+
+      share_count:
+        taiEndpointElement
+          .find(
+            "header > div.entry-after-title > p > span.entry-shares"
+          )
+          .text()
+          .trim(),
+
+      views_count:
+        taiEndpointElement
+          .find(
+            "header > div.entry-after-title > p > span.entry-views"
+          )
+          .text()
+          .trim(),
+
+      type:
+        taiEndpointElement
+          .find("source")
+          .attr("type") || "image/jpeg",
+
+      video_1:
+        taiEndpointElement
+          .find("source")
+          .attr("src") ||
+        taiEndpointElement
+          .find("img")
+          .attr("data-src") ||
+        "",
+
+      video_2:
+        taiEndpointElement
+          .find("video > a")
+          .attr("href") || ""
+    };
 
     // ==============================
     // SUCCESS
@@ -6392,6 +6536,8 @@ case "ai-image":
       return handleTempmail(req, res);
 case "ff-stalk": return handleFFStalk(req, res);
 case "twitter-video": return handleTwitterVideo(req, res);
+case "quotes-anime":
+  return handleQuotesAnimeEndpoint(req, res);
 case "wallpaper":
   return handleWallpaper(req, res);
 case "upscale-image":
