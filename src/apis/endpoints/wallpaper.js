@@ -1,134 +1,65 @@
 export default {
-  slug: "wallpaper",
-
-  name: "Wallpaper Search",
-
-  description:
-    "Mengambil 2 wallpaper secara acak berdasarkan kata kunci dari BestHDWallpaper.",
-
-  category: "Search",
-
+  slug: "wallpaperhd",
+  name: "Wallpaper HD",
+  description: "Mencari wallpaper 4K Ultra HD dari AlphaCoders berdasarkan karakter atau kata kunci.",
+  category: "Wallpaper",
   method: "GET",
-
-  endpoint: "/api/wallpaper",
-
-  icon: "Image",
-
+  endpoint: "/api/wallpaperhd",
+  icon: "Wallpaper",
   parameters: [
     {
-      name: "title",
+      name: "chara",
       type: "string",
       required: true,
-      description:
-        "Kata kunci wallpaper yang ingin dicari.",
+      description: "Nama karakter atau kata kunci wallpaper yang ingin dicari.",
       example: "naruto"
     }
   ],
-
   responseExample: {
     status: true,
-
-    source: "BestHDWallpaper",
-
+    source: "AlphaCoders",
     data: {
       query: "naruto",
-      page: 7,
-      total: 2,
-
-      results: [
-        {
-          title: "Naruto Wallpaper",
-          type: "Anime",
-          source:
-            "https://www.besthdwallpaper.com/anime/naruto-wallpaper",
-          image: [
-            "https://example.com/image-1.jpg",
-            "https://example.com/image-1.webp"
-          ]
-        },
-        {
-          title: "Naruto Uzumaki Wallpaper",
-          type: "Anime",
-          source:
-            "https://www.besthdwallpaper.com/anime/naruto-uzumaki-wallpaper",
-          image: [
-            "https://example.com/image-2.jpg",
-            "https://example.com/image-2.webp"
-          ]
-        }
+      filter: "4K Ultra HD",
+      total: 3,
+      result: [
+        "https://images2.alphacoders.com/example1.jpg",
+        "https://images2.alphacoders.com/example2.jpg",
+        "https://images2.alphacoders.com/example3.jpg"
       ]
     }
   },
-
   responseFields: [
     {
       name: "status",
       type: "boolean",
-      description:
-        "Menunjukkan apakah request berhasil."
+      description: "Status request."
     },
     {
       name: "source",
       type: "string",
-      description:
-        "Nama sumber wallpaper."
-    },
-    {
-      name: "data",
-      type: "object",
-      description:
-        "Data hasil pencarian."
+      description: "Sumber wallpaper."
     },
     {
       name: "data.query",
       type: "string",
-      description:
-        "Kata kunci pencarian."
+      description: "Kata kunci pencarian."
     },
     {
-      name: "data.page",
-      type: "number",
-      description:
-        "Nomor halaman yang dipilih secara acak."
+      name: "data.filter",
+      type: "string",
+      description: "Filter resolusi wallpaper."
     },
     {
       name: "data.total",
       type: "number",
-      description:
-        "Jumlah wallpaper yang dikembalikan. Maksimal 2."
+      description: "Jumlah wallpaper yang ditemukan."
     },
     {
-      name: "data.results",
+      name: "data.result",
       type: "array",
-      description:
-        "Dua wallpaper yang dipilih secara acak."
-    },
-    {
-      name: "data.results[].title",
-      type: "string",
-      description:
-        "Judul wallpaper."
-    },
-    {
-      name: "data.results[].type",
-      type: "string",
-      description:
-        "Kategori wallpaper."
-    },
-    {
-      name: "data.results[].source",
-      type: "string",
-      description:
-        "URL halaman wallpaper."
-    },
-    {
-      name: "data.results[].image",
-      type: "array",
-      description:
-        "URL gambar wallpaper."
+      description: "Daftar URL wallpaper HD."
     }
   ],
-
-  exampleRequest:
-    "https://samapi.example.com/api/wallpaper?title=naruto"
+  exampleRequest: "https://samapi.example.com/api/wallpaperhd?chara=naruto"
 };
