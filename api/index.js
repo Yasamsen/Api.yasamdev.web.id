@@ -150,6 +150,179 @@ async function handleUpscaleImage(req, res) {
     });
   }
 }
+//wallpaper
+async function handleWallpaper(req, res) {
+  try {
+    const { title, page = "1" } = req.query;
+
+    // Validasi title
+    if (!title) {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter title wajib diisi.",
+        error:
+          'example: "/api/wallpaper?title=naruto&page=1"'
+      });
+    }
+
+    // Validasi page
+    const currentPage = String(page);
+
+    if (!/^\d+$/.test(currentPage) || Number(currentPage) < 1) {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter page harus berupa angka mulai dari 1.",
+        error:
+          'example: "/api/wallpaper?title=naruto&page=1"'
+      });
+    }
+
+    // Request ke BestHDWallpaper
+    const response = await axios.get(
+      "https://www.besthdwallpaper.com/search",
+      {
+        params: {
+          CurrentPage: currentPage,
+          q: title
+        },
+
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+
+          "Accept-Language":
+            "en-US,en;q=0.9",
+
+          Referer:
+            "https://www.besthdwallpaper.com/"
+        },
+
+        timeout: 30000
+      }
+    );
+
+    // Parse HTML
+    const $ = cheerio.load(response.data);
+
+    const hasil = [];
+
+    // Ambil semua wallpaper
+    $("div.grid-item").each((index, element) => {
+      const item = $(element);
+
+      // Judul
+      const titleText = item
+        .find("div.info > a > h3")
+        .text()
+        .trim();
+
+      // Type
+      const typeText = item
+        .find("div.info > a:nth-child(2)")
+        .text()
+        .trim();
+
+      // URL halaman wallpaper
+      const sourcePath = item
+        .find("div > a:nth-child(3)")
+        .attr("href");
+
+      const source = sourcePath
+        ? new URL(
+            sourcePath,
+            "https://www.besthdwallpaper.com"
+          ).href
+        : null;
+
+      // Element gambar
+      const imageElement = item.find("picture > img");
+
+      // Ambil semua kemungkinan URL gambar
+      const images = [
+        imageElement.attr("data-src"),
+        imageElement.attr("src"),
+
+        item
+          .find("picture > source:nth-child(1)")
+          .attr("srcset"),
+
+        item
+          .find("picture > source:nth-child(2)")
+          .attr("srcset")
+      ].filter(Boolean);
+
+      // Hilangkan URL duplikat
+      const uniqueImages = [...new Set(images)];
+
+      // Masukkan hasil
+      if (titleText || uniqueImages.length > 0) {
+        hasil.push({
+          title: titleText,
+          type: typeText,
+          source,
+          image: uniqueImages
+        });
+      }
+    });
+
+    // Jika tidak ada hasil
+    if (hasil.length === 0) {
+      return res.status(404).json({
+        status: false,
+        message:
+          "Wallpaper tidak ditemukan untuk kata kunci tersebut.",
+        error: `Tidak ada hasil untuk pencarian: ${title}`
+      });
+    }
+
+    // Acak semua hasil
+    const shuffled = hasil
+      .map((item) => ({
+        item,
+        random: Math.random()
+      }))
+      .sort((a, b) => a.random - b.random)
+      .map(({ item }) => item);
+
+    // Ambil maksimal 10
+    const randomResults = shuffled.slice(0, 10);
+
+    // Response
+    return res.status(200).json({
+      status: true,
+      source: "BestHDWallpaper",
+
+      data: {
+        query: title,
+        page: Number(currentPage),
+        total: randomResults.length,
+        results: randomResults
+      }
+    });
+
+  } catch (error) {
+    console.error(
+      "handleWallpaper:",
+      error
+    );
+
+    const statusCode =
+      error.response?.status >= 400 &&
+      error.response?.status < 600
+        ? error.response.status
+        : 500;
+
+    return res.status(statusCode).json({
+      status: false,
+      message:
+        "Gagal mengambil data wallpaper.",
+      error: error.message
+    });
+  }
+}
 //twiter
 const twitterVideoBaseUrl = "https://twmate.com/id2/?";
 
@@ -6085,6 +6258,8 @@ case "ai-image":
       return handleTempmail(req, res);
 case "ff-stalk": return handleFFStalk(req, res);
 case "twitter-video": return handleTwitterVideo(req, res);
+case "wallpaper":
+  return handleWallpaper(req, res);
 case "upscale-image":
   return handleUpscaleImage(req, res);
     default:
