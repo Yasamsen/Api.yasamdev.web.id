@@ -1,6 +1,6 @@
 import { esc, icon, refreshIcons } from './utils.js';
 
-/* Deteksi URL media oke (download) di dalam respons JSON.
+/* Deteksi URL media (download) di dalam respons JSON.
    Thumbnail / cover / avatar / banner sengaja diabaikan: yang dipreview adalah URL download aslinya. */
 
 const EXT = {
@@ -70,38 +70,22 @@ function preview(item) {
   return `<div class="flex items-center gap-2 rounded-xl bg-fg/[0.04] px-4 py-3 text-xs text-muted">${icon('File', 'h-4 w-4')}<span>Preview tidak tersedia untuk tipe file ini. Gunakan tombol download.</span></div>`;
 }
 
+/* URL eksternal dilewatkan lewat proxy server (/api/download) agar tidak kena 403 hotlink.
+   Blob / data URL (respons biner) tetap diunduh langsung. */
+function downloadHref(item) {
+  if (!/^https?:\/\//i.test(item.url)) return item.url;
+  const ext = (item.url.split('?')[0].match(/\.([a-z0-9]{2,4})$/i) || [])[1] || { video: 'mp4', audio: 'mp3', image: 'jpg' }[item.type] || 'bin';
+  const name = item.filename || `download-${Date.now()}.${ext}`;
+  return `/api/download?url=${encodeURIComponent(item.url)}&filename=${encodeURIComponent(name)}`;
+}
+
 function mediaCard(item) {
-  const filename =
-    item.filename ||
-    `media.${
-      item.type === 'video'
-        ? 'mp4'
-        : item.type === 'audio'
-        ? 'mp3'
-        : item.type === 'image'
-        ? 'jpg'
-        : 'bin'
-    }`;
-
-  const downloadUrl =
-    `/api/media-download?url=${encodeURIComponent(item.url)}&filename=${encodeURIComponent(filename)}`;
-
+  const download = item.filename ? `download="${esc(item.filename)}"` : 'download';
   return `<div class="card !rounded-2xl p-4" data-media-card>
-    <div class="mb-3 flex items-center gap-2 text-[11px] font-bold text-muted">
-      ${icon(TYPE_ICON[item.type], 'h-3.5 w-3.5')}
-      <span class="uppercase tracking-wider">${TYPE_LABEL[item.type]}</span>
-    </div>
-
+    <div class="mb-3 flex items-center gap-2 text-[11px] font-bold text-muted">${icon(TYPE_ICON[item.type], 'h-3.5 w-3.5')}<span class="uppercase tracking-wider">${TYPE_LABEL[item.type]}</span><span class="truncate font-mono font-normal text-dim">${esc(item.path)}</span></div>
     ${preview(item)}
-
     <div class="mt-3">
-      <a
-        href="${esc(downloadUrl)}"
-        class="btn btn-gold btn-sm w-full"
-      >
-        ${icon('Download', 'h-3.5 w-3.5')}
-        <span>Download</span>
-      </a>
+      <a href="${esc(downloadHref(item))}" ${download} class="btn btn-gold btn-sm w-full">${icon('Download', 'h-3.5 w-3.5')}<span>Download</span></a>
     </div>
   </div>`;
 }
