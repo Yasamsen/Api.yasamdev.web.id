@@ -281,8 +281,6 @@ async function handleSsweb(req, res) {
 }
 
 //zerochan
-import axios from "axios";
-
 /* =========================
    ZEROCHAN
 ========================= */
