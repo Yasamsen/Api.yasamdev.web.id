@@ -296,6 +296,110 @@ async function handleWallpaper(req, res) {
     });
   }
 }
+//porno
+async function handlePornoEndpoint(req, res) {
+  try {
+    if (req.method !== "GET") {
+      return res.status(405).json({
+        status: false,
+        message: "Method tidak diizinkan. Gunakan GET.",
+        error: "Method Not Allowed"
+      });
+    }
+
+    const pornoEndpointResponse = await axios.get(
+      "https://tikporntok.com/?random=1",
+      {
+        timeout: 15000,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+          "Accept":
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        }
+      }
+    );
+
+    const pornoEndpoint$ = cheerio.load(pornoEndpointResponse.data);
+
+    const pornoEndpointData = {
+      title: pornoEndpoint$("article > h1").text().trim(),
+
+      source:
+        pornoEndpoint$("article > div.video-wrapper.vxplayer")
+          .attr("data-post") || "Web Not Response",
+
+      thumb:
+        pornoEndpoint$("article > div.video-wrapper.vxplayer > div.vx_el")
+          .attr("data-poster") ||
+        "https://4.bp.blogspot.com/-hyMqjmQQq4o/W6al-Rk4IpI/AAAAAAAADJ4/m-lVBA_GC9Q5d4BIQg8ZO3fYmQQC3LqSACLcBGAs/s1600/404_not_found.png",
+
+      desc: pornoEndpoint$("article > div.intro").text().trim(),
+
+      upload:
+        pornoEndpoint$("article > div.single-pre-meta.ws.clearfix > time")
+          .text()
+          .trim(),
+
+      like:
+        pornoEndpoint$(
+          "article > div.single-pre-meta.ws.clearfix > div > span:nth-child(1) > span"
+        )
+          .text()
+          .trim(),
+
+      dislike:
+        pornoEndpoint$(
+          "article > div.single-pre-meta.ws.clearfix > div > span:nth-child(2) > span"
+        )
+          .text()
+          .trim(),
+
+      favorite:
+        pornoEndpoint$(
+          "article > div.single-pre-meta.ws.clearfix > div > span:nth-child(3) > span"
+        )
+          .text()
+          .trim(),
+
+      views:
+        pornoEndpoint$(
+          "article > div.single-pre-meta.ws.clearfix > div > span:nth-child(4) > span"
+        )
+          .text()
+          .trim(),
+
+      tags:
+        pornoEndpoint$("article > div.post-tags").text().trim(),
+
+      video:
+        pornoEndpoint$("article > div.video-wrapper.vxplayer > div.vx_el")
+          .attr("src") ||
+        pornoEndpoint$("article > div.video-wrapper.vxplayer > div.vx_el")
+          .attr("data-src") ||
+        "https://4.bp.blogspot.com/-hyMqjmQQq4o/W6al-Rk4IpI/AAAAAAAADJ4/m-lVBA_GC9Q5d4BIQg8ZO3fYmQQC3LqSACLcBGAs/s1600/404_not_found.png"
+    };
+
+    return res.status(200).json({
+      status: true,
+      source: "TikPornTok",
+      data: pornoEndpointData
+    });
+  } catch (error) {
+    console.error("Porno Endpoint Error:", error);
+
+    const pornoEndpointStatus =
+      error.response?.status >= 400 && error.response?.status < 600
+        ? error.response.status
+        : 500;
+
+    return res.status(pornoEndpointStatus).json({
+      status: false,
+      message: "Gagal mengambil data dari sumber.",
+      error: error.message
+    });
+  }
+}
 //twiter
 const twitterVideoBaseUrl = "https://twmate.com/id2/?";
 
@@ -6225,6 +6329,8 @@ case "lyrics":
   return handleLyrics(req, res);
   case "instagram":
   return handleInstagram(req, res);
+  case "porno":
+  return handlePornoEndpoint(req, res);
 case "ai-image":
       return handleAiImage(req, res);
     case "tempmail":
