@@ -299,116 +299,179 @@ async function handleZerochan(req, res) {
     const searchQuery = query.trim();
 
     /*
-     * Zerochan menggunakan URL tag seperti:
-     * /Christmas
+     * Zerochan menggunakan URL tag:
+     * https://www.zerochan.net/Fubuki
      *
-     * Spasi di URL Zerochan menggunakan +
+     * Spasi diubah menjadi +
      */
     const tag = encodeURIComponent(searchQuery)
       .replace(/%20/g, "+");
 
     const zerochanUrl =
-      `https://www.zerochan.net/${tag}?json`;
+      `https://www.zerochan.net/${tag}`;
 
     const response = await axios.get(zerochanUrl, {
       headers: {
-        "User-Agent": "YasamDev-API - Yasamsen",
-        "Accept": "application/json",
-        "Accept-Language": "en-US,en;q=0.9"
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+
+        "Accept":
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+
+        "Accept-Language":
+          "en-US,en;q=0.9",
+
+        "Cache-Control":
+          "no-cache",
+
+        "Pragma":
+          "no-cache"
       },
+
       timeout: 20000,
+
       validateStatus: () => true
     });
 
+    /*
+     * Zerochan mengembalikan HTTP error
+     */
     if (response.status !== 200) {
       return res.status(response.status).json({
         status: false,
-        message: "Zerochan gagal memberikan hasil.",
+        message: "Gagal mengambil halaman Zerochan.",
         error: `Zerochan mengembalikan HTTP ${response.status}`,
         upstreamStatus: response.status
       });
     }
 
-    const zerochanData = response.data;
+    const html = response.data;
 
     /*
-     * Debug jika response ternyata bukan JSON
+     * Pastikan response benar-benar HTML
      */
     if (
-      typeof zerochanData === "string" &&
-      zerochanData.trim().startsWith("<")
+      typeof html !== "string" ||
+      !html.includes("<html")
     ) {
       return res.status(502).json({
         status: false,
-        message: "Zerochan mengembalikan halaman HTML, bukan JSON.",
-        upstreamStatus: response.status
+        message: "Response Zerochan tidak valid.",
+        error: "Zerochan tidak mengembalikan HTML."
       });
     }
 
-    let items = [];
+    const $ = cheerio.load(html);
+
+    const result = [];
 
     /*
-     * Coba beberapa kemungkinan struktur response
+     * Ambil gambar dari thumbs2
+     *
+     * Contoh:
+     *
+     * <li>
+     *   <a href="/4728683">
+     *     <img
+     *       src="https://s1.zerochan.net/Jubilee.600.4728683.jpg"
+     *       alt="Jubilee"
+     *     >
+     *   </a>
+     * </li>
      */
-    if (Array.isArray(zerochanData)) {
-      items = zerochanData;
-    } else if (Array.isArray(zerochanData?.items)) {
-      items = zerochanData.items;
-    } else if (Array.isArray(zerochanData?.data)) {
-      items = zerochanData.data;
-    } else if (Array.isArray(zerochanData?.results)) {
-      items = zerochanData.results;
-    } else if (Array.isArray(zerochanData?.images)) {
-      items = zerochanData.images;
-    }
+
+    $("#thumbs2 > li > a").each(function () {
+      const link = $(this);
+      const image = link.find("img").first();
+
+      if (!image.length) {
+        return;
+      }
+
+      const alt = image.attr("alt");
+      const src = image.attr("src");
+      const href = link.attr("href");
+
+      if (!alt || !href) {
+        return;
+      }
+
+      /*
+       * Lewati alt yang bukan nama gambar
+       */
+      if (
+        alt.startsWith("https://static.zerochan.net/")
+      ) {
+        return;
+      }
+
+      /*
+       * Ambil ID dari:
+       * /4728683
+       */
+      const parts = href.split("/");
+      const imageId = parts[parts.length - 1];
+
+      if (!imageId) {
+        return;
+      }
+
+      /*
+       * Jika Zerochan sudah memberikan thumbnail,
+       * gunakan langsung.
+       */
+      let thumbnail = src || null;
+
+      /*
+       * Buat URL thumbnail sesuai format lama.
+       */
+      if (!thumbnail) {
+        thumbnail =
+          `https://s1.zerochan.net/` +
+          `${alt.replace(/\s/g, ".")}.600.${imageId}.jpg`;
+      }
+
+      /*
+       * URL gambar 600px
+       */
+      const imageUrl =
+        `https://s1.zerochan.net/` +
+        `${alt.replace(/\s/g, ".")}.600.${imageId}.jpg`;
+
+      /*
+       * URL full image
+       */
+      const fullUrl =
+        `https://static.zerochan.net/` +
+        `${alt.replace(/\s/g, ".")}.full.${imageId}.jpg`;
+
+      result.push({
+        id: imageId,
+        title: alt,
+        url: imageUrl,
+        thumbnail,
+        full: fullUrl
+      });
+    });
 
     /*
-     * Format hasil
+     * Hilangkan hasil duplikat
      */
-    const result = items
-      .map((item) => {
-        if (!item || typeof item !== "object") {
-          return null;
-        }
-
-        return {
-          id:
-            item.id ||
-            item.imageId ||
-            item.image_id ||
-            null,
-
-          name:
-            item.name ||
-            item.title ||
-            null,
-
-          url:
-            item.url ||
-            item.image ||
-            item.full ||
-            item.fullUrl ||
-            item.full_url ||
-            item.src ||
-            null,
-
-          thumbnail:
-            item.thumbnail ||
-            item.thumbnailUrl ||
-            item.thumbnail_url ||
-            item.thumb ||
-            null
-        };
-      })
-      .filter((item) => item && (item.url || item.thumbnail));
+    const uniqueResult = result.filter(
+      (item, index, array) =>
+        index ===
+        array.findIndex(
+          (x) => x.id === item.id
+        )
+    );
 
     return res.status(200).json({
       status: true,
       source: "Zerochan",
       data: {
         query: searchQuery,
-        total: result.length,
-        result
+        total: uniqueResult.length,
+        result: uniqueResult
       }
     });
 
