@@ -1,32 +1,40 @@
 export default {
   slug: "zerochan",
-  name: "Zerochan Search",
-  description: "Mencari gambar anime dari Zerochan berdasarkan kata kunci.",
+  name: "Zerochan",
+  description: "Mencari gambar anime dan karakter dari Zerochan.",
   category: "Anime",
   method: "GET",
-  endpoint: "/api/zerochan",
+  endpoint: "/api/zerochan?query={query}",
   icon: "Image",
+
   parameters: [
     {
       name: "query",
       type: "string",
       required: true,
-      description: "Kata kunci yang ingin dicari di Zerochan.",
-      example: "rem"
+      description: "Nama karakter atau anime yang ingin dicari.",
+      example: "Fubuki"
     }
   ],
+
   responseExample: {
     status: true,
     source: "Zerochan",
     data: {
-      query: "rem",
+      query: "Fubuki",
       total: 2,
       result: [
-        "https://s1.zerochan.net/Rem.600.123456.jpg",
-        "https://s1.zerochan.net/Rem.600.654321.jpg"
+        {
+          id: "4728683",
+          title: "Fubuki",
+          url: "https://s1.zerochan.net/Fubuki.600.4728683.jpg",
+          thumbnail: "https://s1.zerochan.net/Fubuki.600.4728683.jpg",
+          full: "https://static.zerochan.net/Fubuki.full.4728683.jpg"
+        }
       ]
     }
   },
+
   responseFields: [
     {
       name: "status",
@@ -41,18 +49,45 @@ export default {
     {
       name: "data.query",
       type: "string",
-      description: "Kata kunci pencarian."
+      description: "Query pencarian."
     },
     {
       name: "data.total",
       type: "number",
-      description: "Jumlah gambar yang ditemukan."
+      description: "Jumlah gambar."
     },
     {
       name: "data.result",
       type: "array",
-      description: "Daftar URL gambar hasil pencarian."
+      description: "Daftar hasil gambar."
+    },
+    {
+      name: "data.result[].id",
+      type: "string",
+      description: "ID gambar Zerochan."
+    },
+    {
+      name: "data.result[].title",
+      type: "string",
+      description: "Nama gambar."
+    },
+    {
+      name: "data.result[].url",
+      type: "string",
+      description: "URL gambar ukuran 600px."
+    },
+    {
+      name: "data.result[].thumbnail",
+      type: "string",
+      description: "URL thumbnail."
+    },
+    {
+      name: "data.result[].full",
+      type: "string",
+      description: "URL gambar full."
     }
   ],
-  exampleRequest: "https://samapi.example.com/api/zerochan?query=rem"
+
+  exampleRequest:
+    "/api/zerochan?query=Fubuki"
 };
