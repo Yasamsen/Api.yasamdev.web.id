@@ -163,16 +163,14 @@ async function handleWallpaper(req, res) {
       });
     }
 
-    // Ambil beberapa halaman secara acak
-    // Angka ini bisa disesuaikan jika BestHDWallpaper
-    // memiliki jumlah halaman yang lebih banyak.
-    const randomPage = Math.floor(Math.random() * 10) + 1;
+    // Selalu menggunakan page 1
+    const currentPage = 1;
 
     const response = await axios.get(
       "https://www.besthdwallpaper.com/search",
       {
         params: {
-          CurrentPage: randomPage,
+          CurrentPage: currentPage,
           q: title
         },
 
@@ -195,7 +193,6 @@ async function handleWallpaper(req, res) {
     );
 
     const $ = cheerio.load(response.data);
-
     const hasil = [];
 
     $("div.grid-item").each((index, element) => {
@@ -227,11 +224,9 @@ async function handleWallpaper(req, res) {
       const images = [
         imageElement.attr("data-src"),
         imageElement.attr("src"),
-
         item
           .find("picture > source:nth-child(1)")
           .attr("srcset"),
-
         item
           .find("picture > source:nth-child(2)")
           .attr("srcset")
@@ -249,22 +244,29 @@ async function handleWallpaper(req, res) {
       }
     });
 
-    if (hasil.length < 2) {
+    // Hilangkan wallpaper yang sama berdasarkan source
+    const uniqueResults = Array.from(
+      new Map(
+        hasil.map((item) => [item.source, item])
+      ).values()
+    );
+
+    if (uniqueResults.length < 2) {
       return res.status(404).json({
         status: false,
         message:
           "Tidak ditemukan minimal 2 wallpaper.",
         error:
-          "Hasil dari halaman yang dipilih kurang dari 2."
+          `BestHDWallpaper hanya mengembalikan ${uniqueResults.length} wallpaper untuk "${title}" pada page 1.`
       });
     }
 
-    // Acak hasil
-    const shuffled = [...hasil].sort(
+    // Acak hasil page 1
+    const shuffled = [...uniqueResults].sort(
       () => Math.random() - 0.5
     );
 
-    // Ambil tepat 2 hasil berbeda
+    // Ambil tepat 2 wallpaper berbeda
     const randomResults = shuffled.slice(0, 2);
 
     return res.status(200).json({
@@ -273,17 +275,14 @@ async function handleWallpaper(req, res) {
 
       data: {
         query: title,
-        page: randomPage,
-        total: randomResults.length,
+        page: 1,
+        total: 2,
         results: randomResults
       }
     });
 
   } catch (error) {
-    console.error(
-      "handleWallpaper:",
-      error
-    );
+    console.error("handleWallpaper:", error);
 
     return res.status(
       error.response?.status >= 400 &&
@@ -292,8 +291,7 @@ async function handleWallpaper(req, res) {
         : 500
     ).json({
       status: false,
-      message:
-        "Gagal mengambil data wallpaper.",
+      message: "Gagal mengambil data wallpaper.",
       error: error.message
     });
   }
