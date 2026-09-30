@@ -58,6 +58,98 @@ async function ensureJsonBody(req) {
     req.body = {};
   }
 }
+//Upscale omg
+async function handleUpscaleImage(req, res) {
+  try {
+    const { url } = req.query;
+
+    if (!url) {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter URL gambar wajib diisi.",
+        error: 'example: "/api/upscale-image?url=https://example.com/image.jpg"'
+      });
+    }
+
+    // Validasi URL
+    let imageUrl;
+
+    try {
+      imageUrl = new URL(url).href;
+    } catch {
+      return res.status(400).json({
+        status: false,
+        message: "URL gambar tidak valid.",
+        error: 'example: "/api/upscale-image?url=https://example.com/image.jpg"'
+      });
+    }
+
+    // Download gambar
+    const imageResponse = await axios.get(imageUrl, {
+      responseType: "arraybuffer",
+      timeout: 30000,
+      maxContentLength: 20 * 1024 * 1024,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/91.0.4472.124 Safari/537.36"
+      }
+    });
+
+    const buffer = Buffer.from(imageResponse.data);
+
+    // Buat multipart form
+    const upscaleForm = new FormData();
+
+    upscaleForm.append("image", buffer, {
+      filename: "image.jpg",
+      contentType:
+        imageResponse.headers["content-type"] || "image/jpeg"
+    });
+
+    upscaleForm.append("user_id", "");
+    upscaleForm.append("is_public", "true");
+    upscaleForm.append("scale", "2");
+
+    // Request ke PicUpscaler
+    const upscaleResponse = await axios.post(
+      "https://picupscaler.com/api/generate/handle",
+      upscaleForm,
+      {
+        headers: {
+          ...upscaleForm.getHeaders(),
+          accept: "application/json",
+          referer:
+            "https://picupscaler.com/blog/free-image-upscaler-no-watermark",
+          origin: "https://picupscaler.com",
+          "user-agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/91.0.4472.124 Safari/537.36"
+        },
+        timeout: 120000,
+        maxContentLength: 50 * 1024 * 1024,
+        maxBodyLength: 50 * 1024 * 1024
+      }
+    );
+
+    return res.status(200).json({
+      status: true,
+      source: "PicUpscaler",
+      data: upscaleResponse.data
+    });
+  } catch (error) {
+    console.error("handleUpscaleImage:", error);
+
+    const statusCode =
+      error.response?.status >= 400 && error.response?.status < 600
+        ? error.response.status
+        : 500;
+
+    return res.status(statusCode).json({
+      status: false,
+      message: "Gagal melakukan upscale gambar.",
+      error: error.message
+    });
+  }
+}
 //twiter
 const twitterVideoBaseUrl = "https://twmate.com/id2/?";
 
@@ -5993,6 +6085,8 @@ case "ai-image":
       return handleTempmail(req, res);
 case "ff-stalk": return handleFFStalk(req, res);
 case "twitter-video": return handleTwitterVideo(req, res);
+case "upscale-image":
+  return handleUpscaleImage(req, res);
     default:
       return res.status(404).json({
         status: false,
