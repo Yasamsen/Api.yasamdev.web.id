@@ -151,149 +151,410 @@ async function handleUpscaleImage(req, res) {
     });
   }
 }
-//wallpaper
-async function handleWallpaper(req, res) {
+//ss web
+// ===============================
+// SCREENSHOT WEB
+// ===============================
+async function handleSsweb(req, res) {
   try {
-    const { title } = req.query;
+    const url = req.query.url;
+    const device = req.query.device || "desktop";
 
-    if (!title) {
+    if (!url) {
       return res.status(400).json({
         status: false,
-        message: "Parameter title wajib diisi.",
-        error: 'example: "/api/wallpaper?title=naruto"'
+        message: "Parameter url wajib diisi.",
+        error: 'example: "/api/ssweb?url=https://example.com&device=desktop"'
       });
     }
 
-    // Selalu menggunakan page 1
-    const currentPage = 1;
+    try {
+      new URL(url);
+    } catch {
+      return res.status(400).json({
+        status: false,
+        message: "URL yang diberikan tidak valid.",
+        error: "Gunakan URL lengkap seperti https://example.com"
+      });
+    }
 
-    const response = await axios.get(
-      "https://www.besthdwallpaper.com/search",
+    const allowedDevices = [
+      "desktop",
+      "tablet",
+      "mobile"
+    ];
+
+    if (!allowedDevices.includes(device)) {
+      return res.status(400).json({
+        status: false,
+        message: "Device tidak valid.",
+        error: "Device yang tersedia: desktop, tablet, mobile"
+      });
+    }
+
+    const sswebBaseUrl = "https://www.screenshotmachine.com";
+
+    const sswebParams = {
+      url,
+      device,
+      cacheLimit: 0
+    };
+
+    const sswebCaptureResponse = await axios({
+      url: `${sswebBaseUrl}/capture.php`,
+      method: "POST",
+      data: new URLSearchParams(
+        Object.entries(sswebParams)
+      ).toString(),
+      headers: {
+        "content-type":
+          "application/x-www-form-urlencoded; charset=UTF-8",
+        "user-agent":
+          "Mozilla/5.0"
+      },
+      timeout: 30000
+    });
+
+    if (sswebCaptureResponse.data?.status !== "success") {
+      throw new Error(
+        typeof sswebCaptureResponse.data === "string"
+          ? sswebCaptureResponse.data
+          : "Screenshot gagal dibuat."
+      );
+    }
+
+    const sswebLink = sswebCaptureResponse.data?.link;
+
+    if (!sswebLink) {
+      throw new Error(
+        "Server ScreenshotMachine tidak memberikan link gambar."
+      );
+    }
+
+    const sswebCookies =
+      sswebCaptureResponse.headers["set-cookie"] || [];
+
+    const sswebImageResponse = await axios.get(
+      `${sswebBaseUrl}/${sswebLink}`,
       {
-        params: {
-          CurrentPage: currentPage,
-          q: title
-        },
-
         headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-
-          Accept:
-            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-
-          "Accept-Language":
-            "en-US,en;q=0.9",
-
-          Referer:
-            "https://www.besthdwallpaper.com/"
+          cookie: sswebCookies.join("; ")
         },
-
+        responseType: "arraybuffer",
         timeout: 30000
       }
     );
 
-    const $ = cheerio.load(response.data);
-    const hasil = [];
+    const sswebContentType =
+      sswebImageResponse.headers["content-type"] ||
+      "image/jpeg";
 
-    $("div.grid-item").each((index, element) => {
-      const item = $(element);
-
-      const titleText = item
-        .find("div.info > a > h3")
-        .text()
-        .trim();
-
-      const typeText = item
-        .find("div.info > a:nth-child(2)")
-        .text()
-        .trim();
-
-      const sourcePath = item
-        .find("div > a:nth-child(3)")
-        .attr("href");
-
-      const source = sourcePath
-        ? new URL(
-            sourcePath,
-            "https://www.besthdwallpaper.com"
-          ).href
-        : null;
-
-      const imageElement = item.find("picture > img");
-
-      const images = [
-        imageElement.attr("data-src"),
-        imageElement.attr("src"),
-        item
-          .find("picture > source:nth-child(1)")
-          .attr("srcset"),
-        item
-          .find("picture > source:nth-child(2)")
-          .attr("srcset")
-      ].filter(Boolean);
-
-      const uniqueImages = [...new Set(images)];
-
-      if (source && uniqueImages.length > 0) {
-        hasil.push({
-          title: titleText,
-          type: typeText,
-          source,
-          image: uniqueImages
-        });
-      }
-    });
-
-    // Hilangkan wallpaper yang sama berdasarkan source
-    const uniqueResults = Array.from(
-      new Map(
-        hasil.map((item) => [item.source, item])
-      ).values()
-    );
-
-    if (uniqueResults.length < 2) {
-      return res.status(404).json({
-        status: false,
-        message:
-          "Tidak ditemukan minimal 2 wallpaper.",
-        error:
-          `BestHDWallpaper hanya mengembalikan ${uniqueResults.length} wallpaper untuk "${title}" pada page 1.`
-      });
-    }
-
-    // Acak hasil page 1
-    const shuffled = [...uniqueResults].sort(
-      () => Math.random() - 0.5
-    );
-
-    // Ambil tepat 2 wallpaper berbeda
-    const randomResults = shuffled.slice(0, 2);
+    const sswebBase64 = Buffer
+      .from(sswebImageResponse.data)
+      .toString("base64");
 
     return res.status(200).json({
       status: true,
-      source: "BestHDWallpaper",
-
+      source: "ScreenshotMachine",
       data: {
-        query: title,
-        page: 1,
-        total: 2,
-        results: randomResults
+        url,
+        device,
+        contentType: sswebContentType,
+        result: `data:${sswebContentType};base64,${sswebBase64}`
       }
     });
 
   } catch (error) {
-    console.error("handleWallpaper:", error);
-
-    return res.status(
-      error.response?.status >= 400 &&
-      error.response?.status < 600
+    const sswebStatus =
+      error.response?.status &&
+      error.response.status >= 400 &&
+      error.response.status < 600
         ? error.response.status
-        : 500
-    ).json({
+        : 500;
+
+    return res.status(sswebStatus).json({
       status: false,
-      message: "Gagal mengambil data wallpaper.",
+      message: "Gagal mengambil screenshot website.",
       error: error.message
+    });
+  }
+}
+
+//zerochan
+// ===============================
+// ZEROCHAN SEARCH
+// ===============================
+async function handleZerochan(req, res) {
+  try {
+    const query = req.query.query || req.query.q;
+
+    if (!query) {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter query wajib diisi.",
+        error: 'example: "/api/zerochan?query=rem"',
+      });
+    }
+
+    const zerochanResponse = await axios.get(
+      `https://www.zerochan.net/search?q=${encodeURIComponent(query)}`,
+      {
+        timeout: 15000,
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+        },
+      }
+    );
+
+    const zerochanHtml = zerochanResponse.data;
+    const $ = cheerio.load(zerochanHtml);
+
+    const zerochanJudul = [];
+    const zerochanResult = [];
+    const zerochanId = [];
+
+    $("#thumbs2 > li > a > img").each((index, element) => {
+      const alt = $(element).attr("alt");
+
+      if (
+        alt &&
+        !alt.startsWith("https://static.zerochan.net/")
+      ) {
+        zerochanJudul.push(alt);
+      }
+    });
+
+    $("#thumbs2 > li > a").each((index, element) => {
+      const href = $(element).attr("href");
+
+      if (href) {
+        zerochanId.push(href);
+      }
+    });
+
+    const zerochanTotal = Math.min(
+      zerochanJudul.length,
+      zerochanId.length
+    );
+
+    for (let i = 0; i < zerochanTotal; i++) {
+      const title = zerochanJudul[i];
+      const href = zerochanId[i];
+
+      const idPart = href.split("/")[1];
+
+      if (!idPart) continue;
+
+      const imageUrl =
+        "https://s1.zerochan.net/" +
+        title.replace(/\s/g, ".") +
+        ".600." +
+        idPart +
+        ".jpg";
+
+      zerochanResult.push(imageUrl);
+    }
+
+    return res.status(200).json({
+      status: true,
+      source: "Zerochan",
+      data: {
+        query,
+        total: zerochanResult.length,
+        result: zerochanResult,
+      },
+    });
+  } catch (error) {
+    const statusCode =
+      error.response?.status &&
+      error.response.status >= 400 &&
+      error.response.status < 600
+        ? error.response.status
+        : 500;
+
+    return res.status(statusCode).json({
+      status: false,
+      message: "Gagal mengambil data dari Zerochan.",
+      error: error.message,
+    });
+  }
+}
+//wallpaper
+// ===============================
+// WALLPAPER HD
+// ===============================
+async function handleWallpaperhd(req, res) {
+  try {
+    const chara = req.query.chara || req.query.query;
+
+    if (!chara) {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter chara wajib diisi.",
+        error: 'example: "/api/wallpaperhd?chara=anime"',
+      });
+    }
+
+    const wallpaperhdResponse = await axios.get(
+      `https://wall.alphacoders.com/search.php?search=${encodeURIComponent(chara)}&filter=4K+Ultra+HD`,
+      {
+        timeout: 20000,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+      }
+    );
+
+    const wallpaperhd$ = cheerio.load(
+      wallpaperhdResponse.data
+    );
+
+    const wallpaperhdResult = [];
+
+    wallpaperhd$("div.boxgrid > a > picture").each(
+      (index, element) => {
+        const wallpaperhdImage =
+          wallpaperhd$(element)
+            .find("img")
+            .attr("src");
+
+        if (!wallpaperhdImage) return;
+
+        const wallpaperhdFullImage =
+          wallpaperhdImage.replace("thumbbig-", "");
+
+        if (!wallpaperhdResult.includes(wallpaperhdFullImage)) {
+          wallpaperhdResult.push(wallpaperhdFullImage);
+        }
+      }
+    );
+
+    return res.status(200).json({
+      status: true,
+      source: "AlphaCoders",
+      data: {
+        query: chara,
+        filter: "4K Ultra HD",
+        total: wallpaperhdResult.length,
+        result: wallpaperhdResult,
+      },
+    });
+  } catch (error) {
+    const wallpaperhdStatus =
+      error.response?.status &&
+      error.response.status >= 400 &&
+      error.response.status < 600
+        ? error.response.status
+        : 500;
+
+    return res.status(wallpaperhdStatus).json({
+      status: false,
+      message: "Gagal mengambil wallpaper HD.",
+      error: error.message,
+    });
+  }
+}
+//devi devianart
+// ===============================
+// DEVIANTART SEARCH
+// ===============================
+async function handleDevianart(req, res) {
+  try {
+    const query = req.query.query || req.query.q;
+
+    if (!query) {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter query wajib diisi.",
+        error: 'example: "/api/devianart?query=anime"',
+      });
+    }
+
+    const devianartSearchResponse = await axios.get(
+      `https://www.deviantart.com/search?q=${encodeURIComponent(query)}`,
+      {
+        timeout: 20000,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+      }
+    );
+
+    const devianartSearchHtml = devianartSearchResponse.data;
+    const devianartSearch$ = cheerio.load(devianartSearchHtml);
+
+    let devianartResultUrl = "";
+
+    devianartSearch$(
+      "#root > div.hs1JI > div > div._3WsM9 > div > div > div:nth-child(3) > div > div > div:nth-child(1) > div > div:nth-child(1) > div > section > a"
+    ).each((index, element) => {
+      const href = devianartSearch$(element).attr("href");
+
+      if (href) {
+        devianartResultUrl = href;
+      }
+    });
+
+    if (!devianartResultUrl) {
+      throw new Error(
+        "Hasil pencarian DeviantArt tidak ditemukan."
+      );
+    }
+
+    const devianartDetailResponse = await axios.get(
+      devianartResultUrl,
+      {
+        timeout: 20000,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+      }
+    );
+
+    const devianartDetailHtml = devianartDetailResponse.data;
+    const devianartDetail$ = cheerio.load(
+      devianartDetailHtml
+    );
+
+    const devianartImages = [];
+
+    devianartDetail$(
+      "#root > main > div > div._2QovI > div > div._2HK_1 > div._1lkTS > div > img"
+    ).each((index, element) => {
+      const imageUrl = devianartDetail$(element).attr("src");
+
+      if (imageUrl) {
+        devianartImages.push(imageUrl);
+      }
+    });
+
+    return res.status(200).json({
+      status: true,
+      source: "DeviantArt",
+      data: {
+        query,
+        total: devianartImages.length,
+        result: devianartImages,
+      },
+    });
+  } catch (error) {
+    const devianartStatus =
+      error.response?.status &&
+      error.response.status >= 400 &&
+      error.response.status < 600
+        ? error.response.status
+        : 500;
+
+    return res.status(devianartStatus).json({
+      status: false,
+      message: "Gagal mengambil data dari DeviantArt.",
+      error: error.message,
     });
   }
 }
@@ -1027,52 +1288,171 @@ async function handleMlstalkEndpoint(req, res) {
     });
   }
 }
-//ff stalk
-const ffStalkBaseUrl = "https://freefire.my.id/api/ff";
-
-async function handleFFStalk(req, res) {
+// ===============================
+// NPM STALK
+// ===============================
+async function handleNpmStalk(req, res) {
   try {
-    const { uid } = req.query;
+    const packageName = req.query.package || req.query.packageName;
 
-    if (!uid) {
+    if (!packageName) {
       return res.status(400).json({
         status: false,
-        message: "Parameter UID wajib diisi",
-        error: 'example: "/api/ff-stalk?uid=123456789"'
+        message: "Parameter package wajib diisi.",
+        error: 'example: "/api/npmstalk?package=axios"'
       });
     }
 
-    if (!/^\d+$/.test(String(uid))) {
-      return res.status(400).json({
-        status: false,
-        message: "UID harus berupa angka",
-        error: 'example: "/api/ff-stalk?uid=123456789"'
-      });
+    const npmStalkResponse = await axios.get(
+      `https://registry.npmjs.org/${encodeURIComponent(packageName)}`,
+      {
+        timeout: 15000,
+        headers: {
+          "User-Agent": "yasamDev-API"
+        }
+      }
+    );
+
+    const npmStalkData = npmStalkResponse.data;
+
+    if (!npmStalkData || !npmStalkData.versions) {
+      throw new Error("Data package NPM tidak ditemukan.");
     }
 
-    const response = await axios.get(ffStalkBaseUrl, {
-      params: {
-        uid: uid
-      },
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
-        Referer: `https://freefire.my.id/stalk/${uid}`,
-        Accept: "application/json, text/plain, */*"
-      },
-      timeout: 30000
-    });
+    const npmStalkVersions = npmStalkData.versions;
+    const npmStalkAllVersions = Object.keys(npmStalkVersions);
+
+    if (npmStalkAllVersions.length === 0) {
+      throw new Error("Package NPM tidak memiliki versi.");
+    }
+
+    const npmStalkVersionLatest =
+      npmStalkData["dist-tags"]?.latest ||
+      npmStalkAllVersions[npmStalkAllVersions.length - 1];
+
+    const npmStalkVersionPublish = npmStalkAllVersions[0];
+
+    const npmStalkPackageLatest =
+      npmStalkVersions[npmStalkVersionLatest];
+
+    const npmStalkPackagePublish =
+      npmStalkVersions[npmStalkVersionPublish];
+
+    const npmStalkLatestDependencies =
+      npmStalkPackageLatest?.dependencies || {};
+
+    const npmStalkPublishDependencies =
+      npmStalkPackagePublish?.dependencies || {};
 
     return res.status(200).json({
       status: true,
-      source: "Free Fire",
-      data: response.data
+      source: "NPM Registry",
+      data: {
+        name: packageName,
+        versionLatest: npmStalkVersionLatest,
+        versionPublish: npmStalkVersionPublish,
+        versionUpdate: npmStalkAllVersions.length,
+        latestDependencies: Object.keys(
+          npmStalkLatestDependencies
+        ).length,
+        publishDependencies: Object.keys(
+          npmStalkPublishDependencies
+        ).length,
+        publishTime: npmStalkData.time?.created || null,
+        latestPublishTime:
+          npmStalkData.time?.[npmStalkVersionLatest] || null
+      }
+    });
+  } catch (error) {
+    const npmStalkStatus =
+      error.response?.status &&
+      error.response.status >= 400 &&
+      error.response.status < 600
+        ? error.response.status
+        : 500;
+
+    return res.status(npmStalkStatus).json({
+      status: false,
+      message: "Gagal mengambil informasi package NPM.",
+      error: error.message
+    });
+  }
+}
+
+
+// ===============================
+// FREE FIRE STALK
+// ===============================
+async function handleFfStalk(req, res) {
+  try {
+    const userId = req.query.userId || req.query.id;
+
+    if (!userId) {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter userId wajib diisi.",
+        error: 'example: "/api/ffstalk?userId=123456789"'
+      });
+    }
+
+    const ffStalkPayload = {
+      "voucherPricePoint.id": 8050,
+      "voucherPricePoint.price": "",
+      "voucherPricePoint.variablePrice": "",
+      "email": "",
+      "n": "",
+      "userVariablePrice": "",
+      "order.data.profile": "",
+      "user.userId": userId,
+      "voucherTypeName": "FREEFIRE",
+      "affiliateTrackingId": "",
+      "impactClickId": "",
+      "checkoutId": "",
+      "tmwAccessToken": "",
+      "shopLang": "in_ID"
+    };
+
+    const ffStalkResponse = await axios({
+      method: "POST",
+      url: "https://order.codashop.com/id/initPayment.action",
+      timeout: 15000,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "User-Agent": "Mozilla/5.0"
+      },
+      data: ffStalkPayload
     });
 
+    const ffStalkData = ffStalkResponse.data;
+
+    const ffStalkNickname =
+      ffStalkData?.confirmationFields?.roles?.[0]?.role;
+
+    if (!ffStalkNickname) {
+      throw new Error(
+        "Nickname Free Fire tidak ditemukan. User ID mungkin tidak valid atau layanan sedang bermasalah."
+      );
+    }
+
+    return res.status(200).json({
+      status: true,
+      source: "Codashop",
+      data: {
+        id: userId,
+        nickname: ffStalkNickname
+      }
+    });
   } catch (error) {
-    return res.status(error.response?.status || 500).json({
+    const ffStalkStatus =
+      error.response?.status &&
+      error.response.status >= 400 &&
+      error.response.status < 600
+        ? error.response.status
+        : 500;
+
+    return res.status(ffStalkStatus).json({
       status: false,
-      message: "Gagal mengambil data Free Fire",
+      message: "Gagal mengambil informasi akun Free Fire.",
       error: error.message
     });
   }
@@ -6858,7 +7238,10 @@ case "ai-image":
       return handleAiImage(req, res);
     case "tempmail":
       return handleTempmail(req, res);
-case "ff-stalk": return handleFFStalk(req, res);
+case "npmstalk":
+  return handleNpmStalk(req, res);
+case "ffstalk":
+  return handleFfStalk(req, res);
 case "mlstalk":
   return handleMlstalkEndpoint(req, res);
   case "githubstalk":
@@ -6866,8 +7249,14 @@ case "mlstalk":
 case "twitter-video": return handleTwitterVideo(req, res);
 case "quotes-anime":
   return handleQuotesAnimeEndpoint(req, res);
-case "wallpaper":
-  return handleWallpaper(req, res);
+case "wallpaperhd":
+  return handleWallpaperhd(req, res);
+  case "devianart":
+  return handleDevianart(req, res);
+  case "ssweb":
+  return handleSsweb(req, res);
+  case "zerochan":
+  return handleZerochan(req, res);
 case "upscale-image":
   return handleUpscaleImage(req, res);
   case "ringtone":
