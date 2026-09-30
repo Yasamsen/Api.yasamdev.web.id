@@ -292,90 +292,143 @@ async function handleZerochan(req, res) {
       return res.status(400).json({
         status: false,
         message: "Parameter query wajib diisi.",
-        error: 'example: "/api/zerochan?query=rem"',
+        error: 'example: "/api/zerochan?query=Fubuki"',
       });
     }
 
-    const zerochanResponse = await axios.get(
-      `https://www.zerochan.net/search?q=${encodeURIComponent(query)}`,
-      {
-        timeout: 15000,
-        headers: {
-          "User-Agent": "Mozilla/5.0",
-        },
+    const zerochanQuery = query.trim();
+
+    const zerochanUrl =
+      `https://www.zerochan.net/search?q=${encodeURIComponent(zerochanQuery)}`;
+
+    const zerochanResponse = await axios.get(zerochanUrl, {
+      timeout: 20000,
+
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+
+        "Accept":
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+
+        "Accept-Language":
+          "en-US,en;q=0.9,id;q=0.8",
+
+        "Accept-Encoding":
+          "gzip, deflate, br",
+
+        "Referer":
+          "https://www.zerochan.net/",
+
+        "Upgrade-Insecure-Requests":
+          "1",
+
+        "Sec-Fetch-Dest":
+          "document",
+
+        "Sec-Fetch-Mode":
+          "navigate",
+
+        "Sec-Fetch-Site":
+          "same-origin",
+
+        "Sec-Fetch-User":
+          "?1",
+
+        "Cache-Control":
+          "no-cache",
+
+        "Pragma":
+          "no-cache"
       }
-    );
+    });
 
     const zerochanHtml = zerochanResponse.data;
     const $ = cheerio.load(zerochanHtml);
 
-    const zerochanJudul = [];
     const zerochanResult = [];
-    const zerochanId = [];
 
-    $("#thumbs2 > li > a > img").each((index, element) => {
-      const alt = $(element).attr("alt");
+    // Selector utama
+    $("#thumbs2 li a img").each((index, element) => {
+      const imageAlt = $(element).attr("alt");
+      const imageSrc = $(element).attr("src");
+
+      if (!imageAlt && !imageSrc) {
+        return;
+      }
+
+      let imageUrl = null;
+
+      // Jika src sudah merupakan URL gambar
+      if (
+        imageSrc &&
+        imageSrc.startsWith("http")
+      ) {
+        imageUrl = imageSrc;
+      }
+
+      // Jika alt berisi URL
+      if (
+        !imageUrl &&
+        imageAlt &&
+        imageAlt.startsWith("http")
+      ) {
+        imageUrl = imageAlt;
+      }
 
       if (
-        alt &&
-        !alt.startsWith("https://static.zerochan.net/")
+        imageUrl &&
+        !zerochanResult.includes(imageUrl)
       ) {
-        zerochanJudul.push(alt);
+        zerochanResult.push(imageUrl);
       }
     });
 
-    $("#thumbs2 > li > a").each((index, element) => {
-      const href = $(element).attr("href");
+    // Fallback jika struktur HTML berbeda
+    if (zerochanResult.length === 0) {
+      $("img").each((index, element) => {
+        const imageSrc = $(element).attr("src");
+        const imageAlt = $(element).attr("alt");
 
-      if (href) {
-        zerochanId.push(href);
-      }
-    });
+        const candidate =
+          imageSrc || imageAlt;
 
-    const zerochanTotal = Math.min(
-      zerochanJudul.length,
-      zerochanId.length
-    );
-
-    for (let i = 0; i < zerochanTotal; i++) {
-      const title = zerochanJudul[i];
-      const href = zerochanId[i];
-
-      const idPart = href.split("/")[1];
-
-      if (!idPart) continue;
-
-      const imageUrl =
-        "https://s1.zerochan.net/" +
-        title.replace(/\s/g, ".") +
-        ".600." +
-        idPart +
-        ".jpg";
-
-      zerochanResult.push(imageUrl);
+        if (
+          candidate &&
+          candidate.includes("zerochan.net") &&
+          candidate.startsWith("http") &&
+          !candidate.includes("logo") &&
+          !candidate.includes("icon")
+        ) {
+          if (!zerochanResult.includes(candidate)) {
+            zerochanResult.push(candidate);
+          }
+        }
+      });
     }
 
     return res.status(200).json({
       status: true,
       source: "Zerochan",
       data: {
-        query,
+        query: zerochanQuery,
         total: zerochanResult.length,
-        result: zerochanResult,
-      },
+        result: zerochanResult
+      }
     });
+
   } catch (error) {
-    const statusCode =
+    const zerochanStatus =
       error.response?.status &&
       error.response.status >= 400 &&
       error.response.status < 600
         ? error.response.status
         : 500;
 
-    return res.status(statusCode).json({
+    return res.status(zerochanStatus).json({
       status: false,
       message: "Gagal mengambil data dari Zerochan.",
-      error: error.message,
+      error: error.message
     });
   }
 }
