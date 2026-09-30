@@ -6,6 +6,7 @@ import fs from "fs";
 import QRCode from "qrcode";
 import { createHmac } from "node:crypto";
 
+import https from "https";
 import qs from "qs";
 import FormData from "form-data";
 import crypto from "node:crypto";
@@ -299,6 +300,9 @@ async function handleWallpaper(req, res) {
 //porno
 async function handlePornoEndpoint(req, res) {
   try {
+    // ==============================
+    // METHOD VALIDATION
+    // ==============================
     if (req.method !== "GET") {
       return res.status(405).json({
         status: false,
@@ -307,37 +311,76 @@ async function handlePornoEndpoint(req, res) {
       });
     }
 
+    // ==============================
+    // REQUEST KE SUMBER
+    // ==============================
     const pornoEndpointResponse = await axios.get(
       "https://tikporntok.com/?random=1",
       {
         timeout: 15000,
+
+        // Mengatasi error:
+        // unable to get local issuer certificate
+        httpsAgent: new https.Agent({
+          rejectUnauthorized: false
+        }),
+
         headers: {
           "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+
           "Accept":
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+
+          "Accept-Language":
+            "en-US,en;q=0.9",
+
+          "Cache-Control":
+            "no-cache",
+
+          "Pragma":
+            "no-cache"
         }
       }
     );
 
-    const pornoEndpoint$ = cheerio.load(pornoEndpointResponse.data);
+    // ==============================
+    // PARSE HTML
+    // ==============================
+    const pornoEndpoint$ = cheerio.load(
+      pornoEndpointResponse.data
+    );
 
+    // ==============================
+    // AMBIL DATA
+    // ==============================
     const pornoEndpointData = {
-      title: pornoEndpoint$("article > h1").text().trim(),
+      title:
+        pornoEndpoint$("article > h1")
+          .text()
+          .trim(),
 
       source:
-        pornoEndpoint$("article > div.video-wrapper.vxplayer")
-          .attr("data-post") || "Web Not Response",
+        pornoEndpoint$(
+          "article > div.video-wrapper.vxplayer"
+        ).attr("data-post") ||
+        "Web Not Response",
 
       thumb:
-        pornoEndpoint$("article > div.video-wrapper.vxplayer > div.vx_el")
-          .attr("data-poster") ||
+        pornoEndpoint$(
+          "article > div.video-wrapper.vxplayer > div.vx_el"
+        ).attr("data-poster") ||
         "https://4.bp.blogspot.com/-hyMqjmQQq4o/W6al-Rk4IpI/AAAAAAAADJ4/m-lVBA_GC9Q5d4BIQg8ZO3fYmQQC3LqSACLcBGAs/s1600/404_not_found.png",
 
-      desc: pornoEndpoint$("article > div.intro").text().trim(),
+      desc:
+        pornoEndpoint$("article > div.intro")
+          .text()
+          .trim(),
 
       upload:
-        pornoEndpoint$("article > div.single-pre-meta.ws.clearfix > time")
+        pornoEndpoint$(
+          "article > div.single-pre-meta.ws.clearfix > time"
+        )
           .text()
           .trim(),
 
@@ -370,26 +413,59 @@ async function handlePornoEndpoint(req, res) {
           .trim(),
 
       tags:
-        pornoEndpoint$("article > div.post-tags").text().trim(),
+        pornoEndpoint$("article > div.post-tags")
+          .text()
+          .trim(),
 
       video:
-        pornoEndpoint$("article > div.video-wrapper.vxplayer > div.vx_el")
-          .attr("src") ||
-        pornoEndpoint$("article > div.video-wrapper.vxplayer > div.vx_el")
-          .attr("data-src") ||
+        pornoEndpoint$(
+          "article > div.video-wrapper.vxplayer > div.vx_el"
+        ).attr("src") ||
+
+        pornoEndpoint$(
+          "article > div.video-wrapper.vxplayer > div.vx_el"
+        ).attr("data-src") ||
+
         "https://4.bp.blogspot.com/-hyMqjmQQq4o/W6al-Rk4IpI/AAAAAAAADJ4/m-lVBA_GC9Q5d4BIQg8ZO3fYmQQC3LqSACLcBGAs/s1600/404_not_found.png"
     };
 
+    // ==============================
+    // VALIDASI DATA
+    // ==============================
+    if (
+      !pornoEndpointData.title &&
+      !pornoEndpointData.video &&
+      !pornoEndpointData.thumb
+    ) {
+      return res.status(502).json({
+        status: false,
+        message: "Data dari sumber tidak ditemukan.",
+        error: "Empty response"
+      });
+    }
+
+    // ==============================
+    // SUCCESS RESPONSE
+    // ==============================
     return res.status(200).json({
       status: true,
       source: "TikPornTok",
       data: pornoEndpointData
     });
+
   } catch (error) {
-    console.error("Porno Endpoint Error:", error);
+    // ==============================
+    // ERROR HANDLER
+    // ==============================
+    console.error(
+      "Porno Endpoint Error:",
+      error
+    );
 
     const pornoEndpointStatus =
-      error.response?.status >= 400 && error.response?.status < 600
+      error.response?.status &&
+      error.response.status >= 400 &&
+      error.response.status < 600
         ? error.response.status
         : 500;
 
