@@ -441,6 +441,96 @@ async function handleQuotesAnimeEndpoint(req, res) {
     });
   }
 }
+//github stalk
+async function handleGithubStalkEndpoint(req, res) {
+  try {
+    if (req.method !== "GET") {
+      return res.status(405).json({
+        status: false,
+        message: "Method tidak diizinkan. Gunakan GET.",
+        error: "Method Not Allowed"
+      });
+    }
+
+    const githubStalkEndpointUser =
+      req.query?.user?.trim();
+
+    if (!githubStalkEndpointUser) {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter user wajib diisi.",
+        error: 'Example: "/api/githubstalk?user=Yasamsen"'
+      });
+    }
+
+    const githubStalkEndpointUrl =
+      `https://api.github.com/users/${encodeURIComponent(
+        githubStalkEndpointUser
+      )}`;
+
+    const githubStalkEndpointResponse =
+      await axios.get(
+        githubStalkEndpointUrl,
+        {
+          timeout: 15000,
+          headers: {
+            "User-Agent": "YasamDev-API",
+            "Accept": "application/vnd.github+json"
+          }
+        }
+      );
+
+    const githubStalkEndpointData =
+      githubStalkEndpointResponse.data;
+
+    const githubStalkEndpointResult = {
+      username: githubStalkEndpointData.login,
+      nickname: githubStalkEndpointData.name,
+      bio: githubStalkEndpointData.bio,
+      id: githubStalkEndpointData.id,
+      nodeId: githubStalkEndpointData.node_id,
+      profile_pic: githubStalkEndpointData.avatar_url,
+      url: githubStalkEndpointData.html_url,
+      type: githubStalkEndpointData.type,
+      admin: githubStalkEndpointData.site_admin,
+      company: githubStalkEndpointData.company,
+      blog: githubStalkEndpointData.blog,
+      location: githubStalkEndpointData.location,
+      email: githubStalkEndpointData.email,
+      public_repo: githubStalkEndpointData.public_repos,
+      public_gists: githubStalkEndpointData.public_gists,
+      followers: githubStalkEndpointData.followers,
+      following: githubStalkEndpointData.following,
+      ceated_at: githubStalkEndpointData.created_at,
+      updated_at: githubStalkEndpointData.updated_at
+    };
+
+    return res.status(200).json({
+      status: true,
+      source: "GitHub",
+      data: githubStalkEndpointResult
+    });
+
+  } catch (error) {
+    console.error(
+      "GitHub Stalk Endpoint Error:",
+      error
+    );
+
+    const githubStalkEndpointStatus =
+      error.response?.status &&
+      error.response.status >= 400 &&
+      error.response.status < 600
+        ? error.response.status
+        : 500;
+
+    return res.status(githubStalkEndpointStatus).json({
+      status: false,
+      message: "Gagal mengambil data pengguna GitHub.",
+      error: error.message
+    });
+  }
+}
 //porno
 async function handleTaiEndpoint(req, res) {
   try {
@@ -599,6 +689,137 @@ async function handleTaiEndpoint(req, res) {
     });
   }
 }
+//ringtone
+async function handleRingtoneEndpoint(req, res) {
+  try {
+    // ==============================
+    // METHOD VALIDATION
+    // ==============================
+    if (req.method !== "GET") {
+      return res.status(405).json({
+        status: false,
+        message: "Method tidak diizinkan. Gunakan GET.",
+        error: "Method Not Allowed"
+      });
+    }
+
+    // ==============================
+    // VALIDASI TITLE
+    // ==============================
+    const ringtoneEndpointTitle =
+      req.query?.title?.trim();
+
+    if (!ringtoneEndpointTitle) {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter title wajib diisi.",
+        error: 'Example: "/api/ringtone?title=naruto"'
+      });
+    }
+
+    // ==============================
+    // REQUEST
+    // ==============================
+    const ringtoneEndpointUrl =
+      `https://meloboom.com/en/search/${encodeURIComponent(
+        ringtoneEndpointTitle
+      )}`;
+
+    const ringtoneEndpointResponse = await axios.get(
+      ringtoneEndpointUrl,
+      {
+        timeout: 15000,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+
+          "Accept":
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+
+          "Accept-Language":
+            "en-US,en;q=0.9"
+        }
+      }
+    );
+
+    // ==============================
+    // PARSE HTML
+    // ==============================
+    const ringtoneEndpoint$ = cheerio.load(
+      ringtoneEndpointResponse.data
+    );
+
+    // ==============================
+    // AMBIL HASIL PERTAMA SAJA
+    // ==============================
+    const ringtoneEndpointElement =
+      ringtoneEndpoint$(
+        "#__next > main > section > div.jsx-2244708474.container > div > div > div > div:nth-child(4) > div > div > div > ul > li"
+      ).first();
+
+    // ==============================
+    // VALIDASI HASIL
+    // ==============================
+    if (!ringtoneEndpointElement.length) {
+      return res.status(404).json({
+        status: false,
+        message: "Ringtone tidak ditemukan.",
+        error: "Empty result"
+      });
+    }
+
+    // ==============================
+    // SCRAPE DATA
+    // ==============================
+    const ringtoneEndpointData = {
+      title:
+        ringtoneEndpointElement
+          .find("h4")
+          .text()
+          .trim(),
+
+      source:
+        `https://meloboom.com/${
+          ringtoneEndpointElement
+            .find("a")
+            .attr("href") || ""
+        }`,
+
+      audio:
+        ringtoneEndpointElement
+          .find("audio")
+          .attr("src") || ""
+    };
+
+    // ==============================
+    // SUCCESS RESPONSE
+    // ==============================
+    return res.status(200).json({
+      status: true,
+      source: "MeloBoom",
+      data: ringtoneEndpointData
+    });
+
+  } catch (error) {
+    console.error(
+      "Ringtone Endpoint Error:",
+      error
+    );
+
+    const ringtoneEndpointStatus =
+      error.response?.status &&
+      error.response.status >= 400 &&
+      error.response.status < 600
+        ? error.response.status
+        : 500;
+
+    return res.status(ringtoneEndpointStatus).json({
+      status: false,
+      message: "Gagal mengambil ringtone dari sumber.",
+      error: error.message
+    });
+  }
+}
 //twiter
 const twitterVideoBaseUrl = "https://twmate.com/id2/?";
 
@@ -699,6 +920,109 @@ async function handleTwitterVideo(req, res) {
     return res.status(error.response?.status || 500).json({
       status: false,
       message: "Gagal mengambil video Twitter/X",
+      error: error.message
+    });
+  }
+}
+//ml stalk
+async function handleMlstalkEndpoint(req, res) {
+  try {
+    if (req.method !== "GET") {
+      return res.status(405).json({
+        status: false,
+        message: "Method tidak diizinkan. Gunakan GET.",
+        error: "Method Not Allowed"
+      });
+    }
+
+    const mlstalkEndpointId =
+      req.query?.id?.trim();
+
+    const mlstalkEndpointZoneId =
+      req.query?.zoneId?.trim();
+
+    if (!mlstalkEndpointId) {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter id wajib diisi.",
+        error: 'Example: "/api/mlstalk?id=123456789&zoneId=1234"'
+      });
+    }
+
+    if (!mlstalkEndpointZoneId) {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter zoneId wajib diisi.",
+        error: 'Example: "/api/mlstalk?id=123456789&zoneId=1234"'
+      });
+    }
+
+    const mlstalkEndpointBody =
+      new URLSearchParams(
+        Object.entries({
+          productId: "1",
+          itemId: "2",
+          catalogId: "57",
+          paymentId: "352",
+          gameId: mlstalkEndpointId,
+          zoneId: mlstalkEndpointZoneId,
+          product_ref: "REG",
+          product_ref_denom: "AE"
+        })
+      );
+
+    const mlstalkEndpointResponse =
+      await axios.post(
+        "https://api.duniagames.co.id/api/transaction/v1/top-up/inquiry/store",
+        mlstalkEndpointBody,
+        {
+          timeout: 15000,
+          headers: {
+            "Content-Type":
+              "application/x-www-form-urlencoded",
+            "Referer":
+              "https://www.duniagames.co.id/",
+            "Accept":
+              "application/json",
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36"
+          }
+        }
+      );
+
+    const mlstalkEndpointResult =
+      mlstalkEndpointResponse.data?.data?.gameDetail;
+
+    if (!mlstalkEndpointResult) {
+      return res.status(404).json({
+        status: false,
+        message: "Data Mobile Legends tidak ditemukan.",
+        error: "Empty gameDetail"
+      });
+    }
+
+    return res.status(200).json({
+      status: true,
+      source: "DuniaGames",
+      data: mlstalkEndpointResult
+    });
+
+  } catch (error) {
+    console.error(
+      "ML Stalk Endpoint Error:",
+      error
+    );
+
+    const mlstalkEndpointStatus =
+      error.response?.status &&
+      error.response.status >= 400 &&
+      error.response.status < 600
+        ? error.response.status
+        : 500;
+
+    return res.status(mlstalkEndpointStatus).json({
+      status: false,
+      message: "Gagal mengambil data Mobile Legends.",
       error: error.message
     });
   }
@@ -6535,6 +6859,10 @@ case "ai-image":
     case "tempmail":
       return handleTempmail(req, res);
 case "ff-stalk": return handleFFStalk(req, res);
+case "mlstalk":
+  return handleMlstalkEndpoint(req, res);
+  case "githubstalk":
+  return handleGithubStalkEndpoint(req, res);
 case "twitter-video": return handleTwitterVideo(req, res);
 case "quotes-anime":
   return handleQuotesAnimeEndpoint(req, res);
@@ -6542,6 +6870,8 @@ case "wallpaper":
   return handleWallpaper(req, res);
 case "upscale-image":
   return handleUpscaleImage(req, res);
+  case "ringtone":
+  return handleRingtoneEndpoint(req, res);
     default:
       return res.status(404).json({
         status: false,
