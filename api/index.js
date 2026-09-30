@@ -292,18 +292,20 @@ async function handleZerochan(req, res) {
       return res.status(400).json({
         status: false,
         message: "Parameter query wajib diisi.",
-        example: "/api/zerochan?query=Alya"
+        example: "/api/zerochan?query=Fubuki"
       });
     }
 
     const tag = encodeURIComponent(query).replace(/%20/g, "+");
 
-    const url = `https://www.zerochan.net/${tag}?json`;
+    const zerochanUrl = `https://www.zerochan.net/${tag}?json`;
 
-    const response = await axios.get(url, {
+    const response = await axios.get(zerochanUrl, {
       headers: {
         "User-Agent": "YasamDev API - Yasamsen",
-        "Accept": "application/json,text/html;q=0.9,*/*;q=0.8"
+        "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.zerochan.net/"
       },
       timeout: 20000,
       validateStatus: () => true
@@ -320,28 +322,30 @@ async function handleZerochan(req, res) {
 
     const html = String(response.data);
 
-    const itemsIndex = html.indexOf('"items"');
+    // Cari property "items"
+    const itemsPosition = html.indexOf('"items"');
 
-    if (itemsIndex === -1) {
+    if (itemsPosition === -1) {
       return res.status(502).json({
         status: false,
         message: "Data gambar tidak ditemukan dari Zerochan.",
-        error: "Property items tidak ditemukan pada response Zerochan."
+        error: "Property items tidak ditemukan."
       });
     }
 
-    const start = html.indexOf("[", itemsIndex);
+    // Cari awal array
+    const arrayStart = html.indexOf("[", itemsPosition);
 
-    if (start === -1) {
+    if (arrayStart === -1) {
       throw new Error("Array items tidak ditemukan.");
     }
 
     let depth = 0;
-    let end = -1;
-    let inString = false;
+    let arrayEnd = -1;
+    let insideString = false;
     let escaped = false;
 
-    for (let i = start; i < html.length; i++) {
+    for (let i = arrayStart; i < html.length; i++) {
       const char = html[i];
 
       if (escaped) {
@@ -349,43 +353,53 @@ async function handleZerochan(req, res) {
         continue;
       }
 
-      if (char === "\\" && inString) {
+      if (char === "\\" && insideString) {
         escaped = true;
         continue;
       }
 
       if (char === '"') {
-        inString = !inString;
+        insideString = !insideString;
         continue;
       }
 
-      if (inString) continue;
+      if (insideString) continue;
 
-      if (char === "[") depth++;
-      if (char === "]") depth--;
+      if (char === "[") {
+        depth++;
+      }
 
-      if (depth === 0) {
-        end = i;
-        break;
+      if (char === "]") {
+        depth--;
+
+        if (depth === 0) {
+          arrayEnd = i;
+          break;
+        }
       }
     }
 
-    if (end === -1) {
-      throw new Error("Akhir data items tidak ditemukan.");
+    if (arrayEnd === -1) {
+      throw new Error("Akhir array items tidak ditemukan.");
     }
 
-    const items = JSON.parse(
-      html.slice(start, end + 1)
+    const itemsText = html.slice(
+      arrayStart,
+      arrayEnd + 1
     );
+
+    const items = JSON.parse(itemsText);
 
     const result = items.map(item => ({
       id: item.id ?? null,
-      tag: item.tag ?? null,
       width: item.width ?? null,
       height: item.height ?? null,
       thumbnail: item.thumbnail ?? null,
       source: item.source || null,
-      tags: Array.isArray(item.tags) ? item.tags : []
+      tag: item.tag ?? null,
+      tags: Array.isArray(item.tags)
+        ? item.tags
+        : []
     }));
 
     return res.status(200).json({
