@@ -286,9 +286,9 @@ async function handleSsweb(req, res) {
 ========================= */
 async function handleZerochan(req, res) {
   try {
-    const query = req.query.query || req.query.q;
+    const query = String(req.query.query || "").trim();
 
-    if (!query || !query.trim()) {
+    if (!query) {
       return res.status(400).json({
         status: false,
         message: "Parameter query wajib diisi.",
@@ -296,41 +296,26 @@ async function handleZerochan(req, res) {
       });
     }
 
-    const searchQuery = query.trim();
+    const searchUrl =
+      `https://www.zerochan.net/search?q=${encodeURIComponent(query)}`;
 
-    /*
-     * Zerochan tag URL
-     *
-     * Contoh:
-     * /Fubuki?json
-     * /Kantai+Collection?json
-     */
-    const tag = encodeURIComponent(searchQuery)
-      .replace(/%20/g, "+");
-
-    const zerochanUrl =
-      `https://www.zerochan.net/${tag}?json`;
-
-    const response = await axios.get(zerochanUrl, {
+    const response = await axios.get(searchUrl, {
       headers: {
-        "User-Agent": "YasamDev-API - Yasamsen",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36",
         "Accept":
-          "text/html,application/xhtml+xml,application/json",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9"
       },
       timeout: 20000,
       validateStatus: () => true
     });
 
-    /*
-     * Cek response Zerochan
-     */
     if (response.status !== 200) {
-      return res.status(response.status).json({
+      return res.status(502).json({
         status: false,
         message: "Gagal mengambil data dari Zerochan.",
-        error:
-          `Zerochan mengembalikan HTTP ${response.status}`,
+        error: `Zerochan mengembalikan HTTP ${response.status}`,
         upstreamStatus: response.status
       });
     }
@@ -339,163 +324,54 @@ async function handleZerochan(req, res) {
 
     if (
       typeof html !== "string" ||
-      !html.includes('"items"')
+      html.includes("Checking your browser") ||
+      html.includes("Make sure cookies are enabled")
     ) {
-      return res.status(502).json({
+      return res.status(503).json({
         status: false,
-        message: "Format response Zerochan tidak dikenali.",
-        error: "Data items tidak ditemukan."
+        message: "Zerochan sedang memblokir permintaan dari server.",
+        error: "Browser challenge dari Zerochan"
       });
     }
 
-    /*
-     * Cari:
-     *
-     * "items": [
-     *   {...},
-     *   {...}
-     * ]
-     *
-     * Karena response adalah HTML,
-     * kita ekstrak array JSON-nya.
-     */
+    const $ = cheerio.load(html);
+    const result = [];
+    const seen = new Set();
 
-    const itemsStart = html.indexOf('"items"');
+    $("#thumbs2 li a").each((index, element) => {
+      const img = $(element).find("img");
 
-    if (itemsStart === -1) {
-      return res.status(502).json({
-        status: false,
-        message: "Data gambar Zerochan tidak ditemukan.",
-        error: "Property items tidak ditemukan."
+      const href = $(element).attr("href");
+      const id = href
+        ? href.split("/").filter(Boolean).pop()
+        : null;
+
+      const thumbnail =
+        img.attr("src") ||
+        img.attr("data-src") ||
+        img.attr("data-original");
+
+      const alt = img.attr("alt") || "";
+
+      if (!thumbnail || seen.has(thumbnail)) return;
+
+      seen.add(thumbnail);
+
+      result.push({
+        id: id ? Number(id) || id : null,
+        title: alt,
+        thumbnail,
+        url: href
+          ? `https://www.zerochan.net${href}`
+          : null
       });
-    }
+    });
 
-    const arrayStart = html.indexOf("[", itemsStart);
-
-    if (arrayStart === -1) {
-      return res.status(502).json({
-        status: false,
-        message: "Data gambar Zerochan tidak valid.",
-        error: "Array items tidak ditemukan."
-      });
-    }
-
-    /*
-     * Cari penutup array dengan bracket counter.
-     */
-    let depth = 0;
-    let arrayEnd = -1;
-    let insideString = false;
-    let escaped = false;
-
-    for (let i = arrayStart; i < html.length; i++) {
-      const char = html[i];
-
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-
-      if (char === "\\") {
-        if (insideString) {
-          escaped = true;
-        }
-
-        continue;
-      }
-
-      if (char === '"') {
-        insideString = !insideString;
-        continue;
-      }
-
-      if (insideString) {
-        continue;
-      }
-
-      if (char === "[") {
-        depth++;
-      }
-
-      if (char === "]") {
-        depth--;
-
-        if (depth === 0) {
-          arrayEnd = i;
-          break;
-        }
-      }
-    }
-
-    if (arrayEnd === -1) {
-      return res.status(502).json({
-        status: false,
-        message: "Gagal membaca data gambar Zerochan.",
-        error: "Array items tidak lengkap."
-      });
-    }
-
-    const itemsJson = html.slice(
-      arrayStart,
-      arrayEnd + 1
-    );
-
-    let items;
-
-    try {
-      items = JSON.parse(itemsJson);
-    } catch (parseError) {
-      return res.status(502).json({
-        status: false,
-        message: "Gagal memproses data Zerochan.",
-        error: parseError.message
-      });
-    }
-
-    /*
-     * Pastikan items berupa array
-     */
-    if (!Array.isArray(items)) {
-      return res.status(502).json({
-        status: false,
-        message: "Data Zerochan tidak berbentuk array.",
-        error: "items bukan array."
-      });
-    }
-
-    /*
-     * Format hasil
-     */
-    const result = items
-      .map((item) => {
-        if (!item || !item.id) {
-          return null;
-        }
-
-        const imageId = item.id;
-
-        return {
-          id: imageId,
-          tag: item.tag || searchQuery,
-          width: item.width || null,
-          height: item.height || null,
-          thumbnail: item.thumbnail || null,
-          source: item.source || null,
-          tags: Array.isArray(item.tags)
-            ? item.tags
-            : []
-        };
-      })
-      .filter(Boolean);
-
-    /*
-     * Response API
-     */
     return res.status(200).json({
       status: true,
       source: "Zerochan",
       data: {
-        query: searchQuery,
+        query,
         total: result.length,
         result
       }
