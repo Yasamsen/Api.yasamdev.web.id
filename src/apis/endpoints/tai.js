@@ -1,28 +1,29 @@
 export default {
   slug: "tai",
   name: "Tai Random",
-  description: "Mengambil daftar konten secara acak dari halaman SFMCompile.",
+  description: "Mengambil satu data media secara acak dari halaman SFMCompile.",
   category: "Media",
   method: "GET",
   endpoint: "/api/tai",
   icon: "Shuffle",
+
   parameters: [],
+
   responseExample: {
     status: true,
     source: "SFMCompile",
-    data: [
-      {
-        title: "Example Title",
-        link: "https://sfmcompile.club/example",
-        category: "Example",
-        share_count: "10",
-        views_count: "100",
-        type: "video/mp4",
-        video_1: "https://example.com/video.mp4",
-        video_2: "https://example.com/video.mp4"
-      }
-    ]
+    data: {
+      title: "Example Title",
+      link: "https://sfmcompile.club/example",
+      category: "Example",
+      share_count: "10",
+      views_count: "100",
+      type: "video/mp4",
+      video_1: "https://example.com/video.mp4",
+      video_2: "https://example.com/video.mp4"
+    }
   },
+
   responseFields: [
     {
       name: "status",
@@ -36,49 +37,50 @@ export default {
     },
     {
       name: "data",
-      type: "array",
-      description: "Daftar konten yang ditemukan."
+      type: "object",
+      description: "Satu data media yang dipilih dari halaman random."
     },
     {
-      name: "data[].title",
+      name: "data.title",
       type: "string",
-      description: "Judul konten."
+      description: "Judul media."
     },
     {
-      name: "data[].link",
+      name: "data.link",
       type: "string",
-      description: "Link halaman konten."
+      description: "URL halaman media."
     },
     {
-      name: "data[].category",
+      name: "data.category",
       type: "string",
-      description: "Kategori konten."
+      description: "Kategori media."
     },
     {
-      name: "data[].share_count",
+      name: "data.share_count",
       type: "string",
       description: "Jumlah share."
     },
     {
-      name: "data[].views_count",
+      name: "data.views_count",
       type: "string",
       description: "Jumlah views."
     },
     {
-      name: "data[].type",
+      name: "data.type",
       type: "string",
-      description: "MIME type media."
+      description: "Tipe atau MIME type media."
     },
     {
-      name: "data[].video_1",
+      name: "data.video_1",
       type: "string",
-      description: "URL media utama atau URL gambar."
+      description: "URL media utama atau gambar."
     },
     {
-      name: "data[].video_2",
+      name: "data.video_2",
       type: "string",
       description: "URL alternatif media."
     }
   ],
+
   exampleRequest: "https://samapi.example.com/api/tai"
 };
