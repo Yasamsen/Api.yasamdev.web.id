@@ -298,7 +298,7 @@ async function handleWallpaper(req, res) {
   }
 }
 //porno
-async function handlePornoEndpoint(req, res) {
+async function handleTaiEndpoint(req, res) {
   try {
     // ==============================
     // METHOD VALIDATION
@@ -312,34 +312,29 @@ async function handlePornoEndpoint(req, res) {
     }
 
     // ==============================
-    // REQUEST KE SUMBER
+    // RANDOM PAGE
     // ==============================
-    const pornoEndpointResponse = await axios.get(
-      "https://tikporntok.com/?random=1",
+    const taiEndpointPage = Math.floor(
+      Math.random() * 1153
+    );
+
+    const taiEndpointUrl =
+      `https://sfmcompile.club/page/${taiEndpointPage}`;
+
+    // ==============================
+    // REQUEST
+    // ==============================
+    const taiEndpointResponse = await axios.get(
+      taiEndpointUrl,
       {
         timeout: 15000,
-
-        // Mengatasi error:
-        // unable to get local issuer certificate
-        httpsAgent: new https.Agent({
-          rejectUnauthorized: false
-        }),
-
         headers: {
           "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-
           "Accept":
-            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           "Accept-Language":
-            "en-US,en;q=0.9",
-
-          "Cache-Control":
-            "no-cache",
-
-          "Pragma":
-            "no-cache"
+            "en-US,en;q=0.9"
         }
       }
     );
@@ -347,129 +342,113 @@ async function handlePornoEndpoint(req, res) {
     // ==============================
     // PARSE HTML
     // ==============================
-    const pornoEndpoint$ = cheerio.load(
-      pornoEndpointResponse.data
+    const taiEndpoint$ = cheerio.load(
+      taiEndpointResponse.data
     );
 
-    // ==============================
-    // AMBIL DATA
-    // ==============================
-    const pornoEndpointData = {
-      title:
-        pornoEndpoint$("article > h1")
-          .text()
-          .trim(),
-
-      source:
-        pornoEndpoint$(
-          "article > div.video-wrapper.vxplayer"
-        ).attr("data-post") ||
-        "Web Not Response",
-
-      thumb:
-        pornoEndpoint$(
-          "article > div.video-wrapper.vxplayer > div.vx_el"
-        ).attr("data-poster") ||
-        "https://4.bp.blogspot.com/-hyMqjmQQq4o/W6al-Rk4IpI/AAAAAAAADJ4/m-lVBA_GC9Q5d4BIQg8ZO3fYmQQC3LqSACLcBGAs/s1600/404_not_found.png",
-
-      desc:
-        pornoEndpoint$("article > div.intro")
-          .text()
-          .trim(),
-
-      upload:
-        pornoEndpoint$(
-          "article > div.single-pre-meta.ws.clearfix > time"
-        )
-          .text()
-          .trim(),
-
-      like:
-        pornoEndpoint$(
-          "article > div.single-pre-meta.ws.clearfix > div > span:nth-child(1) > span"
-        )
-          .text()
-          .trim(),
-
-      dislike:
-        pornoEndpoint$(
-          "article > div.single-pre-meta.ws.clearfix > div > span:nth-child(2) > span"
-        )
-          .text()
-          .trim(),
-
-      favorite:
-        pornoEndpoint$(
-          "article > div.single-pre-meta.ws.clearfix > div > span:nth-child(3) > span"
-        )
-          .text()
-          .trim(),
-
-      views:
-        pornoEndpoint$(
-          "article > div.single-pre-meta.ws.clearfix > div > span:nth-child(4) > span"
-        )
-          .text()
-          .trim(),
-
-      tags:
-        pornoEndpoint$("article > div.post-tags")
-          .text()
-          .trim(),
-
-      video:
-        pornoEndpoint$(
-          "article > div.video-wrapper.vxplayer > div.vx_el"
-        ).attr("src") ||
-
-        pornoEndpoint$(
-          "article > div.video-wrapper.vxplayer > div.vx_el"
-        ).attr("data-src") ||
-
-        "https://4.bp.blogspot.com/-hyMqjmQQq4o/W6al-Rk4IpI/AAAAAAAADJ4/m-lVBA_GC9Q5d4BIQg8ZO3fYmQQC3LqSACLcBGAs/s1600/404_not_found.png"
-    };
+    const taiEndpointData = [];
 
     // ==============================
-    // VALIDASI DATA
+    // SCRAPE ARTICLE
     // ==============================
-    if (
-      !pornoEndpointData.title &&
-      !pornoEndpointData.video &&
-      !pornoEndpointData.thumb
-    ) {
-      return res.status(502).json({
+    taiEndpoint$(
+      "#primary > div > div > ul > li > article"
+    ).each(function (index, element) {
+
+      taiEndpointData.push({
+        title:
+          taiEndpoint$(element)
+            .find("header > h2")
+            .text()
+            .trim(),
+
+        link:
+          taiEndpoint$(element)
+            .find("header > h2 > a")
+            .attr("href") || "",
+
+        category:
+          taiEndpoint$(element)
+            .find(
+              "header > div.entry-before-title > span > span"
+            )
+            .text()
+            .replace("in ", "")
+            .trim(),
+
+        share_count:
+          taiEndpoint$(element)
+            .find(
+              "header > div.entry-after-title > p > span.entry-shares"
+            )
+            .text()
+            .trim(),
+
+        views_count:
+          taiEndpoint$(element)
+            .find(
+              "header > div.entry-after-title > p > span.entry-views"
+            )
+            .text()
+            .trim(),
+
+        type:
+          taiEndpoint$(element)
+            .find("source")
+            .attr("type") ||
+          "image/jpeg",
+
+        video_1:
+          taiEndpoint$(element)
+            .find("source")
+            .attr("src") ||
+          taiEndpoint$(element)
+            .find("img")
+            .attr("data-src") ||
+          "",
+
+        video_2:
+          taiEndpoint$(element)
+            .find("video > a")
+            .attr("href") ||
+          ""
+      });
+    });
+
+    // ==============================
+    // VALIDASI HASIL
+    // ==============================
+    if (taiEndpointData.length === 0) {
+      return res.status(404).json({
         status: false,
-        message: "Data dari sumber tidak ditemukan.",
-        error: "Empty response"
+        message: "Tidak ada data yang ditemukan pada halaman.",
+        error: "Empty result"
       });
     }
 
     // ==============================
-    // SUCCESS RESPONSE
+    // SUCCESS
     // ==============================
     return res.status(200).json({
       status: true,
-      source: "TikPornTok",
-      data: pornoEndpointData
+      source: "SFMCompile",
+      data: taiEndpointData
     });
 
   } catch (error) {
-    // ==============================
-    // ERROR HANDLER
-    // ==============================
     console.error(
-      "Porno Endpoint Error:",
+      "Tai Endpoint Error:",
       error
     );
 
-    const pornoEndpointStatus =
+    const taiEndpointStatus =
       error.response?.status &&
       error.response.status >= 400 &&
       error.response.status < 600
         ? error.response.status
         : 500;
 
-    return res.status(pornoEndpointStatus).json({
+    return res.status(taiEndpointStatus).json({
       status: false,
       message: "Gagal mengambil data dari sumber.",
       error: error.message
@@ -6405,8 +6384,8 @@ case "lyrics":
   return handleLyrics(req, res);
   case "instagram":
   return handleInstagram(req, res);
-  case "porno":
-  return handlePornoEndpoint(req, res);
+  case "tai":
+  return handleTaiEndpoint(req, res);
 case "ai-image":
       return handleAiImage(req, res);
     case "tempmail":
