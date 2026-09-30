@@ -292,20 +292,18 @@ async function handleZerochan(req, res) {
       return res.status(400).json({
         status: false,
         message: "Parameter query wajib diisi.",
-        example: "/api/zerochan?query=Fubuki"
+        example: "/api/zerochan?query=Alya"
       });
     }
 
-    const searchUrl =
-      `https://www.zerochan.net/search?q=${encodeURIComponent(query)}`;
+    const tag = encodeURIComponent(query).replace(/%20/g, "+");
 
-    const response = await axios.get(searchUrl, {
+    const url = `https://www.zerochan.net/${tag}?json`;
+
+    const response = await axios.get(url, {
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36",
-        "Accept":
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9"
+        "User-Agent": "YasamDev API - Yasamsen",
+        "Accept": "application/json,text/html;q=0.9,*/*;q=0.8"
       },
       timeout: 20000,
       validateStatus: () => true
@@ -320,52 +318,75 @@ async function handleZerochan(req, res) {
       });
     }
 
-    const html = response.data;
+    const html = String(response.data);
 
-    if (
-      typeof html !== "string" ||
-      html.includes("Checking your browser") ||
-      html.includes("Make sure cookies are enabled")
-    ) {
-      return res.status(503).json({
+    const itemsIndex = html.indexOf('"items"');
+
+    if (itemsIndex === -1) {
+      return res.status(502).json({
         status: false,
-        message: "Zerochan sedang memblokir permintaan dari server.",
-        error: "Browser challenge dari Zerochan"
+        message: "Data gambar tidak ditemukan dari Zerochan.",
+        error: "Property items tidak ditemukan pada response Zerochan."
       });
     }
 
-    const $ = cheerio.load(html);
-    const result = [];
-    const seen = new Set();
+    const start = html.indexOf("[", itemsIndex);
 
-    $("#thumbs2 li a").each((index, element) => {
-      const img = $(element).find("img");
+    if (start === -1) {
+      throw new Error("Array items tidak ditemukan.");
+    }
 
-      const href = $(element).attr("href");
-      const id = href
-        ? href.split("/").filter(Boolean).pop()
-        : null;
+    let depth = 0;
+    let end = -1;
+    let inString = false;
+    let escaped = false;
 
-      const thumbnail =
-        img.attr("src") ||
-        img.attr("data-src") ||
-        img.attr("data-original");
+    for (let i = start; i < html.length; i++) {
+      const char = html[i];
 
-      const alt = img.attr("alt") || "";
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
 
-      if (!thumbnail || seen.has(thumbnail)) return;
+      if (char === "\\" && inString) {
+        escaped = true;
+        continue;
+      }
 
-      seen.add(thumbnail);
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
 
-      result.push({
-        id: id ? Number(id) || id : null,
-        title: alt,
-        thumbnail,
-        url: href
-          ? `https://www.zerochan.net${href}`
-          : null
-      });
-    });
+      if (inString) continue;
+
+      if (char === "[") depth++;
+      if (char === "]") depth--;
+
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+
+    if (end === -1) {
+      throw new Error("Akhir data items tidak ditemukan.");
+    }
+
+    const items = JSON.parse(
+      html.slice(start, end + 1)
+    );
+
+    const result = items.map(item => ({
+      id: item.id ?? null,
+      tag: item.tag ?? null,
+      width: item.width ?? null,
+      height: item.height ?? null,
+      thumbnail: item.thumbnail ?? null,
+      source: item.source || null,
+      tags: Array.isArray(item.tags) ? item.tags : []
+    }));
 
     return res.status(200).json({
       status: true,
