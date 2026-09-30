@@ -298,17 +298,21 @@ async function handleZerochan(req, res) {
 
     const tag = encodeURIComponent(query).replace(/%20/g, "+");
 
+    // Pakai URL halaman Zerochan
     const zerochanUrl = `https://www.zerochan.net/${tag}?json`;
 
     const response = await axios.get(zerochanUrl, {
-      headers: {
-        "User-Agent": "YasamDev API - Yasamsen",
-        "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.zerochan.net/"
-      },
       timeout: 20000,
-      validateStatus: () => true
+      validateStatus: () => true,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36",
+        "Accept":
+          "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.zerochan.net/",
+        "Cache-Control": "no-cache"
+      }
     });
 
     if (response.status !== 200) {
@@ -316,25 +320,24 @@ async function handleZerochan(req, res) {
         status: false,
         message: "Gagal mengambil data dari Zerochan.",
         error: `Zerochan mengembalikan HTTP ${response.status}`,
-        upstreamStatus: response.status
+        upstreamStatus: response.status,
+        url: zerochanUrl
       });
     }
 
     const html = String(response.data);
 
-    // Cari property "items"
-    const itemsPosition = html.indexOf('"items"');
+    const itemsIndex = html.indexOf('"items"');
 
-    if (itemsPosition === -1) {
+    if (itemsIndex === -1) {
       return res.status(502).json({
         status: false,
         message: "Data gambar tidak ditemukan dari Zerochan.",
-        error: "Property items tidak ditemukan."
+        error: "Property items tidak ditemukan pada response Zerochan."
       });
     }
 
-    // Cari awal array
-    const arrayStart = html.indexOf("[", itemsPosition);
+    const arrayStart = html.indexOf("[", itemsIndex);
 
     if (arrayStart === -1) {
       throw new Error("Array items tidak ditemukan.");
@@ -383,23 +386,26 @@ async function handleZerochan(req, res) {
       throw new Error("Akhir array items tidak ditemukan.");
     }
 
-    const itemsText = html.slice(
-      arrayStart,
-      arrayEnd + 1
-    );
+    const itemsText = html.slice(arrayStart, arrayEnd + 1);
 
-    const items = JSON.parse(itemsText);
+    let items;
 
-    const result = items.map(item => ({
+    try {
+      items = JSON.parse(itemsText);
+    } catch (parseError) {
+      throw new Error(
+        `Gagal membaca data items Zerochan: ${parseError.message}`
+      );
+    }
+
+    const result = items.map((item) => ({
       id: item.id ?? null,
       width: item.width ?? null,
       height: item.height ?? null,
       thumbnail: item.thumbnail ?? null,
       source: item.source || null,
       tag: item.tag ?? null,
-      tags: Array.isArray(item.tags)
-        ? item.tags
-        : []
+      tags: Array.isArray(item.tags) ? item.tags : []
     }));
 
     return res.status(200).json({
