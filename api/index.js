@@ -12,6 +12,8 @@ import crypto from "node:crypto";
 import CryptoJS from "crypto-js";
 import vm from "node:vm";
 import { createHash } from "node:crypto";
+import dns from "node:dns/promises";
+import net from "node:net";
 // Semua endpoint digabung ke 1 file supaya hanya dihitung 1 Serverless
 // Function oleh Vercel (Hobby plan cuma boleh maksimal 12 function).
 // Body parser dimatikan secara global karena nano-banana butuh raw stream
@@ -54,139 +56,6 @@ async function ensureJsonBody(req) {
     req.body = Object.fromEntries(new URLSearchParams(raw));
   } else {
     req.body = {};
-  }
-}
-//media
-async function handleMediaDownload(req, res) {
-  const host = req.headers?.host || "localhost";
-  const requestUrl = new URL(req.url, `http://${host}`);
-
-  const mediaUrl = requestUrl.searchParams.get("url");
-  const requestedFilename = requestUrl.searchParams.get("filename");
-
-  if (!mediaUrl) {
-    return res.status(400).json({
-      status: false,
-      message: "URL media wajib diisi."
-    });
-  }
-
-  let target;
-
-  try {
-    target = new URL(mediaUrl);
-  } catch {
-    return res.status(400).json({
-      status: false,
-      message: "URL media tidak valid."
-    });
-  }
-
-  if (!["http:", "https:"].includes(target.protocol)) {
-    return res.status(400).json({
-      status: false,
-      message: "Protocol URL tidak didukung."
-    });
-  }
-
-  const hostname = target.hostname.toLowerCase();
-
-  const blocked = [
-    "localhost",
-    "127.0.0.1",
-    "0.0.0.0",
-    "::1",
-    "metadata.google.internal",
-    "metadata.google.com"
-  ];
-
-  if (
-    blocked.includes(hostname) ||
-    hostname.endsWith(".localhost") ||
-    hostname.endsWith(".local")
-  ) {
-    return res.status(403).json({
-      status: false,
-      message: "Host media tidak diizinkan."
-    });
-  }
-
-  try {
-    const upstream = await fetch(target.toString(), {
-  redirect: "follow",
-  headers: {
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36",
-    "Accept":
-      "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-    "Referer": "https://www.bmkg.go.id/",
-    "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7"
-  }
-});
-
-    if (!upstream.ok) {
-      return res.status(502).json({
-        status: false,
-        message: "Gagal mengambil media.",
-        upstreamStatus: upstream.status
-      });
-    }
-
-    const contentType =
-      upstream.headers.get("content-type") ||
-      "application/octet-stream";
-
-    const filename = (
-      requestedFilename || "media.bin"
-    )
-      .replace(/[\/\"\r\n]/g, "_")
-      .slice(0, 180);
-
-    res.setHeader(
-      "Content-Type",
-      contentType
-    );
-
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${filename}"`
-    );
-
-    res.setHeader(
-      "Cache-Control",
-      "no-store"
-    );
-
-    const length =
-      upstream.headers.get("content-length");
-
-    if (length) {
-      res.setHeader(
-        "Content-Length",
-        length
-      );
-    }
-
-    const buffer = Buffer.from(
-      await upstream.arrayBuffer()
-    );
-
-    return res.status(200).send(buffer);
-
-  } catch (error) {
-
-    console.error(
-      "MEDIA DOWNLOAD ERROR:",
-      error
-    );
-
-    return res.status(502).json({
-      status: false,
-      message: "Gagal mengunduh media.",
-      error:
-        error?.message ||
-        "Network error"
-    });
   }
 }
 //twiter
@@ -5924,6 +5793,115 @@ async function handleTempmail(req, res) {
 }
 
 /* ============================================================
+ * DOWNLOAD PROXY
+ * Tombol Download di frontend mengarah ke sini supaya request ke
+ * CDN/upstream dikirim dari server dengan User-Agent + Referer yang
+ * benar (menghindari 403 hotlink protection) dan browser menerima
+ * header Content-Disposition: attachment.
+ * ============================================================ */
+function isPrivateIp(ip) {
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split(".").map(Number);
+    return (
+      a === 10 || a === 127 || a === 0 ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168)
+    );
+  }
+  if (net.isIPv6(ip)) {
+    const l = ip.toLowerCase();
+    return l === "::1" || l.startsWith("fc") || l.startsWith("fd") || l.startsWith("fe80");
+  }
+  return true;
+}
+
+async function handleDownload(req, res) {
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    return res.status(405).json({ status: false, message: "Method tidak diizinkan." });
+  }
+
+  const target = req.query?.url;
+  const filename = String(req.query?.filename || "").replace(/[^\w.\- ]+/g, "_").slice(0, 120);
+
+  if (!target) {
+    return res.status(400).json({
+      status: false,
+      message: "Parameter url wajib diisi.",
+      example: "/api/download?url=https://cdn.example.com/video.mp4&filename=video.mp4"
+    });
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(target);
+  } catch {
+    return res.status(400).json({ status: false, message: "URL tidak valid." });
+  }
+
+  if (!/^https?:$/.test(parsed.protocol)) {
+    return res.status(400).json({ status: false, message: "Hanya http/https yang diizinkan." });
+  }
+
+  try {
+    // Cegah SSRF ke jaringan internal
+    const addrs = net.isIP(parsed.hostname)
+      ? [{ address: parsed.hostname }]
+      : await dns.lookup(parsed.hostname, { all: true });
+    if (!addrs.length || addrs.some((a) => isPrivateIp(a.address))) {
+      return res.status(400).json({ status: false, message: "Host tidak diizinkan." });
+    }
+
+    const headers = {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      Accept: "*/*",
+      Referer: `${parsed.origin}/`
+    };
+    if (req.headers.range) headers.Range = req.headers.range;
+
+    const upstream = await axios.get(parsed.href, {
+      headers,
+      responseType: "stream",
+      timeout: 30000,
+      maxRedirects: 5,
+      validateStatus: () => true
+    });
+
+    if (upstream.status < 200 || upstream.status >= 400) {
+      upstream.data?.destroy?.();
+      return res.status(502).json({
+        status: false,
+        message: "Gagal mengambil media.",
+        upstreamStatus: upstream.status
+      });
+    }
+
+    const type = upstream.headers["content-type"] || "application/octet-stream";
+    const nameFromUrl = decodeURIComponent(parsed.pathname.split("/").pop() || "") || "download";
+    const name = filename || nameFromUrl.replace(/[^\w.\- ]+/g, "_");
+
+    res.status(upstream.status === 206 ? 206 : 200);
+    res.setHeader("Content-Type", type);
+    res.setHeader("Content-Disposition", `attachment; filename="${name}"`);
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    for (const h of ["content-length", "content-range", "accept-ranges"]) {
+      if (upstream.headers[h]) res.setHeader(h, upstream.headers[h]);
+    }
+
+    upstream.data.on("error", () => res.end());
+    upstream.data.pipe(res);
+  } catch (error) {
+    return res.status(502).json({
+      status: false,
+      message: "Gagal mengambil media.",
+      error: error.message
+    });
+  }
+}
+
+/* ============================================================
  * ROUTER UTAMA
  *
  * Route ditentukan dari path URL asli (req.url), BUKAN dari
@@ -5949,6 +5927,8 @@ export default async function handler(req, res) {
   const routeKey = getRouteKey(req);
 
   switch (routeKey) {
+    case "download":
+      return handleDownload(req, res);
     case "tiktok":
       return handleTiktok(req, res);
     case "instagram-stalker":
@@ -6007,8 +5987,6 @@ case "lyrics":
   return handleLyrics(req, res);
   case "instagram":
   return handleInstagram(req, res);
-  case "media-download":
-  return handleMediaDownload(req, res);
 case "ai-image":
       return handleAiImage(req, res);
     case "tempmail":
