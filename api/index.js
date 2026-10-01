@@ -431,6 +431,9 @@ async function handleZerochan(req, res) {
 
 const ALPHACODERS_RANDOM_BASE = "https://wall.alphacoders.com";
 
+// Batas respons Vercel sekitar 4.5MB, sisakan ruang untuk header
+const ALPHACODERS_RANDOM_MAX_BYTES = 4_200_000;
+
 // Header mirip browser asli untuk membuka halaman HTML
 const ALPHACODERS_RANDOM_HEADERS = {
   "User-Agent":
@@ -456,8 +459,10 @@ const ALPHACODERS_RANDOM_HEADERS = {
 // Header untuk mengunduh gambar
 const ALPHACODERS_RANDOM_IMAGE_HEADERS = {
   "User-Agent": ALPHACODERS_RANDOM_HEADERS["User-Agent"],
-  // Sengaja tanpa image/webp dan image/avif supaya server tidak mengirim versi konversi
+  // Sengaja tanpa webp/avif supaya server tidak mengirim versi konversi
   Accept: "image/jpeg,image/png,image/gif,image/*;q=0.8,*/*;q=0.5",
+  // Tanpa kompresi supaya byte yang diterima = byte gambar asli
+  "Accept-Encoding": "identity",
   "Accept-Language": "en-US,en;q=0.9",
   Connection: "keep-alive",
   "sec-ch-ua": ALPHACODERS_RANDOM_HEADERS["sec-ch-ua"],
@@ -565,7 +570,6 @@ async function alphacodersRandomOpenImage(url) {
     responseType: "stream",
     headers: ALPHACODERS_RANDOM_IMAGE_HEADERS,
     timeout: 25000,
-    decompress: false,
   });
 
   const contentType = response.headers["content-type"] || "";
@@ -589,12 +593,47 @@ async function alphacodersRandomTryUrls(urls, attempts, allowWebp = false) {
         continue;
       }
 
-      attempts.push({ url, ok: true, contentType });
+      attempts.push({
+        url,
+        ok: true,
+        contentType,
+        contentLength: Number(response.headers["content-length"]) || null,
+      });
       return { response, url };
     } catch (err) {
       attempts.push({ url, ok: false, status: err.response?.status || err.message });
     }
   }
+  return null;
+}
+
+// Kumpulkan stream jadi Buffer; return null kalau melebihi batas
+async function alphacodersRandomCollect(stream, maxBytes) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of stream) {
+    size += chunk.length;
+    if (size > maxBytes) {
+      stream.destroy();
+      return null;
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+// Deteksi tipe gambar dari byte awal file (bukan dari header server)
+function alphacodersRandomImageType(buf) {
+  if (!buf || buf.length < 12) return null;
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])))
+    return "image/png";
+  if (buf.subarray(0, 3).toString("ascii") === "GIF") return "image/gif";
+  if (
+    buf.subarray(0, 4).toString("ascii") === "RIFF" &&
+    buf.subarray(8, 12).toString("ascii") === "WEBP"
+  )
+    return "image/webp";
   return null;
 }
 
@@ -604,7 +643,7 @@ async function handleAlphacodersRandom(req, res) {
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader(
     "Access-Control-Expose-Headers",
-    "Content-Type, X-Wallpaper-Id, X-Wallpaper-Source"
+    "Content-Type, Content-Length, X-Wallpaper-Id, X-Wallpaper-Source"
   );
 
   if (req.method === "OPTIONS") {
@@ -667,13 +706,26 @@ async function handleAlphacodersRandom(req, res) {
       found = await alphacodersRandomTryUrls([guess.webp], attempts, true);
     }
 
-    // Mode debug: tampilkan URL yang dicoba, tanpa mengirim gambar
+    // Mode debug: laporkan kondisi file tanpa mengirim gambar
     if (debug) {
-      if (found) found.response.data.destroy();
+      let report = null;
+      if (found) {
+        const buf = await alphacodersRandomCollect(
+          found.response.data,
+          ALPHACODERS_RANDOM_MAX_BYTES
+        );
+        report = {
+          url: found.url,
+          contentLength: Number(found.response.headers["content-length"]) || null,
+          contentEncoding: found.response.headers["content-encoding"] || null,
+          bytesReceived: buf ? buf.length : `>${ALPHACODERS_RANDOM_MAX_BYTES} (akan di-redirect)`,
+          signature: buf ? alphacodersRandomImageType(buf) : null,
+        };
+      }
       return res.status(200).json({
         status: true,
         source: "WallpaperAbyss",
-        data: { query, page, picked, attempts },
+        data: { query, page, picked, attempts, report },
       });
     }
 
@@ -685,27 +737,63 @@ async function handleAlphacodersRandom(req, res) {
       });
     }
 
-    const { response: upstream } = found;
-    const contentType = upstream.headers["content-type"];
+    const { response: upstream, url: imageUrl } = found;
+    const contentLength = Number(upstream.headers["content-length"]) || 0;
+
+    // File jelas terlalu besar untuk Vercel: arahkan langsung ke file asli
+    if (contentLength > ALPHACODERS_RANDOM_MAX_BYTES) {
+      upstream.data.destroy();
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.redirect(302, imageUrl);
+    }
+
+    // Unduh penuh (maks 4.2MB)
+    const buffer = await alphacodersRandomCollect(
+      upstream.data,
+      ALPHACODERS_RANDOM_MAX_BYTES
+    );
+
+    // Ukuran tidak diketahui di awal dan ternyata besar: redirect ke file asli
+    if (!buffer) {
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.redirect(302, imageUrl);
+    }
+
+    // Validasi isi file: harus benar-benar gambar dan utuh
+    const detectedType = alphacodersRandomImageType(buffer);
+    if (!detectedType) {
+      return res.status(502).json({
+        status: false,
+        message: "File yang diterima dari Wallpaper Abyss bukan gambar yang valid",
+        error: `Ukuran ${buffer.length} byte, signature tidak dikenali`,
+      });
+    }
+    if (contentLength && buffer.length < contentLength) {
+      return res.status(502).json({
+        status: false,
+        message: "File gambar dari Wallpaper Abyss terpotong saat diunduh",
+        error: `Diterima ${buffer.length} dari ${contentLength} byte`,
+      });
+    }
+
     const extMap = {
       "image/jpeg": "jpg",
       "image/png": "png",
       "image/gif": "gif",
       "image/webp": "webp",
     };
-    const fileExt = extMap[contentType.split(";")[0]] || "jpg";
 
-    res.status(200);
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Content-Disposition", `inline; filename="wallpaper-${picked.id}.${fileExt}"`);
+    res.setHeader("Content-Type", detectedType);
+    res.setHeader("Content-Length", buffer.length);
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="wallpaper-${picked.id}.${extMap[detectedType]}"`
+    );
     res.setHeader("Cache-Control", "no-store, max-age=0");
     res.setHeader("X-Wallpaper-Id", picked.id);
     res.setHeader("X-Wallpaper-Source", `${ALPHACODERS_RANDOM_BASE}/big.php?i=${picked.id}`);
-
-    // Alirkan gambar langsung ke client (stream, tanpa batas 4.5MB Vercel)
-    await pipeline(upstream.data, res);
+    return res.status(200).send(buffer);
   } catch (error) {
-    // Kalau stream sudah mulai terkirim, tidak bisa kirim JSON lagi
     if (res.headersSent) {
       return res.destroy();
     }
