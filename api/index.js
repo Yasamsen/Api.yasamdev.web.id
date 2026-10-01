@@ -427,103 +427,73 @@ async function handleZerochan(req, res) {
   }
 }
 //wallpaper
-// ===============================
-// WALLPAPER HD
-// ===============================
-const ALPHACODERS_BASE_URL = "https://wall.alphacoders.com";
+const ALPHACODERS_RANDOM_BASE = "https://wall.alphacoders.com";
 
-const ALPHACODERS_HEADERS = {
+const ALPHACODERS_RANDOM_HEADERS = {
   "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+  Accept:
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
   "Accept-Language": "en-US,en;q=0.9",
-  Referer: ALPHACODERS_BASE_URL + "/",
+  "Accept-Encoding": "gzip, deflate",
+  "Cache-Control": "max-age=0",
+  Connection: "keep-alive",
+  "Upgrade-Insecure-Requests": "1",
+  "sec-ch-ua": '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+  "sec-ch-ua-mobile": "?0",
+  "sec-ch-ua-platform": '"Windows"',
+  "Sec-Fetch-Dest": "document",
+  "Sec-Fetch-Mode": "navigate",
+  "Sec-Fetch-Site": "none",
+  "Sec-Fetch-User": "?1",
+  Referer: ALPHACODERS_RANDOM_BASE + "/",
 };
 
-function alphacodersAbsUrl(url) {
-  if (!url) return null;
-  if (url.startsWith("//")) return "https:" + url;
-  if (url.startsWith("http")) return url;
-  return ALPHACODERS_BASE_URL + (url.startsWith("/") ? url : "/" + url);
-}
-
-// thumb-350-123456.jpg -> 123456.jpg (versi resolusi penuh)
-function alphacodersFullImage(thumbUrl) {
-  if (!thumbUrl) return null;
-  return thumbUrl.replace(/thumb(-\d+)?-/, "");
-}
-
-async function alphacodersSearch(query, page) {
-  const { data: html } = await axios.get(`${ALPHACODERS_BASE_URL}/search.php`, {
+async function alphacodersRandomGetImages(query, page) {
+  const { data: html } = await axios.get(`${ALPHACODERS_RANDOM_BASE}/search.php`, {
     params: { search: query, page },
-    headers: ALPHACODERS_HEADERS,
+    headers: ALPHACODERS_RANDOM_HEADERS,
     timeout: 20000,
   });
 
   const $ = cheerio.load(html);
-  const seen = new Set();
-  const results = [];
+  const images = [];
 
   $('a[href*="big.php?i="]').each((_, el) => {
-    const $a = $(el);
-    const href = $a.attr("href") || "";
-    const idMatch = href.match(/[?&]i=(\d+)/);
-    if (!idMatch) return;
+    const $img = $(el).find("img").first();
+    const src = $img.attr("data-src") || $img.attr("src") || "";
+    if (!src) return;
 
-    const id = idMatch[1];
-    if (seen.has(id)) return;
-
-    const $img = $a.find("img").first();
-    const thumb = alphacodersAbsUrl(
-      $img.attr("data-src") || $img.attr("src") || ""
-    );
-    if (!thumb) return;
-
-    seen.add(id);
-
-    const title =
-      ($img.attr("alt") || $a.attr("title") || "")
-        .replace(/\s+/g, " ")
-        .trim() || null;
-
-    results.push({
-      id,
-      title,
-      thumbnail: thumb,
-      image: alphacodersFullImage(thumb),
-      page_url: alphacodersAbsUrl(href),
-    });
+    const abs = src.startsWith("//") ? "https:" + src : src;
+    // thumb-350-123456.jpg -> 123456.jpg (resolusi penuh)
+    images.push(abs.replace(/thumb(-\d+)?-/, ""));
   });
 
-  const bodyText = $("body").text().replace(/\s+/g, " ");
-  const totalMatch = bodyText.match(/([\d,]+)\s+Wallpapers?\s+found/i);
-  const total = totalMatch ? parseInt(totalMatch[1].replace(/,/g, ""), 10) : null;
-
-  let totalPages = page;
-  $('a[href*="page="]').each((_, el) => {
-    const m = ($(el).attr("href") || "").match(/[?&]page=(\d+)/);
-    if (m) totalPages = Math.max(totalPages, parseInt(m[1], 10));
-  });
-
-  return { total, totalPages, results };
+  return images;
 }
 
-async function handleAlphacoders(req, res) {
+async function handleAlphacodersRandom(req, res) {
   try {
     const query = String(req.query.query || req.query.q || "").trim();
-    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
 
     if (!query) {
       return res.status(400).json({
         status: false,
         message: 'Parameter "query" wajib diisi',
-        example: "/api/alphacoders?query=naruto&page=1",
+        example: "/api/alphacoders-random?query=naruto",
       });
     }
 
-    const { total, totalPages, results } = await alphacodersSearch(query, page);
+    // 1 request: ambil halaman acak 1-10
+    const page = Math.floor(Math.random() * 10) + 1;
+    let images = await alphacodersRandomGetImages(query, page);
 
-    if (!results.length) {
+    // Cadangan (hanya jalan kalau halaman acak kosong): kembali ke halaman 1
+    if (!images.length && page > 1) {
+      images = await alphacodersRandomGetImages(query, 1);
+    }
+
+    if (!images.length) {
       return res.status(404).json({
         status: false,
         message: `Wallpaper dengan kata kunci "${query}" tidak ditemukan`,
@@ -531,25 +501,17 @@ async function handleAlphacoders(req, res) {
       });
     }
 
-    return res.status(200).json({
-      status: true,
-      source: "WallpaperAbyss",
-      data: {
-        query,
-        page,
-        total_pages: totalPages,
-        total_results: total,
-        count: results.length,
-        results,
-      },
-    });
+    const imageUrl = images[Math.floor(Math.random() * images.length)];
+
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.redirect(302, imageUrl);
   } catch (error) {
     const upstream = error.response?.status;
     return res.status(upstream ? 502 : 500).json({
       status: false,
       message: upstream
         ? `Gagal mengambil data dari Wallpaper Abyss (status ${upstream})`
-        : "Terjadi kesalahan saat mengambil data wallpaper",
+        : "Terjadi kesalahan saat mengambil wallpaper acak",
       error: error.message,
     });
   }
@@ -7347,11 +7309,11 @@ case "mlstalk":
 case "twitter-video": return handleTwitterVideo(req, res);
 case "quotes-anime":
   return handleQuotesAnimeEndpoint(req, res);
-case "alphacoders": return handleAlphacoders(req, res);
   case "devianart":
   return handleDevianart(req, res);
   case "ssweb":
   return handleSsweb(req, res);
+  case "alphacoders-random": return handleAlphacodersRandom(req, res);
   case "zerochan":
   return handleZerochan(req, res);
 case "upscale-image":
