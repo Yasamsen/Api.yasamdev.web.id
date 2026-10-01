@@ -59,6 +59,56 @@ async function ensureJsonBody(req) {
     req.body = {};
   }
 }
+//nsfw
+async function handleNsfwRandomEndpoint(req, res) {
+  try {
+    if (req.method !== "GET") {
+      return res.status(405).json({
+        status: false,
+        message: "Method tidak diizinkan. Gunakan GET.",
+        error: "Method Not Allowed"
+      });
+    }
+
+    const sourceUrl =
+      "https://raw.githubusercontent.com/Yasamsen/media-repo/main/Media/Nsfw.json";
+
+    const response = await fetch(sourceUrl);
+
+    if (!response.ok) {
+      throw new Error(
+        `Gagal mengambil Nsfw.json. HTTP ${response.status}`
+      );
+    }
+
+    const json = await response.json();
+
+    if (!json || !Array.isArray(json.data) || json.data.length === 0) {
+      throw new Error("Data Nsfw.json kosong atau format tidak valid.");
+    }
+
+    const randomIndex = Math.floor(Math.random() * json.data.length);
+    const randomUrl = json.data[randomIndex];
+
+    if (typeof randomUrl !== "string" || !randomUrl.trim()) {
+      throw new Error("URL random yang dipilih tidak valid.");
+    }
+
+    return res.status(200).json({
+      status: true,
+      source: "NSFW Random",
+      data: {
+        url: randomUrl
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: false,
+      message: "Gagal mengambil data NSFW secara random.",
+      error: error.message
+    });
+  }
+}
 //Upscale omg
 async function handleUpscaleImage(req, res) {
   try {
@@ -7773,6 +7823,7 @@ case "quotes-anime":
   case "alphacoders-random": return handleAlphacodersRandom(req, res);
   case "zerochan":
   return handleZerochan(req, res);
+  case "nsfw-random": return handleNsfwRandomEndpoint(req, res);
 case "upscale-image":
   return handleUpscaleImage(req, res);
   case "ringtone":
