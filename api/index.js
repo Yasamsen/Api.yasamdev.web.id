@@ -427,17 +427,21 @@ async function handleZerochan(req, res) {
   }
 }
 //wallpaper
+// ====================== ALPHACODERS RANDOM (WALLPAPER ABYSS) ======================
+
 const ALPHACODERS_RANDOM_BASE = "https://wall.alphacoders.com";
 
+// Header mirip browser asli untuk membuka halaman pencarian
 const ALPHACODERS_RANDOM_HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
   Accept:
-    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
   "Accept-Language": "en-US,en;q=0.9",
   "Accept-Encoding": "gzip, deflate",
   "Cache-Control": "max-age=0",
   Connection: "keep-alive",
+  DNT: "1",
   "Upgrade-Insecure-Requests": "1",
   "sec-ch-ua": '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
   "sec-ch-ua-mobile": "?0",
@@ -449,6 +453,26 @@ const ALPHACODERS_RANDOM_HEADERS = {
   Referer: ALPHACODERS_RANDOM_BASE + "/",
 };
 
+// Header untuk mengunduh gambar (seperti <img> di halaman)
+const ALPHACODERS_RANDOM_IMAGE_HEADERS = {
+  "User-Agent": ALPHACODERS_RANDOM_HEADERS["User-Agent"],
+  Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+  "Accept-Encoding": "gzip, deflate",
+  Connection: "keep-alive",
+  "sec-ch-ua": ALPHACODERS_RANDOM_HEADERS["sec-ch-ua"],
+  "sec-ch-ua-mobile": "?0",
+  "sec-ch-ua-platform": '"Windows"',
+  "Sec-Fetch-Dest": "image",
+  "Sec-Fetch-Mode": "no-cors",
+  "Sec-Fetch-Site": "same-site",
+  Referer: ALPHACODERS_RANDOM_BASE + "/",
+};
+
+// Batas respons Vercel Serverless sekitar 4.5MB, sisakan sedikit ruang
+const ALPHACODERS_RANDOM_MAX_BYTES = 4_200_000;
+
+// Request 1: ambil daftar gambar dari halaman pencarian
 async function alphacodersRandomGetImages(query, page) {
   const { data: html } = await axios.get(`${ALPHACODERS_RANDOM_BASE}/search.php`, {
     params: { search: query, page },
@@ -457,22 +481,65 @@ async function alphacodersRandomGetImages(query, page) {
   });
 
   const $ = cheerio.load(html);
-  const images = [];
+  const seen = new Set();
+  const items = [];
 
   $('a[href*="big.php?i="]').each((_, el) => {
-    const $img = $(el).find("img").first();
+    const $a = $(el);
+    const idMatch = ($a.attr("href") || "").match(/[?&]i=(\d+)/);
+    if (!idMatch || seen.has(idMatch[1])) return;
+
+    const $img = $a.find("img").first();
     const src = $img.attr("data-src") || $img.attr("src") || "";
     if (!src) return;
 
-    const abs = src.startsWith("//") ? "https:" + src : src;
-    // thumb-350-123456.jpg -> 123456.jpg (resolusi penuh)
-    images.push(abs.replace(/thumb(-\d+)?-/, ""));
+    const thumb = src.startsWith("//") ? "https:" + src : src;
+    seen.add(idMatch[1]);
+    items.push({
+      id: idMatch[1],
+      thumb,
+      // thumb-350-123456.jpg -> 123456.jpg (resolusi penuh)
+      image: thumb.replace(/thumb(-\d+)?-/, ""),
+    });
   });
 
-  return images;
+  return items;
+}
+
+// Request 2: unduh file gambar
+async function alphacodersRandomDownload(url) {
+  const response = await axios.get(url, {
+    responseType: "arraybuffer",
+    headers: ALPHACODERS_RANDOM_IMAGE_HEADERS,
+    timeout: 25000,
+    maxContentLength: ALPHACODERS_RANDOM_MAX_BYTES,
+  });
+
+  let contentType = response.headers["content-type"] || "";
+  if (!contentType.startsWith("image/")) {
+    const ext = (url.split("?")[0].split(".").pop() || "").toLowerCase();
+    contentType =
+      ext === "png" ? "image/png" :
+      ext === "gif" ? "image/gif" :
+      ext === "webp" ? "image/webp" : "image/jpeg";
+  }
+
+  return { buffer: Buffer.from(response.data), contentType };
 }
 
 async function handleAlphacodersRandom(req, res) {
+  // CORS supaya bisa dipanggil lewat fetch() dari browser
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader(
+    "Access-Control-Expose-Headers",
+    "Content-Type, Content-Length, X-Wallpaper-Id"
+  );
+
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+
   try {
     const query = String(req.query.query || req.query.q || "").trim();
 
@@ -484,16 +551,16 @@ async function handleAlphacodersRandom(req, res) {
       });
     }
 
-    // 1 request: ambil halaman acak 1-10
+    // Request 1: halaman pencarian (halaman acak 1-10)
     const page = Math.floor(Math.random() * 10) + 1;
-    let images = await alphacodersRandomGetImages(query, page);
+    let items = await alphacodersRandomGetImages(query, page);
 
-    // Cadangan (hanya jalan kalau halaman acak kosong): kembali ke halaman 1
-    if (!images.length && page > 1) {
-      images = await alphacodersRandomGetImages(query, 1);
+    // Cadangan: kalau halaman acak kosong, kembali ke halaman 1
+    if (!items.length && page > 1) {
+      items = await alphacodersRandomGetImages(query, 1);
     }
 
-    if (!images.length) {
+    if (!items.length) {
       return res.status(404).json({
         status: false,
         message: `Wallpaper dengan kata kunci "${query}" tidak ditemukan`,
@@ -501,10 +568,21 @@ async function handleAlphacodersRandom(req, res) {
       });
     }
 
-    const imageUrl = images[Math.floor(Math.random() * images.length)];
+    const picked = items[Math.floor(Math.random() * items.length)];
 
+    // Request 2: unduh gambar. Kalau gagal/terlalu besar, pakai thumbnail.
+    let media;
+    try {
+      media = await alphacodersRandomDownload(picked.image);
+    } catch (err) {
+      media = await alphacodersRandomDownload(picked.thumb);
+    }
+
+    res.setHeader("Content-Type", media.contentType);
+    res.setHeader("Content-Length", media.buffer.length);
     res.setHeader("Cache-Control", "no-store, max-age=0");
-    return res.redirect(302, imageUrl);
+    res.setHeader("X-Wallpaper-Id", picked.id);
+    return res.status(200).send(media.buffer);
   } catch (error) {
     const upstream = error.response?.status;
     return res.status(upstream ? 502 : 500).json({
