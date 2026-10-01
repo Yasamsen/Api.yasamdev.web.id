@@ -458,7 +458,6 @@ const ALPHACODERS_RANDOM_IMAGE_HEADERS = {
   "User-Agent": ALPHACODERS_RANDOM_HEADERS["User-Agent"],
   Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
   "Accept-Language": "en-US,en;q=0.9",
-  "Accept-Encoding": "gzip, deflate",
   Connection: "keep-alive",
   "sec-ch-ua": ALPHACODERS_RANDOM_HEADERS["sec-ch-ua"],
   "sec-ch-ua-mobile": "?0",
@@ -469,10 +468,7 @@ const ALPHACODERS_RANDOM_IMAGE_HEADERS = {
   Referer: ALPHACODERS_RANDOM_BASE + "/",
 };
 
-// Batas respons Vercel Serverless sekitar 4.5MB, sisakan sedikit ruang
-const ALPHACODERS_RANDOM_MAX_BYTES = 4_200_000;
-
-// Request 1: ambil daftar gambar dari halaman pencarian
+// Request 1: ambil daftar gambar (URL resolusi penuh) dari halaman pencarian
 async function alphacodersRandomGetImages(query, page) {
   const { data: html } = await axios.get(`${ALPHACODERS_RANDOM_BASE}/search.php`, {
     params: { search: query, page },
@@ -495,36 +491,15 @@ async function alphacodersRandomGetImages(query, page) {
 
     const thumb = src.startsWith("//") ? "https:" + src : src;
     seen.add(idMatch[1]);
+
     items.push({
       id: idMatch[1],
-      thumb,
-      // thumb-350-123456.jpg -> 123456.jpg (resolusi penuh)
+      // thumb-350-123456.jpg -> 123456.jpg (resolusi asli, tanpa dikecilkan)
       image: thumb.replace(/thumb(-\d+)?-/, ""),
     });
   });
 
   return items;
-}
-
-// Request 2: unduh file gambar
-async function alphacodersRandomDownload(url) {
-  const response = await axios.get(url, {
-    responseType: "arraybuffer",
-    headers: ALPHACODERS_RANDOM_IMAGE_HEADERS,
-    timeout: 25000,
-    maxContentLength: ALPHACODERS_RANDOM_MAX_BYTES,
-  });
-
-  let contentType = response.headers["content-type"] || "";
-  if (!contentType.startsWith("image/")) {
-    const ext = (url.split("?")[0].split(".").pop() || "").toLowerCase();
-    contentType =
-      ext === "png" ? "image/png" :
-      ext === "gif" ? "image/gif" :
-      ext === "webp" ? "image/webp" : "image/jpeg";
-  }
-
-  return { buffer: Buffer.from(response.data), contentType };
 }
 
 async function handleAlphacodersRandom(req, res) {
@@ -533,7 +508,7 @@ async function handleAlphacodersRandom(req, res) {
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader(
     "Access-Control-Expose-Headers",
-    "Content-Type, Content-Length, X-Wallpaper-Id"
+    "Content-Type, X-Wallpaper-Id, X-Wallpaper-Source"
   );
 
   if (req.method === "OPTIONS") {
@@ -570,25 +545,43 @@ async function handleAlphacodersRandom(req, res) {
 
     const picked = items[Math.floor(Math.random() * items.length)];
 
-    // Request 2: unduh gambar. Kalau gagal/terlalu besar, pakai thumbnail.
-    let media;
-    try {
-      media = await alphacodersRandomDownload(picked.image);
-    } catch (err) {
-      media = await alphacodersRandomDownload(picked.thumb);
+    // Request 2: buka koneksi gambar sebagai STREAM (tanpa batas 4.5MB Vercel)
+    const upstream = await axios.get(picked.image, {
+      responseType: "stream",
+      headers: ALPHACODERS_RANDOM_IMAGE_HEADERS,
+      timeout: 25000,
+      decompress: false,
+    });
+
+    let contentType = upstream.headers["content-type"] || "";
+    if (!contentType.startsWith("image/")) {
+      const ext = (picked.image.split("?")[0].split(".").pop() || "").toLowerCase();
+      contentType =
+        ext === "png" ? "image/png" :
+        ext === "gif" ? "image/gif" :
+        ext === "webp" ? "image/webp" : "image/jpeg";
     }
 
-    res.setHeader("Content-Type", media.contentType);
-    res.setHeader("Content-Length", media.buffer.length);
+    res.status(200);
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", `inline; filename="wallpaper-${picked.id}"`);
     res.setHeader("Cache-Control", "no-store, max-age=0");
     res.setHeader("X-Wallpaper-Id", picked.id);
-    return res.status(200).send(media.buffer);
+    res.setHeader("X-Wallpaper-Source", `${ALPHACODERS_RANDOM_BASE}/big.php?i=${picked.id}`);
+
+    // Alirkan gambar langsung ke client, resolusi asli tanpa dipotong
+    await pipeline(upstream.data, res);
   } catch (error) {
-    const upstream = error.response?.status;
-    return res.status(upstream ? 502 : 500).json({
+    // Kalau stream sudah mulai terkirim, tidak bisa kirim JSON lagi
+    if (res.headersSent) {
+      return res.destroy();
+    }
+
+    const upstreamStatus = error.response?.status;
+    return res.status(upstreamStatus ? 502 : 500).json({
       status: false,
-      message: upstream
-        ? `Gagal mengambil data dari Wallpaper Abyss (status ${upstream})`
+      message: upstreamStatus
+        ? `Gagal mengambil gambar dari Wallpaper Abyss (status ${upstreamStatus})`
         : "Terjadi kesalahan saat mengambil wallpaper acak",
       error: error.message,
     });
