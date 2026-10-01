@@ -2,7 +2,7 @@ export default {
   slug: "alphacoders-random",
   name: "Wallpaper Abyss Random",
   description:
-    "Mengambil 1 wallpaper acak dari Wallpaper Abyss (Alpha Coders) berdasarkan kata kunci, dalam resolusi asli (HD/4K) tanpa dikecilkan. Respons berupa file gambar langsung, bukan JSON.",
+    "Mengambil 1 wallpaper acak dari Wallpaper Abyss (Alpha Coders) berdasarkan kata kunci, dalam resolusi dan format asli (JPG/PNG) tanpa dikecilkan. Respons berupa file gambar langsung, bukan JSON. File yang sangat besar akan diarahkan (redirect) ke URL gambar aslinya.",
   category: "Random",
   method: "GET",
   endpoint: "/api/alphacoders-random",
@@ -14,6 +14,13 @@ export default {
       required: true,
       description: "Kata kunci wallpaper yang dicari",
       example: "naruto",
+    },
+    {
+      name: "debug",
+      type: "string",
+      required: false,
+      description: "Isi 1 untuk melihat laporan diagnosa (JSON), tanpa mengirim gambar",
+      example: "1",
     },
   ],
   responseExample: {
