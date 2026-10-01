@@ -809,103 +809,269 @@ async function handleAlphacodersRandom(req, res) {
   }
 }
 //devi devianart
-// ===============================
-// DEVIANTART SEARCH
-// ===============================
-async function handleDevianart(req, res) {
+// ====================== DEVIANTART RANDOM ======================
+
+const DEVIANTART_RANDOM_BASE = "https://www.deviantart.com";
+const DEVIANTART_RANDOM_RSS = "https://backend.deviantart.com/rss.xml";
+const DEVIANTART_RANDOM_PAGE_SIZE = 24;
+
+// Batas respons Vercel sekitar 4.5MB, sisakan ruang untuk header
+const DEVIANTART_RANDOM_MAX_BYTES = 4_200_000;
+
+const DEVIANTART_RANDOM_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
+// Header untuk membaca RSS
+const DEVIANTART_RANDOM_RSS_HEADERS = {
+  "User-Agent": DEVIANTART_RANDOM_UA,
+  Accept: "application/rss+xml,application/xml;q=0.9,text/xml;q=0.8,*/*;q=0.5",
+  "Accept-Language": "en-US,en;q=0.9",
+  "Accept-Encoding": "gzip, deflate",
+  Connection: "keep-alive",
+  Referer: DEVIANTART_RANDOM_BASE + "/",
+};
+
+// Header untuk mengunduh gambar
+const DEVIANTART_RANDOM_IMAGE_HEADERS = {
+  "User-Agent": DEVIANTART_RANDOM_UA,
+  Accept: "image/jpeg,image/png,image/gif,image/*;q=0.8,*/*;q=0.5",
+  // Tanpa kompresi supaya byte yang diterima = byte gambar asli
+  "Accept-Encoding": "identity",
+  "Accept-Language": "en-US,en;q=0.9",
+  Connection: "keep-alive",
+  "Sec-Fetch-Dest": "image",
+  "Sec-Fetch-Mode": "no-cors",
+  "Sec-Fetch-Site": "cross-site",
+  Referer: DEVIANTART_RANDOM_BASE + "/",
+};
+
+// Request 1: ambil daftar karya dari RSS pencarian
+async function deviantartRandomGetItems(query, offset) {
+  const { data: xml } = await axios.get(DEVIANTART_RANDOM_RSS, {
+    params: {
+      q: query,
+      type: "deviation",
+      offset,
+      limit: DEVIANTART_RANDOM_PAGE_SIZE,
+    },
+    headers: DEVIANTART_RANDOM_RSS_HEADERS,
+    responseType: "text",
+    timeout: 20000,
+  });
+
+  const $ = cheerio.load(xml, { xmlMode: true });
+  const items = [];
+
+  $("item").each((_, el) => {
+    const $item = $(el);
+
+    // Lewati karya dewasa
+    const rating = $item.find("media\\:rating").first().text().trim().toLowerCase();
+    if (rating === "adult") return;
+
+    // Ambil media:content bertipe image dengan lebar terbesar
+    let best = null;
+    $item.find("media\\:content").each((_, c) => {
+      const $c = $(c);
+      const url = $c.attr("url");
+      const medium = ($c.attr("medium") || "").toLowerCase();
+      if (!url || medium !== "image") return;
+
+      const width = parseInt($c.attr("width"), 10) || 0;
+      const height = parseInt($c.attr("height"), 10) || 0;
+      if (!best || width > best.width) best = { url, width, height };
+    });
+    if (!best) return;
+
+    items.push({
+      title: $item.children("title").first().text().trim() || null,
+      author: $item.find("media\\:credit").first().text().trim() || null,
+      link: $item.children("link").first().text().trim() || null,
+      image: best.url,
+      width: best.width,
+      height: best.height,
+    });
+  });
+
+  return items;
+}
+
+// Request 2: buka koneksi gambar sebagai stream
+async function deviantartRandomOpenImage(url) {
+  const response = await axios.get(url, {
+    responseType: "stream",
+    headers: DEVIANTART_RANDOM_IMAGE_HEADERS,
+    timeout: 25000,
+  });
+
+  const contentType = response.headers["content-type"] || "";
+  if (!contentType.startsWith("image/")) {
+    response.data.destroy();
+    throw new Error("Respons bukan gambar");
+  }
+  return response;
+}
+
+// Kumpulkan stream jadi Buffer; return null kalau melebihi batas
+async function deviantartRandomCollect(stream, maxBytes) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of stream) {
+    size += chunk.length;
+    if (size > maxBytes) {
+      stream.destroy();
+      return null;
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+// Deteksi tipe gambar dari byte awal file (bukan dari header server)
+function deviantartRandomImageType(buf) {
+  if (!buf || buf.length < 12) return null;
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])))
+    return "image/png";
+  if (buf.subarray(0, 3).toString("ascii") === "GIF") return "image/gif";
+  if (
+    buf.subarray(0, 4).toString("ascii") === "RIFF" &&
+    buf.subarray(8, 12).toString("ascii") === "WEBP"
+  )
+    return "image/webp";
+  return null;
+}
+
+async function handleDeviantartRandom(req, res) {
+  // CORS supaya bisa dipanggil lewat fetch() dari browser
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader(
+    "Access-Control-Expose-Headers",
+    "Content-Type, Content-Length, X-Deviation-Title, X-Deviation-Author, X-Deviation-Source"
+  );
+
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+
+  const debug = req.query.debug === "1";
+
   try {
-    const query = req.query.query || req.query.q;
+    const query = String(req.query.query || req.query.q || "").trim();
 
     if (!query) {
       return res.status(400).json({
         status: false,
-        message: "Parameter query wajib diisi.",
-        error: 'example: "/api/devianart?query=anime"',
+        message: 'Parameter "query" wajib diisi',
+        example: "/api/deviantart-random?query=naruto",
       });
     }
 
-    const devianartSearchResponse = await axios.get(
-      `https://www.deviantart.com/search?q=${encodeURIComponent(query)}`,
-      {
-        timeout: 20000,
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36",
-          "Accept-Language": "en-US,en;q=0.9",
-        },
-      }
-    );
+    // Request 1: RSS dengan offset acak (0, 24, 48, 72, 96)
+    const offset = Math.floor(Math.random() * 5) * DEVIANTART_RANDOM_PAGE_SIZE;
+    let items = await deviantartRandomGetItems(query, offset);
 
-    const devianartSearchHtml = devianartSearchResponse.data;
-    const devianartSearch$ = cheerio.load(devianartSearchHtml);
-
-    let devianartResultUrl = "";
-
-    devianartSearch$(
-      "#root > div.hs1JI > div > div._3WsM9 > div > div > div:nth-child(3) > div > div > div:nth-child(1) > div > div:nth-child(1) > div > section > a"
-    ).each((index, element) => {
-      const href = devianartSearch$(element).attr("href");
-
-      if (href) {
-        devianartResultUrl = href;
-      }
-    });
-
-    if (!devianartResultUrl) {
-      throw new Error(
-        "Hasil pencarian DeviantArt tidak ditemukan."
-      );
+    // Cadangan: kalau offset acak kosong, kembali ke halaman pertama
+    if (!items.length && offset > 0) {
+      items = await deviantartRandomGetItems(query, 0);
     }
 
-    const devianartDetailResponse = await axios.get(
-      devianartResultUrl,
-      {
-        timeout: 20000,
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36",
-          "Accept-Language": "en-US,en;q=0.9",
+    if (!items.length) {
+      return res.status(404).json({
+        status: false,
+        message: `Karya dengan kata kunci "${query}" tidak ditemukan`,
+        error: "Hasil pencarian kosong",
+      });
+    }
+
+    const picked = items[Math.floor(Math.random() * items.length)];
+
+    // Request 2: buka gambar
+    const upstream = await deviantartRandomOpenImage(picked.image);
+    const contentLength = Number(upstream.headers["content-length"]) || 0;
+
+    // Mode debug: laporkan kondisi file tanpa mengirim gambar
+    if (debug) {
+      const buf = await deviantartRandomCollect(upstream.data, DEVIANTART_RANDOM_MAX_BYTES);
+      return res.status(200).json({
+        status: true,
+        source: "DeviantArt",
+        data: {
+          query,
+          offset,
+          total_items: items.length,
+          picked,
+          report: {
+            contentType: upstream.headers["content-type"] || null,
+            contentLength: contentLength || null,
+            contentEncoding: upstream.headers["content-encoding"] || null,
+            bytesReceived: buf ? buf.length : `>${DEVIANTART_RANDOM_MAX_BYTES} (akan di-redirect)`,
+            signature: buf ? deviantartRandomImageType(buf) : null,
+          },
         },
-      }
-    );
+      });
+    }
 
-    const devianartDetailHtml = devianartDetailResponse.data;
-    const devianartDetail$ = cheerio.load(
-      devianartDetailHtml
-    );
+    // File jelas terlalu besar untuk Vercel: arahkan langsung ke file asli
+    if (contentLength > DEVIANTART_RANDOM_MAX_BYTES) {
+      upstream.data.destroy();
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.redirect(302, picked.image);
+    }
 
-    const devianartImages = [];
+    // Unduh penuh (maks 4.2MB)
+    const buffer = await deviantartRandomCollect(upstream.data, DEVIANTART_RANDOM_MAX_BYTES);
 
-    devianartDetail$(
-      "#root > main > div > div._2QovI > div > div._2HK_1 > div._1lkTS > div > img"
-    ).each((index, element) => {
-      const imageUrl = devianartDetail$(element).attr("src");
+    // Ukuran tidak diketahui di awal dan ternyata besar: redirect ke file asli
+    if (!buffer) {
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.redirect(302, picked.image);
+    }
 
-      if (imageUrl) {
-        devianartImages.push(imageUrl);
-      }
-    });
+    // Validasi isi file: harus benar-benar gambar dan utuh
+    const detectedType = deviantartRandomImageType(buffer);
+    if (!detectedType) {
+      return res.status(502).json({
+        status: false,
+        message: "File yang diterima dari DeviantArt bukan gambar yang valid",
+        error: `Ukuran ${buffer.length} byte, signature tidak dikenali`,
+      });
+    }
+    if (contentLength && buffer.length < contentLength) {
+      return res.status(502).json({
+        status: false,
+        message: "File gambar dari DeviantArt terpotong saat diunduh",
+        error: `Diterima ${buffer.length} dari ${contentLength} byte`,
+      });
+    }
 
-    return res.status(200).json({
-      status: true,
-      source: "DeviantArt",
-      data: {
-        query,
-        total: devianartImages.length,
-        result: devianartImages,
-      },
-    });
+    const extMap = {
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/gif": "gif",
+      "image/webp": "webp",
+    };
+
+    res.setHeader("Content-Type", detectedType);
+    res.setHeader("Content-Length", buffer.length);
+    res.setHeader("Content-Disposition", `inline; filename="deviantart.${extMap[detectedType]}"`);
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    res.setHeader("X-Deviation-Title", encodeURIComponent(picked.title || ""));
+    res.setHeader("X-Deviation-Author", encodeURIComponent(picked.author || ""));
+    res.setHeader("X-Deviation-Source", picked.link || "");
+    return res.status(200).send(buffer);
   } catch (error) {
-    const devianartStatus =
-      error.response?.status &&
-      error.response.status >= 400 &&
-      error.response.status < 600
-        ? error.response.status
-        : 500;
+    if (res.headersSent) {
+      return res.destroy();
+    }
 
-    return res.status(devianartStatus).json({
+    const upstreamStatus = error.response?.status;
+    return res.status(upstreamStatus ? 502 : 500).json({
       status: false,
-      message: "Gagal mengambil data dari DeviantArt.",
+      message: upstreamStatus
+        ? `Gagal mengambil data dari DeviantArt (status ${upstreamStatus})`
+        : "Terjadi kesalahan saat mengambil karya DeviantArt",
       error: error.message,
     });
   }
@@ -7601,8 +7767,7 @@ case "mlstalk":
 case "twitter-video": return handleTwitterVideo(req, res);
 case "quotes-anime":
   return handleQuotesAnimeEndpoint(req, res);
-  case "devianart":
-  return handleDevianart(req, res);
+  case "deviantart-random": return handleDeviantartRandom(req, res);
   case "ssweb":
   return handleSsweb(req, res);
   case "alphacoders-random": return handleAlphacodersRandom(req, res);
