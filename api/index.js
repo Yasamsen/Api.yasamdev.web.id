@@ -430,75 +430,126 @@ async function handleZerochan(req, res) {
 // ===============================
 // WALLPAPER HD
 // ===============================
-async function handleWallpaperhd(req, res) {
-  try {
-    const chara = req.query.chara || req.query.query;
+const ALPHACODERS_BASE_URL = "https://wall.alphacoders.com";
 
-    if (!chara) {
+const ALPHACODERS_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+  Referer: ALPHACODERS_BASE_URL + "/",
+};
+
+function alphacodersAbsUrl(url) {
+  if (!url) return null;
+  if (url.startsWith("//")) return "https:" + url;
+  if (url.startsWith("http")) return url;
+  return ALPHACODERS_BASE_URL + (url.startsWith("/") ? url : "/" + url);
+}
+
+// thumb-350-123456.jpg -> 123456.jpg (versi resolusi penuh)
+function alphacodersFullImage(thumbUrl) {
+  if (!thumbUrl) return null;
+  return thumbUrl.replace(/thumb(-\d+)?-/, "");
+}
+
+async function alphacodersSearch(query, page) {
+  const { data: html } = await axios.get(`${ALPHACODERS_BASE_URL}/search.php`, {
+    params: { search: query, page },
+    headers: ALPHACODERS_HEADERS,
+    timeout: 20000,
+  });
+
+  const $ = cheerio.load(html);
+  const seen = new Set();
+  const results = [];
+
+  $('a[href*="big.php?i="]').each((_, el) => {
+    const $a = $(el);
+    const href = $a.attr("href") || "";
+    const idMatch = href.match(/[?&]i=(\d+)/);
+    if (!idMatch) return;
+
+    const id = idMatch[1];
+    if (seen.has(id)) return;
+
+    const $img = $a.find("img").first();
+    const thumb = alphacodersAbsUrl(
+      $img.attr("data-src") || $img.attr("src") || ""
+    );
+    if (!thumb) return;
+
+    seen.add(id);
+
+    const title =
+      ($img.attr("alt") || $a.attr("title") || "")
+        .replace(/\s+/g, " ")
+        .trim() || null;
+
+    results.push({
+      id,
+      title,
+      thumbnail: thumb,
+      image: alphacodersFullImage(thumb),
+      page_url: alphacodersAbsUrl(href),
+    });
+  });
+
+  const bodyText = $("body").text().replace(/\s+/g, " ");
+  const totalMatch = bodyText.match(/([\d,]+)\s+Wallpapers?\s+found/i);
+  const total = totalMatch ? parseInt(totalMatch[1].replace(/,/g, ""), 10) : null;
+
+  let totalPages = page;
+  $('a[href*="page="]').each((_, el) => {
+    const m = ($(el).attr("href") || "").match(/[?&]page=(\d+)/);
+    if (m) totalPages = Math.max(totalPages, parseInt(m[1], 10));
+  });
+
+  return { total, totalPages, results };
+}
+
+async function handleAlphacoders(req, res) {
+  try {
+    const query = String(req.query.query || req.query.q || "").trim();
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+
+    if (!query) {
       return res.status(400).json({
         status: false,
-        message: "Parameter chara wajib diisi.",
-        error: 'example: "/api/wallpaperhd?chara=anime"',
+        message: 'Parameter "query" wajib diisi',
+        example: "/api/alphacoders?query=naruto&page=1",
       });
     }
 
-    const wallpaperhdResponse = await axios.get(
-      `https://wall.alphacoders.com/search.php?search=${encodeURIComponent(chara)}&filter=4K+Ultra+HD`,
-      {
-        timeout: 20000,
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36",
-          "Accept-Language": "en-US,en;q=0.9",
-        },
-      }
-    );
+    const { total, totalPages, results } = await alphacodersSearch(query, page);
 
-    const wallpaperhd$ = cheerio.load(
-      wallpaperhdResponse.data
-    );
-
-    const wallpaperhdResult = [];
-
-    wallpaperhd$("div.boxgrid > a > picture").each(
-      (index, element) => {
-        const wallpaperhdImage =
-          wallpaperhd$(element)
-            .find("img")
-            .attr("src");
-
-        if (!wallpaperhdImage) return;
-
-        const wallpaperhdFullImage =
-          wallpaperhdImage.replace("thumbbig-", "");
-
-        if (!wallpaperhdResult.includes(wallpaperhdFullImage)) {
-          wallpaperhdResult.push(wallpaperhdFullImage);
-        }
-      }
-    );
+    if (!results.length) {
+      return res.status(404).json({
+        status: false,
+        message: `Wallpaper dengan kata kunci "${query}" tidak ditemukan`,
+        error: "Hasil pencarian kosong",
+      });
+    }
 
     return res.status(200).json({
       status: true,
-      source: "AlphaCoders",
+      source: "WallpaperAbyss",
       data: {
-        query: chara,
-        filter: "4K Ultra HD",
-        total: wallpaperhdResult.length,
-        result: wallpaperhdResult,
+        query,
+        page,
+        total_pages: totalPages,
+        total_results: total,
+        count: results.length,
+        results,
       },
     });
   } catch (error) {
-    const wallpaperhdStatus =
-      error.response?.status &&
-      error.response.status >= 400 &&
-      error.response.status < 600
-        ? error.response.status
-        : 500;
-
-    return res.status(wallpaperhdStatus).json({
+    const upstream = error.response?.status;
+    return res.status(upstream ? 502 : 500).json({
       status: false,
-      message: "Gagal mengambil wallpaper HD.",
+      message: upstream
+        ? `Gagal mengambil data dari Wallpaper Abyss (status ${upstream})`
+        : "Terjadi kesalahan saat mengambil data wallpaper",
       error: error.message,
     });
   }
@@ -7296,8 +7347,7 @@ case "mlstalk":
 case "twitter-video": return handleTwitterVideo(req, res);
 case "quotes-anime":
   return handleQuotesAnimeEndpoint(req, res);
-case "wallpaperhd":
-  return handleWallpaperhd(req, res);
+case "alphacoders": return handleAlphacoders(req, res);
   case "devianart":
   return handleDevianart(req, res);
   case "ssweb":
