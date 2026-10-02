@@ -14,6 +14,7 @@ import CryptoJS from "crypto-js";
 import vm from "node:vm";
 import { createHash } from "node:crypto";
 import dns from "node:dns/promises";
+import Busboy from "busboy";
 import net from "node:net";
 // Semua endpoint digabung ke 1 file supaya hanya dihitung 1 Serverless
 // Function oleh Vercel (Hobby plan cuma boleh maksimal 12 function).
@@ -201,23 +202,25 @@ async function handleUpscaleImage(req, res) {
     });
   }
 }
+// =====================================================================
+// TEMPEL KE api/index.js
+// =====================================================================
+
+// ---------- 1. IMPORT (taruh di bagian paling atas api/index.js) ----------
+// Lewati baris axios kalau sudah di-import di file router.
+// ---------- 2. CASE (tambahkan ke dalam switch (routeKey)) ----------
+//
+//   case "tourl":
+//     return handleTourl(req, res);
+//
+
+// ---------- 3. HANDLER (taruh bersama fungsi endpoint lain) ----------
+
 //tourl
 // ===============================
 // TOURL (UPLOAD FILE -> URL)
 // ===============================
-// Dependensi:
-//   - axios            (sudah dipakai di endpoint lain)
-//   - busboy           -> npm i busboy   (untuk membaca multipart/form-data)
-//   - Node 18+         (fetch, FormData, Blob bawaan)
-//
-// Cara pakai:
-//   1. multipart : POST /api/tourl  (form-data, field apa saja berisi file, misal "file")
-//   2. raw body  : POST /api/tourl?filename=foto.png  (body = isi file, Content-Type sesuai file)
-//   3. URL remote: GET/POST /api/tourl?url=yasamdev.web.id/gambar.png  (https:// opsional)
-//
-// Catatan: Vercel membatasi body request sekitar 4.5MB, jadi batas file di sini 4MB.
-// Kalau project Anda Next.js API route, tambahkan:
-//   export const config = { api: { bodyParser: false } };
+// Batas body Vercel sekitar 4.5MB, jadi batas file di sini 4MB.
 
 const TOURL_MAX_BYTES = 4_000_000;
 const TOURL_UPLOAD_TIMEOUT = 8000;
@@ -293,7 +296,6 @@ function tourlReadStream(stream, maxBytes) {
 // Parse multipart/form-data, ambil file pertama
 function tourlParseMultipart(req, maxBytes) {
   return new Promise((resolve, reject) => {
-    const Busboy = require("busboy");
     let bb;
     try {
       bb = Busboy({ headers: req.headers, limits: { files: 1, fileSize: maxBytes } });
@@ -331,7 +333,7 @@ function tourlParseMultipart(req, maxBytes) {
   });
 }
 
-// Ambil file dari request: multipart, raw body, atau URL remote
+// Ambil file dari request: URL remote, multipart, atau raw body
 async function tourlGetInput(req) {
   const contentType = String(req.headers["content-type"] || "");
 
@@ -369,7 +371,7 @@ async function tourlGetInput(req) {
     };
   }
 
-  // 3. raw body (platform kadang sudah mengubahnya jadi Buffer)
+  // 3. raw body (Vercel kadang sudah mengubahnya jadi Buffer)
   if (req.method === "POST") {
     let buffer = null;
     if (Buffer.isBuffer(req.body)) buffer = req.body;
@@ -473,7 +475,11 @@ async function handleTourl(req, res) {
     try {
       file = await tourlGetInput(req);
     } catch (err) {
-      if (err.code === "TOO_LARGE" || err.code === "ERR_FR_MAX_BODY_LENGTH_EXCEEDED" || /maxContentLength|maxBodyLength/i.test(err.message)) {
+      if (
+        err.code === "TOO_LARGE" ||
+        err.code === "ERR_FR_MAX_BODY_LENGTH_EXCEEDED" ||
+        /maxContentLength|maxBodyLength/i.test(err.message)
+      ) {
         return res.status(413).json({
           status: false,
           message: "File terlalu besar.",
@@ -484,7 +490,7 @@ async function handleTourl(req, res) {
         return res.status(400).json({
           status: false,
           message: "URL yang diberikan tidak valid.",
-          error: "Gunakan domain seperti yasamdev.web.id/gambar.png atau URL lengkap",
+          error: 'example: "/api/tourl?url=yasamdev.web.id/gambar.png"',
         });
       }
       return res.status(400).json({
@@ -499,7 +505,7 @@ async function handleTourl(req, res) {
         status: false,
         message: "File tidak ditemukan.",
         error:
-          'Kirim file lewat multipart/form-data (field "file"), raw body (?filename=nama.png), atau parameter ?url=',
+          'Kirim file lewat multipart/form-data (field "file"), raw body (?filename=nama.png), atau parameter url. example: "/api/tourl?url=yasamdev.web.id/gambar.png"',
       });
     }
 
@@ -540,6 +546,7 @@ async function handleTourl(req, res) {
     });
   }
 }
+
 
 //ss web
 // ===============================
@@ -8303,7 +8310,6 @@ case "quotes-anime":
 case "upscale-image":
   return handleUpscaleImage(req, res);
   case "tourl":
-  case "upload":
   return handleTourl(req, res);
   case "ringtone":
   return handleRingtoneEndpoint(req, res);
