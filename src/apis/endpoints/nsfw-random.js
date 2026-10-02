@@ -2,7 +2,7 @@ export default {
   slug: "nsfw-random",
   name: "NSFW Random",
   description: "Mengambil satu URL media secara acak dari koleksi Nsfw.json.",
-  category: "NSFW",
+  category: "Media",
   method: "GET",
   endpoint: "/api/nsfw-random",
   icon: "Shuffle",
