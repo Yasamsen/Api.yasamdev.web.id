@@ -201,6 +201,346 @@ async function handleUpscaleImage(req, res) {
     });
   }
 }
+//tourl
+// ===============================
+// TOURL (UPLOAD FILE -> URL)
+// ===============================
+// Dependensi:
+//   - axios            (sudah dipakai di endpoint lain)
+//   - busboy           -> npm i busboy   (untuk membaca multipart/form-data)
+//   - Node 18+         (fetch, FormData, Blob bawaan)
+//
+// Cara pakai:
+//   1. multipart : POST /api/tourl  (form-data, field apa saja berisi file, misal "file")
+//   2. raw body  : POST /api/tourl?filename=foto.png  (body = isi file, Content-Type sesuai file)
+//   3. URL remote: GET/POST /api/tourl?url=yasamdev.web.id/gambar.png  (https:// opsional)
+//
+// Catatan: Vercel membatasi body request sekitar 4.5MB, jadi batas file di sini 4MB.
+// Kalau project Anda Next.js API route, tambahkan:
+//   export const config = { api: { bodyParser: false } };
+
+const TOURL_MAX_BYTES = 4_000_000;
+const TOURL_UPLOAD_TIMEOUT = 8000;
+const TOURL_DOWNLOAD_TIMEOUT = 8000;
+const TOURL_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
+const TOURL_MIME_EXT = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/svg+xml": "svg",
+  "video/mp4": "mp4",
+  "video/webm": "webm",
+  "audio/mpeg": "mp3",
+  "audio/ogg": "ogg",
+  "audio/wav": "wav",
+  "application/pdf": "pdf",
+  "application/zip": "zip",
+  "text/plain": "txt",
+  "application/json": "json",
+};
+
+// Bersihkan nama file: tanpa path, hanya karakter aman, maksimal 80 karakter
+function tourlSafeName(name, mimetype) {
+  let base = String(name || "").split(/[\\/]/).pop().replace(/[^\w.\-]+/g, "_");
+  base = base.replace(/^\.+/, "").slice(-80);
+  if (!base) base = "file";
+  if (!/\.[a-z0-9]{1,8}$/i.test(base)) {
+    const ext = TOURL_MIME_EXT[String(mimetype || "").split(";")[0].toLowerCase()];
+    if (ext) base += "." + ext;
+  }
+  return base;
+}
+
+// Protokol opsional: "yasamdev.web.id/a.png" -> "https://yasamdev.web.id/a.png"
+function tourlNormalizeUrl(input) {
+  let raw = String(input || "").trim();
+  if (!raw) return null;
+  if (raw.startsWith("//")) raw = "https:" + raw;
+  else if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) raw = "https://" + raw;
+
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    if (!u.hostname.startsWith("[") && !u.hostname.includes(".")) return null;
+    return u.href;
+  } catch {
+    return null;
+  }
+}
+
+// Baca stream request jadi Buffer (batas ukuran)
+function tourlReadStream(stream, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    stream.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        reject(Object.assign(new Error("File terlalu besar"), { code: "TOO_LARGE" }));
+        stream.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    stream.on("end", () => resolve(Buffer.concat(chunks)));
+    stream.on("error", reject);
+  });
+}
+
+// Parse multipart/form-data, ambil file pertama
+function tourlParseMultipart(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const Busboy = require("busboy");
+    let bb;
+    try {
+      bb = Busboy({ headers: req.headers, limits: { files: 1, fileSize: maxBytes } });
+    } catch (err) {
+      return reject(err);
+    }
+
+    let result = null;
+    let tooLarge = false;
+
+    bb.on("file", (field, stream, info) => {
+      const chunks = [];
+      stream.on("data", (c) => chunks.push(c));
+      stream.on("limit", () => {
+        tooLarge = true;
+      });
+      stream.on("end", () => {
+        result = {
+          buffer: Buffer.concat(chunks),
+          filename: info.filename,
+          mimetype: info.mimeType,
+        };
+      });
+    });
+
+    bb.on("error", reject);
+    bb.on("close", () => {
+      if (tooLarge) {
+        return reject(Object.assign(new Error("File terlalu besar"), { code: "TOO_LARGE" }));
+      }
+      resolve(result);
+    });
+
+    req.pipe(bb);
+  });
+}
+
+// Ambil file dari request: multipart, raw body, atau URL remote
+async function tourlGetInput(req) {
+  const contentType = String(req.headers["content-type"] || "");
+
+  // 1. URL remote (?url=)
+  const remote = req.query.url || (req.body && typeof req.body === "object" && req.body.url);
+  if (remote) {
+    const url = tourlNormalizeUrl(remote);
+    if (!url) {
+      throw Object.assign(new Error("URL tidak valid"), { code: "BAD_URL" });
+    }
+    const r = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: TOURL_DOWNLOAD_TIMEOUT,
+      maxContentLength: TOURL_MAX_BYTES,
+      maxBodyLength: TOURL_MAX_BYTES,
+      headers: { "User-Agent": TOURL_UA },
+    });
+    const mimetype = String(r.headers["content-type"] || "application/octet-stream").split(";")[0];
+    const nameFromUrl = decodeURIComponent(new URL(url).pathname.split("/").pop() || "");
+    return {
+      buffer: Buffer.from(r.data),
+      filename: tourlSafeName(nameFromUrl, mimetype),
+      mimetype,
+    };
+  }
+
+  // 2. multipart/form-data
+  if (/multipart\/form-data/i.test(contentType)) {
+    const parsed = await tourlParseMultipart(req, TOURL_MAX_BYTES);
+    if (!parsed || !parsed.buffer.length) return null;
+    return {
+      buffer: parsed.buffer,
+      filename: tourlSafeName(parsed.filename, parsed.mimetype),
+      mimetype: parsed.mimetype || "application/octet-stream",
+    };
+  }
+
+  // 3. raw body (platform kadang sudah mengubahnya jadi Buffer)
+  if (req.method === "POST") {
+    let buffer = null;
+    if (Buffer.isBuffer(req.body)) buffer = req.body;
+    else if (!req.body || (typeof req.body === "object" && !Object.keys(req.body).length)) {
+      buffer = await tourlReadStream(req, TOURL_MAX_BYTES);
+    }
+    if (buffer && buffer.length) {
+      if (buffer.length > TOURL_MAX_BYTES) {
+        throw Object.assign(new Error("File terlalu besar"), { code: "TOO_LARGE" });
+      }
+      const mimetype = contentType.split(";")[0] || "application/octet-stream";
+      return {
+        buffer,
+        filename: tourlSafeName(req.query.filename, mimetype),
+        mimetype,
+      };
+    }
+  }
+
+  return null;
+}
+
+// ---------- Penyedia hosting (dicoba berurutan sampai ada yang berhasil) ----------
+
+async function tourlPostForm(url, form) {
+  const r = await fetch(url, {
+    method: "POST",
+    body: form,
+    headers: { "User-Agent": TOURL_UA },
+    signal: AbortSignal.timeout(TOURL_UPLOAD_TIMEOUT),
+  });
+  const text = (await r.text()).trim();
+  if (!r.ok) throw new Error(`status ${r.status}: ${text.slice(0, 120)}`);
+  return text;
+}
+
+const TOURL_PROVIDERS = [
+  {
+    name: "catbox.moe",
+    expires: "permanen",
+    async upload(file) {
+      const form = new FormData();
+      form.append("reqtype", "fileupload");
+      form.append("fileToUpload", new Blob([file.buffer], { type: file.mimetype }), file.filename);
+      const text = await tourlPostForm("https://catbox.moe/user/api.php", form);
+      if (!/^https?:\/\//i.test(text)) throw new Error(text.slice(0, 120) || "respons tidak valid");
+      return text;
+    },
+  },
+  {
+    name: "uguu.se",
+    expires: "sementara (sekitar 3 jam)",
+    async upload(file) {
+      const form = new FormData();
+      form.append("files[]", new Blob([file.buffer], { type: file.mimetype }), file.filename);
+      const text = await tourlPostForm("https://uguu.se/upload?output=json", form);
+      if (/^https?:\/\//i.test(text)) return text.split(/\s+/)[0];
+      const json = JSON.parse(text);
+      const link = json?.files?.[0]?.url;
+      if (!link) throw new Error("respons tidak valid");
+      return link;
+    },
+  },
+  {
+    name: "tmpfiles.org",
+    expires: "sementara (sekitar 1 jam)",
+    async upload(file) {
+      const form = new FormData();
+      form.append("file", new Blob([file.buffer], { type: file.mimetype }), file.filename);
+      const text = await tourlPostForm("https://tmpfiles.org/api/v1/upload", form);
+      const link = JSON.parse(text)?.data?.url;
+      if (!link) throw new Error("respons tidak valid");
+      // Ubah ke link unduh langsung
+      return link.replace(/^http:\/\//, "https://").replace("tmpfiles.org/", "tmpfiles.org/dl/");
+    },
+  },
+];
+
+async function handleTourl(req, res) {
+  // CORS supaya bisa dipanggil dari browser
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+
+  try {
+    // Tolak lebih awal kalau Content-Length sudah jelas kebesaran
+    const declared = Number(req.headers["content-length"]) || 0;
+    if (declared > TOURL_MAX_BYTES + 100_000) {
+      return res.status(413).json({
+        status: false,
+        message: "File terlalu besar.",
+        error: `Maksimal ${(TOURL_MAX_BYTES / 1_000_000).toFixed(0)}MB`,
+      });
+    }
+
+    let file;
+    try {
+      file = await tourlGetInput(req);
+    } catch (err) {
+      if (err.code === "TOO_LARGE" || err.code === "ERR_FR_MAX_BODY_LENGTH_EXCEEDED" || /maxContentLength|maxBodyLength/i.test(err.message)) {
+        return res.status(413).json({
+          status: false,
+          message: "File terlalu besar.",
+          error: `Maksimal ${(TOURL_MAX_BYTES / 1_000_000).toFixed(0)}MB`,
+        });
+      }
+      if (err.code === "BAD_URL") {
+        return res.status(400).json({
+          status: false,
+          message: "URL yang diberikan tidak valid.",
+          error: "Gunakan domain seperti yasamdev.web.id/gambar.png atau URL lengkap",
+        });
+      }
+      return res.status(400).json({
+        status: false,
+        message: "Gagal membaca file yang dikirim.",
+        error: err.message,
+      });
+    }
+
+    if (!file || !file.buffer || !file.buffer.length) {
+      return res.status(400).json({
+        status: false,
+        message: "File tidak ditemukan.",
+        error:
+          'Kirim file lewat multipart/form-data (field "file"), raw body (?filename=nama.png), atau parameter ?url=',
+      });
+    }
+
+    // Coba penyedia satu per satu
+    const errors = [];
+    for (const provider of TOURL_PROVIDERS) {
+      try {
+        const link = await provider.upload(file);
+        return res.status(200).json({
+          status: true,
+          source: provider.name,
+          data: {
+            url: link,
+            filename: file.filename,
+            mimetype: file.mimetype,
+            size: file.buffer.length,
+            expires: provider.expires,
+          },
+        });
+      } catch (err) {
+        errors.push({ host: provider.name, error: err.message });
+      }
+    }
+
+    return res.status(502).json({
+      status: false,
+      message: "Gagal mengunggah file ke semua server penyimpanan.",
+      error: errors.map((e) => `${e.host}: ${e.error}`).join(" | "),
+    });
+  } catch (error) {
+    if (res.headersSent) {
+      return res.destroy();
+    }
+    return res.status(500).json({
+      status: false,
+      message: "Terjadi kesalahan saat mengunggah file.",
+      error: error.message,
+    });
+  }
+}
+
 //ss web
 // ===============================
 // SCREENSHOT WEB
@@ -7962,6 +8302,9 @@ case "quotes-anime":
   case "nsfw-random": return handleNsfwRandomEndpoint(req, res);
 case "upscale-image":
   return handleUpscaleImage(req, res);
+  case "tourl":
+  case "upload":
+  return handleTourl(req, res);
   case "ringtone":
   return handleRingtoneEndpoint(req, res);
     default:
