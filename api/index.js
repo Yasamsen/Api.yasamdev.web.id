@@ -477,12 +477,35 @@ async function handleZerochan(req, res) {
   }
 }
 //wallpaper
+//wallpaper
 // ====================== ALPHACODERS RANDOM (WALLPAPER ABYSS) ======================
+// Pastikan axios & cheerio sudah tersedia di file ini / project:
+// const axios = require("axios");
+// const cheerio = require("cheerio");
+//
+// Perilaku: setelah "query" valid, handler SELALU membalas dengan gambar (tanpa JSON error,
+// tanpa redirect). Urutan fallback:
+//   1. Gambar asli dari beberapa kandidat wallpaper
+//   2. Thumbnail resolusi besar (thumb-1920 / thumb-1280)
+//   3. Thumbnail biasa dari hasil pencarian
+//   4. Gambar placeholder (SVG) sebagai pilihan terakhir
+// Header X-Wallpaper-Quality memberi tahu mana yang dipakai: original | thumbnail | placeholder
 
 const ALPHACODERS_RANDOM_BASE = "https://wall.alphacoders.com";
 
 // Batas respons Vercel sekitar 4.5MB, sisakan ruang untuk header
 const ALPHACODERS_RANDOM_MAX_BYTES = 4_200_000;
+
+// Waktu maksimal untuk mencoba gambar asli; setelah itu langsung ke fallback thumbnail.
+// Sesuaikan dengan maxDuration Vercel (Hobby = 10 detik).
+const ALPHACODERS_RANDOM_ORIGINAL_BUDGET_MS = 6000;
+
+// Jumlah maksimal wallpaper berbeda yang dicoba
+const ALPHACODERS_RANDOM_MAX_CANDIDATES = 8;
+
+// Timeout per request axios
+const ALPHACODERS_RANDOM_HTML_TIMEOUT = 6000;
+const ALPHACODERS_RANDOM_IMAGE_TIMEOUT = 8000;
 
 // Header mirip browser asli untuk membuka halaman HTML
 const ALPHACODERS_RANDOM_HEADERS = {
@@ -524,6 +547,14 @@ const ALPHACODERS_RANDOM_IMAGE_HEADERS = {
   Referer: ALPHACODERS_RANDOM_BASE + "/",
 };
 
+const ALPHACODERS_RANDOM_EXT_MAP = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/svg+xml": "svg",
+};
+
 function alphacodersRandomAbs(url) {
   if (!url) return null;
   if (url.startsWith("//")) return "https:" + url;
@@ -536,7 +567,7 @@ async function alphacodersRandomGetImages(query, page) {
   const { data: html } = await axios.get(`${ALPHACODERS_RANDOM_BASE}/search.php`, {
     params: { search: query, page },
     headers: ALPHACODERS_RANDOM_HEADERS,
-    timeout: 20000,
+    timeout: ALPHACODERS_RANDOM_HTML_TIMEOUT,
   });
 
   const $ = cheerio.load(html);
@@ -576,12 +607,23 @@ function alphacodersRandomGuessUrls(thumb) {
   };
 }
 
+// Varian thumbnail dari yang terbesar ke terkecil (yang terakhir = thumbnail asli dari pencarian)
+function alphacodersRandomThumbVariants(thumb) {
+  const variants = [];
+  if (/thumb(-\d+)?-/.test(thumb)) {
+    variants.push(thumb.replace(/thumb(-\d+)?-/, "thumb-1920-"));
+    variants.push(thumb.replace(/thumb(-\d+)?-/, "thumb-1280-"));
+  }
+  variants.push(thumb);
+  return [...new Set(variants)];
+}
+
 // Cadangan: ambil URL gambar asli / link download dari halaman detail wallpaper
 async function alphacodersRandomDetailUrls(id) {
   const { data: html } = await axios.get(`${ALPHACODERS_RANDOM_BASE}/big.php`, {
     params: { i: id },
     headers: { ...ALPHACODERS_RANDOM_HEADERS, Referer: ALPHACODERS_RANDOM_BASE + "/search.php" },
-    timeout: 20000,
+    timeout: ALPHACODERS_RANDOM_HTML_TIMEOUT,
   });
 
   const $ = cheerio.load(html);
@@ -619,7 +661,7 @@ async function alphacodersRandomOpenImage(url) {
   const response = await axios.get(url, {
     responseType: "stream",
     headers: ALPHACODERS_RANDOM_IMAGE_HEADERS,
-    timeout: 25000,
+    timeout: ALPHACODERS_RANDOM_IMAGE_TIMEOUT,
   });
 
   const contentType = response.headers["content-type"] || "";
@@ -687,176 +729,222 @@ function alphacodersRandomImageType(buf) {
   return null;
 }
 
+// Unduh dari daftar URL sampai dapat file yang utuh, valid, dan tidak terlalu besar.
+// Return { buffer, type, url } atau null (tidak pernah melempar error).
+async function alphacodersRandomDownloadValid(urls, attempts, allowWebp) {
+  for (const url of urls) {
+    try {
+      const found = await alphacodersRandomTryUrls([url], attempts, allowWebp);
+      if (!found) continue;
+
+      const { response } = found;
+      const len = Number(response.headers["content-length"]) || 0;
+
+      if (len > ALPHACODERS_RANDOM_MAX_BYTES) {
+        response.data.destroy();
+        attempts.push({ url, ok: false, status: "terlalu besar, dilewati" });
+        continue;
+      }
+
+      const buffer = await alphacodersRandomCollect(response.data, ALPHACODERS_RANDOM_MAX_BYTES);
+      if (!buffer) {
+        attempts.push({ url, ok: false, status: "terlalu besar, dilewati" });
+        continue;
+      }
+
+      const type = alphacodersRandomImageType(buffer);
+      if (!type) {
+        attempts.push({ url, ok: false, status: "bukan gambar valid" });
+        continue;
+      }
+      if (len && buffer.length < len) {
+        attempts.push({ url, ok: false, status: "terpotong" });
+        continue;
+      }
+
+      return { buffer, type, url };
+    } catch (err) {
+      attempts.push({ url, ok: false, status: err.message });
+    }
+  }
+  return null;
+}
+
+// Ambil gambar ASLI satu wallpaper (tebakan URL -> halaman detail -> webp)
+async function alphacodersRandomFetchOriginal(picked, attempts) {
+  const guess = alphacodersRandomGuessUrls(picked.thumb);
+
+  let result = await alphacodersRandomDownloadValid(guess.originals, attempts, false);
+
+  if (!result) {
+    try {
+      const detailUrls = await alphacodersRandomDetailUrls(picked.id);
+      result = await alphacodersRandomDownloadValid(detailUrls, attempts, false);
+    } catch (err) {
+      attempts.push({
+        url: `${ALPHACODERS_RANDOM_BASE}/big.php?i=${picked.id}`,
+        ok: false,
+        status: err.response?.status || err.message,
+      });
+    }
+  }
+
+  if (!result) {
+    result = await alphacodersRandomDownloadValid([guess.webp], attempts, true);
+  }
+
+  return result;
+}
+
+// Fallback: thumbnail resolusi besar -> thumbnail biasa
+async function alphacodersRandomFetchThumb(picked, attempts) {
+  return alphacodersRandomDownloadValid(
+    alphacodersRandomThumbVariants(picked.thumb),
+    attempts,
+    true
+  );
+}
+
+// Gambar placeholder terakhir (tanpa jaringan, tidak mungkin gagal)
+function alphacodersRandomPlaceholder() {
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">' +
+    '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">' +
+    '<stop offset="0" stop-color="#1e1b4b"/><stop offset="0.5" stop-color="#4c1d95"/>' +
+    '<stop offset="1" stop-color="#0f172a"/></linearGradient></defs>' +
+    '<rect width="1920" height="1080" fill="url(#g)"/></svg>';
+  return { buffer: Buffer.from(svg, "utf8"), type: "image/svg+xml" };
+}
+
+function alphacodersRandomSend(res, { buffer, type }, id, quality) {
+  res.setHeader("Content-Type", type);
+  res.setHeader("Content-Length", buffer.length);
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="wallpaper-${id || "fallback"}.${ALPHACODERS_RANDOM_EXT_MAP[type]}"`
+  );
+  res.setHeader("Cache-Control", "no-store, max-age=0");
+  res.setHeader("X-Wallpaper-Quality", quality);
+  if (id) {
+    res.setHeader("X-Wallpaper-Id", id);
+    res.setHeader("X-Wallpaper-Source", `${ALPHACODERS_RANDOM_BASE}/big.php?i=${id}`);
+  }
+  return res.status(200).send(buffer);
+}
+
 async function handleAlphacodersRandom(req, res) {
   // CORS supaya bisa dipanggil lewat fetch() dari browser
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader(
     "Access-Control-Expose-Headers",
-    "Content-Type, Content-Length, X-Wallpaper-Id, X-Wallpaper-Source"
+    "Content-Type, Content-Length, X-Wallpaper-Id, X-Wallpaper-Source, X-Wallpaper-Quality"
   );
 
   if (req.method === "OPTIONS") {
     return res.status(204).end();
   }
 
-  const attempts = [];
+  const query = String(req.query.query || req.query.q || "").trim();
+
+  // Satu-satunya error yang tersisa: parameter wajib tidak diisi (kesalahan pemanggil)
+  if (!query) {
+    return res.status(400).json({
+      status: false,
+      message: 'Parameter "query" wajib diisi',
+      example: "/api/alphacoders-random?query=naruto",
+    });
+  }
+
+  const startedAt = Date.now();
+  const originalDeadline = startedAt + ALPHACODERS_RANDOM_ORIGINAL_BUDGET_MS;
   const debug = req.query.debug === "1";
+  const tried = []; // laporan debug
 
   try {
-    const query = String(req.query.query || req.query.q || "").trim();
-
-    if (!query) {
-      return res.status(400).json({
-        status: false,
-        message: 'Parameter "query" wajib diisi',
-        example: "/api/alphacoders-random?query=naruto",
-      });
+    // Request 1: halaman pencarian (halaman acak 1-10), cadangan ke halaman 1
+    let items = [];
+    let page = Math.floor(Math.random() * 10) + 1;
+    try {
+      items = await alphacodersRandomGetImages(query, page);
+      if (!items.length && page > 1) {
+        page = 1;
+        items = await alphacodersRandomGetImages(query, 1);
+      }
+    } catch (err) {
+      tried.push({ stage: "search", error: err.message });
     }
 
-    // Request 1: halaman pencarian (halaman acak 1-10)
-    const page = Math.floor(Math.random() * 10) + 1;
-    let items = await alphacodersRandomGetImages(query, page);
+    const candidates = [...items]
+      .sort(() => Math.random() - 0.5)
+      .slice(0, ALPHACODERS_RANDOM_MAX_CANDIDATES);
 
-    // Cadangan: kalau halaman acak kosong, kembali ke halaman 1
-    if (!items.length && page > 1) {
-      items = await alphacodersRandomGetImages(query, 1);
-    }
+    // Tahap 1: gambar asli, pindah ke kandidat lain kalau gagal / terlalu besar
+    for (const picked of candidates) {
+      if (Date.now() > originalDeadline) break;
 
-    if (!items.length) {
-      return res.status(404).json({
-        status: false,
-        message: `Wallpaper dengan kata kunci "${query}" tidak ditemukan`,
-        error: "Hasil pencarian kosong",
-      });
-    }
+      const attempts = [];
+      const result = await alphacodersRandomFetchOriginal(picked, attempts);
 
-    const picked = items[Math.floor(Math.random() * items.length)];
-
-    // Request 2: coba tebakan URL asli (jpg/png), webp ditolak
-    const guess = alphacodersRandomGuessUrls(picked.thumb);
-    let found = await alphacodersRandomTryUrls(guess.originals, attempts);
-
-    // Cadangan 1: ambil link download / URL asli dari halaman detail
-    if (!found) {
-      try {
-        const detailUrls = await alphacodersRandomDetailUrls(picked.id);
-        found = await alphacodersRandomTryUrls(detailUrls, attempts);
-      } catch (err) {
-        attempts.push({
-          url: `${ALPHACODERS_RANDOM_BASE}/big.php?i=${picked.id}`,
-          ok: false,
-          status: err.response?.status || err.message,
+      if (debug) {
+        tried.push({
+          stage: "original",
+          id: picked.id,
+          outcome: result ? "ok" : "gagal",
+          url: result?.url || null,
+          bytes: result?.buffer.length || null,
+          attempts,
         });
       }
+
+      if (result && !debug) {
+        return alphacodersRandomSend(res, result, picked.id, "original");
+      }
+      if (result && debug) break;
     }
 
-    // Cadangan 2 (terakhir): webp, hanya kalau tidak ada pilihan lain
-    if (!found) {
-      found = await alphacodersRandomTryUrls([guess.webp], attempts, true);
-    }
-
-    // Mode debug: laporkan kondisi file tanpa mengirim gambar
-    if (debug) {
-      let report = null;
-      if (found) {
-        const buf = await alphacodersRandomCollect(
-          found.response.data,
-          ALPHACODERS_RANDOM_MAX_BYTES
-        );
-        report = {
-          url: found.url,
-          contentLength: Number(found.response.headers["content-length"]) || null,
-          contentEncoding: found.response.headers["content-encoding"] || null,
-          bytesReceived: buf ? buf.length : `>${ALPHACODERS_RANDOM_MAX_BYTES} (akan di-redirect)`,
-          signature: buf ? alphacodersRandomImageType(buf) : null,
-        };
+    // Tahap 2 & 3: thumbnail (cepat dan kecil), cukup coba beberapa kandidat
+    if (!debug) {
+      for (const picked of candidates.slice(0, 4)) {
+        const attempts = [];
+        const result = await alphacodersRandomFetchThumb(picked, attempts);
+        if (result) {
+          return alphacodersRandomSend(res, result, picked.id, "thumbnail");
+        }
+      }
+    } else {
+      for (const picked of candidates.slice(0, 2)) {
+        const attempts = [];
+        const result = await alphacodersRandomFetchThumb(picked, attempts);
+        tried.push({
+          stage: "thumbnail",
+          id: picked.id,
+          outcome: result ? "ok" : "gagal",
+          url: result?.url || null,
+          bytes: result?.buffer.length || null,
+          attempts,
+        });
+        if (result) break;
       }
       return res.status(200).json({
         status: true,
         source: "WallpaperAbyss",
-        data: { query, page, picked, attempts, report },
+        data: { query, page, elapsedMs: Date.now() - startedAt, tried },
       });
     }
+  } catch (err) {
+    // Error tak terduga: abaikan, lanjut ke placeholder
+  }
 
-    if (!found) {
-      return res.status(502).json({
-        status: false,
-        message: "Gagal menemukan file gambar asli dari Wallpaper Abyss",
-        error: "Semua kandidat URL gambar gagal. Tambahkan &debug=1 untuk melihat detailnya",
-      });
-    }
-
-    const { response: upstream, url: imageUrl } = found;
-    const contentLength = Number(upstream.headers["content-length"]) || 0;
-
-    // File jelas terlalu besar untuk Vercel: arahkan langsung ke file asli
-    if (contentLength > ALPHACODERS_RANDOM_MAX_BYTES) {
-      upstream.data.destroy();
-      res.setHeader("Cache-Control", "no-store, max-age=0");
-      return res.redirect(302, imageUrl);
-    }
-
-    // Unduh penuh (maks 4.2MB)
-    const buffer = await alphacodersRandomCollect(
-      upstream.data,
-      ALPHACODERS_RANDOM_MAX_BYTES
-    );
-
-    // Ukuran tidak diketahui di awal dan ternyata besar: redirect ke file asli
-    if (!buffer) {
-      res.setHeader("Cache-Control", "no-store, max-age=0");
-      return res.redirect(302, imageUrl);
-    }
-
-    // Validasi isi file: harus benar-benar gambar dan utuh
-    const detectedType = alphacodersRandomImageType(buffer);
-    if (!detectedType) {
-      return res.status(502).json({
-        status: false,
-        message: "File yang diterima dari Wallpaper Abyss bukan gambar yang valid",
-        error: `Ukuran ${buffer.length} byte, signature tidak dikenali`,
-      });
-    }
-    if (contentLength && buffer.length < contentLength) {
-      return res.status(502).json({
-        status: false,
-        message: "File gambar dari Wallpaper Abyss terpotong saat diunduh",
-        error: `Diterima ${buffer.length} dari ${contentLength} byte`,
-      });
-    }
-
-    const extMap = {
-      "image/jpeg": "jpg",
-      "image/png": "png",
-      "image/gif": "gif",
-      "image/webp": "webp",
-    };
-
-    res.setHeader("Content-Type", detectedType);
-    res.setHeader("Content-Length", buffer.length);
-    res.setHeader(
-      "Content-Disposition",
-      `inline; filename="wallpaper-${picked.id}.${extMap[detectedType]}"`
-    );
-    res.setHeader("Cache-Control", "no-store, max-age=0");
-    res.setHeader("X-Wallpaper-Id", picked.id);
-    res.setHeader("X-Wallpaper-Source", `${ALPHACODERS_RANDOM_BASE}/big.php?i=${picked.id}`);
-    return res.status(200).send(buffer);
-  } catch (error) {
-    if (res.headersSent) {
-      return res.destroy();
-    }
-
-    const upstreamStatus = error.response?.status;
-    return res.status(upstreamStatus ? 502 : 500).json({
-      status: false,
-      message: upstreamStatus
-        ? `Gagal mengambil data dari Wallpaper Abyss (status ${upstreamStatus})`
-        : "Terjadi kesalahan saat mengambil wallpaper acak",
-      error: error.message,
+  // Tahap 4: placeholder, supaya klien tetap menerima gambar
+  if (debug) {
+    return res.status(200).json({
+      status: true,
+      source: "WallpaperAbyss",
+      data: { query, elapsedMs: Date.now() - startedAt, tried, final: "placeholder" },
     });
   }
+  return alphacodersRandomSend(res, alphacodersRandomPlaceholder(), null, "placeholder");
 }
 //devi devianart
 // ====================== DEVIANTART RANDOM ======================
