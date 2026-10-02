@@ -330,24 +330,37 @@ async function handleSsweb(req, res) {
       }
     );
 
-    const sswebContentType =
-      sswebImageResponse.headers["content-type"] ||
-      "image/jpeg";
+    const sswebBuffer = Buffer.from(sswebImageResponse.data);
 
-    const sswebBase64 = Buffer
-      .from(sswebImageResponse.data)
-      .toString("base64");
+    // Tentukan tipe gambar dari isi file; cadangan: header server, lalu jpeg
+    let sswebContentType =
+      sswebImageResponse.headers["content-type"] || "image/jpeg";
+    if (sswebBuffer[0] === 0xff && sswebBuffer[1] === 0xd8) {
+      sswebContentType = "image/jpeg";
+    } else if (
+      sswebBuffer.subarray(0, 8).equals(
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+      )
+    ) {
+      sswebContentType = "image/png";
+    }
 
-    return res.status(200).json({
-      status: true,
-      source: "ScreenshotMachine",
-      data: {
-        url,
-        device,
-        contentType: sswebContentType,
-        result: `data:${sswebContentType};base64,${sswebBase64}`
-      }
-    });
+    if (!sswebContentType.startsWith("image/")) {
+      throw new Error("Respons dari ScreenshotMachine bukan gambar.");
+    }
+
+    const sswebExt = sswebContentType.includes("png") ? "png" : "jpg";
+    const sswebHost = new URL(url).hostname.replace(/[^a-z0-9.-]/gi, "_");
+
+    // Kirim gambar langsung sebagai media
+    res.setHeader("Content-Type", sswebContentType);
+    res.setHeader("Content-Length", sswebBuffer.length);
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="ssweb-${sswebHost}-${device}.${sswebExt}"`
+    );
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(200).send(sswebBuffer);
 
   } catch (error) {
     const sswebStatus =
@@ -364,6 +377,7 @@ async function handleSsweb(req, res) {
     });
   }
 }
+
 //zerochan
 /* =========================
    ZEROCHAN
