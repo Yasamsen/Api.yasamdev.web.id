@@ -205,26 +205,61 @@ async function handleUpscaleImage(req, res) {
 // ===============================
 // SCREENSHOT WEB
 // ===============================
+
+// Normalisasi input URL: protokol opsional.
+//   "yasamdev.web.id"           -> "https://yasamdev.web.id/"
+//   "//yasamdev.web.id/path"    -> "https://yasamdev.web.id/path"
+//   "http://yasamdev.web.id"    -> tetap http
+// Return URL string yang valid, atau null kalau tidak valid.
+function sswebNormalizeUrl(input) {
+  let raw = String(input || "").trim();
+  if (!raw) return null;
+
+  if (raw.startsWith("//")) {
+    raw = "https:" + raw;
+  } else if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) {
+    // Tidak ada skema (termasuk kasus "domain.com:8080/path") -> default https
+    raw = "https://" + raw;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+
+  // Hanya http / https
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+
+  // Hostname harus berupa domain (mengandung titik) atau IP, bukan kata tunggal seperti "abc"
+  const host = parsed.hostname;
+  const isIPv6 = host.startsWith("[");
+  if (!isIPv6 && !host.includes(".")) return null;
+
+  return parsed.href;
+}
+
 async function handleSsweb(req, res) {
   try {
-    const url = req.query.url;
+    const rawUrl = req.query.url;
     const device = req.query.device || "desktop";
+
+    if (!rawUrl) {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter url wajib diisi.",
+        error: 'example: "/api/ssweb?url=yasamdev.web.id&device=desktop"'
+      });
+    }
+
+    const url = sswebNormalizeUrl(rawUrl);
 
     if (!url) {
       return res.status(400).json({
         status: false,
-        message: "Parameter url wajib diisi.",
-        error: 'example: "/api/ssweb?url=https://example.com&device=desktop"'
-      });
-    }
-
-    try {
-      new URL(url);
-    } catch {
-      return res.status(400).json({
-        status: false,
         message: "URL yang diberikan tidak valid.",
-        error: "Gunakan URL lengkap seperti https://example.com"
+        error: "Gunakan domain seperti yasamdev.web.id atau URL lengkap seperti https://example.com"
       });
     }
 
@@ -329,7 +364,6 @@ async function handleSsweb(req, res) {
     });
   }
 }
-
 //zerochan
 /* =========================
    ZEROCHAN
