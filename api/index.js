@@ -7588,84 +7588,291 @@ async function handleInstagramStalker(req, res) {
   return res.status(result.status ? 200 : 400).json(result);
 }
 
-/* ============================================================
- * NANO BANANA
- * ============================================================ */
-function parseNanoBananaForm(req) {
-  return new Promise((resolve, reject) => {
-    const form = formidable({ multiples: false, keepExtensions: true });
+// @description Edit image with Nano Banana
+// @category Tools
+// @url https://unwatermark.ai/
 
-    form.parse(req, (err, fields, files) => {
-      if (err) {
-        reject(err);
-        return;
-      }
-
-      resolve({ fields, files });
-    });
-  });
+async function unwatermarkNanoBananaGenerateSerial() {
+    return (
+        Math.random().toString(16).slice(2, 10) +
+        Math.random().toString(16).slice(2, 10)
+    );
 }
 
-function getField(value) {
-  if (Array.isArray(value)) return value[0];
-  return value;
+async function unwatermarkNanoBananaEditImage(
+    imageUrl,
+    prompt,
+    ratio = "match_input_image"
+) {
+    const imageResponse = await axios.get(imageUrl, {
+        responseType: "arraybuffer",
+        timeout: 30000
+    });
+
+    const buffer = Buffer.from(imageResponse.data);
+
+    const form = new formData();
+
+    form.append("target_images", buffer, {
+        contentType: "image/jpeg",
+        filename: "image.jpg"
+    });
+
+    form.append("prompt", prompt);
+    form.append("ratio", ratio);
+
+    const productSerial =
+        await unwatermarkNanoBananaGenerateSerial();
+
+    const createTask = await axios.post(
+        "https://api.unwatermark.ai/api/web/v1/photo-editor-nano-banana/create-job",
+        form,
+        {
+            headers: {
+                ...form.getHeaders(),
+
+                "accept-language":
+                    "en-GB,en;q=0.9,id-ID;q=0.8,id;q=0.7,en-US;q=0.6",
+
+                "origin":
+                    "https://unwatermark.ai",
+
+                "referer":
+                    "https://unwatermark.ai/",
+
+                "Product-Code":
+                    "067003",
+
+                "Product-Serial":
+                    productSerial,
+
+                "user-agent":
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"
+            },
+
+            timeout: 30000
+        }
+    );
+
+    if (!createTask.data?.result) {
+        throw new Error(
+            "API Error: " +
+            JSON.stringify(createTask.data)
+        );
+    }
+
+    const taskId =
+        createTask.data.result.job_id;
+
+    if (!taskId) {
+        throw new Error(
+            "Gagal mendapatkan job ID."
+        );
+    }
+
+    // Polling status
+    for (let i = 1; i <= 20; i++) {
+
+        await new Promise(resolve =>
+            setTimeout(resolve, 2000)
+        );
+
+        const getTask = await axios.get(
+            `https://api.unwatermark.ai/api/web/v1/photo-editor-nano-banana/get-job/${taskId}`,
+            {
+                headers: {
+                    "accept-language":
+                        "en-GB,en;q=0.9,id-ID;q=0.8,id;q=0.7,en-US;q=0.6",
+
+                    "origin":
+                        "https://unwatermark.ai",
+
+                    "referer":
+                        "https://unwatermark.ai/",
+
+                    "user-agent":
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"
+                },
+
+                timeout: 30000
+            }
+        );
+
+        const result =
+            getTask.data?.result;
+
+        if (!result) {
+            continue;
+        }
+
+        // Status 1 = selesai
+        if (result.status === 1) {
+            return getTask.data;
+        }
+
+        // Beberapa API menggunakan status gagal
+        if (
+            result.status === -1 ||
+            result.status === 3 ||
+            result.status === 4
+        ) {
+            throw new Error(
+                result.message ||
+                "Proses editing gambar gagal."
+            );
+        }
+    }
+
+    throw new Error(
+        "Gagal mendapatkan hasil tugas atau proses timeout."
+    );
 }
 
-async function handleNanoBanana(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ status: false, message: "Method not allowed" });
-  }
 
-  const BANANA_API = "https://ibbo.ai/api/nano-banana-lite-image-to-image";
-  const HEADERS = {
-    Accept: "*/*",
-    Origin: "https://banana-nano.ai",
-    Referer: "https://banana-nano.ai/ai-image-editor",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/109.0.0.0 Safari/537.36"
-  };
+async function handleUnwatermarkNanoBanana(req, res) {
+    try {
 
-  try {
-    const { fields, files } = await parseNanoBananaForm(req);
+        if (req.method !== "GET") {
+            return res.status(405).json({
+                status: false,
+                message:
+                    "Method tidak diizinkan. Gunakan GET.",
+                error:
+                    "Method Not Allowed"
+            });
+        }
 
-    const prompt = getField(fields.prompt);
-    const uploadedImage = files.image || files.file;
-    const imageFile = Array.isArray(uploadedImage) ? uploadedImage[0] : uploadedImage;
+        const image =
+            req.query?.image;
 
-    if (!imageFile) {
-      return res.status(400).json({ status: false, message: "Parameter image wajib diisi" });
+        const prompt =
+            req.query?.prompt;
+
+        const ratio =
+            req.query?.ratio ||
+            "match_input_image";
+
+
+        // =========================
+        // VALIDATE IMAGE
+        // =========================
+
+        if (!image) {
+            return res.status(400).json({
+                status: false,
+                message:
+                    "Parameter image wajib diisi.",
+                error:
+                    'Example: "/api/unwatermark-nano-banana?image=https://example.com/image.jpg&prompt=Tambahkan%20kacamata&ratio=9:16"'
+            });
+        }
+
+
+        // =========================
+        // VALIDATE PROMPT
+        // =========================
+
+        if (!prompt) {
+            return res.status(400).json({
+                status: false,
+                message:
+                    "Parameter prompt wajib diisi.",
+                error:
+                    'Example: "/api/unwatermark-nano-banana?image=https://example.com/image.jpg&prompt=Tambahkan%20kacamata&ratio=9:16"'
+            });
+        }
+
+
+        // =========================
+        // VALIDATE URL
+        // =========================
+
+        try {
+            new URL(image);
+        } catch {
+            return res.status(400).json({
+                status: false,
+                message:
+                    "URL gambar tidak valid.",
+                error:
+                    "Parameter image harus berupa URL yang valid."
+            });
+        }
+
+
+        // =========================
+        // ALLOWED RATIOS
+        // =========================
+
+        const allowedRatios = [
+            "match_input_image",
+            "1:1",
+            "4:3",
+            "3:4",
+            "16:9",
+            "9:16",
+            "3:2",
+            "2:3"
+        ];
+
+        if (!allowedRatios.includes(ratio)) {
+            return res.status(400).json({
+                status: false,
+                message:
+                    "Aspect ratio tidak didukung.",
+                error:
+                    `Gunakan salah satu: ${allowedRatios.join(", ")}`
+            });
+        }
+
+
+        // =========================
+        // PROCESS
+        // =========================
+
+        const result =
+            await unwatermarkNanoBananaEditImage(
+                image,
+                prompt,
+                ratio
+            );
+
+
+        // =========================
+        // SUCCESS
+        // =========================
+
+        return res.status(200).json({
+            status: true,
+            source:
+                "Unwatermark Nano Banana",
+            data:
+                result
+        });
+
+    } catch (error) {
+
+        console.error(
+            "Unwatermark Nano Banana Error:",
+            error
+        );
+
+        const statusCode =
+            error.response?.status >= 400 &&
+            error.response?.status < 600
+                ? error.response.status
+                : 500;
+
+        return res.status(statusCode).json({
+            status: false,
+            message:
+                "Gagal mengedit gambar dengan Unwatermark AI.",
+            error:
+                error.response?.data?.message ||
+                error.response?.data?.error ||
+                error.message
+        });
     }
-
-    if (!prompt) {
-      return res.status(400).json({ status: false, message: "Parameter prompt wajib diisi" });
-    }
-
-    const imageBuffer = fs.readFileSync(imageFile.filepath);
-
-    const FormData = new FormData();
-    const blob = new Blob([imageBuffer], { type: imageFile.mimetype || "image/jpeg" });
-
-    FormData.append("file", blob, imageFile.originalFilename || "image.jpg");
-    FormData.append("prompt", String(prompt));
-    FormData.append("output_format", String(getField(fields.output_format) || "jpg"));
-    FormData.append("generator_slug", "ai-image-editor");
-
-    const response = await axios.post(BANANA_API, FormData, {
-      headers: { ...HEADERS, ...FormData.getHeaders?.() },
-      timeout: 120000,
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity
-    });
-
-    return res.status(200).json({ status: true, source: "NanoBanana", data: response.data });
-  } catch (error) {
-    console.error("NanoBanana Error:", error);
-    return res.status(error.response?.status || 502).json({
-      status: false,
-      source: "NanoBanana",
-      message: "Gagal memproses gambar",
-      error: error.response?.data || error.message
-    });
-  }
 }
 
 /* ============================================================
@@ -8806,8 +9013,8 @@ export default async function handler(req, res) {
       return handleTiktok(req, res);
     case "instagram-stalker":
       return handleInstagramStalker(req, res);
-    case "nano-banana":
-      return handleNanoBanana(req, res);
+    case "unwatermark-nano-banana":
+    return handleUnwatermarkNanoBanana(req, res);
     case "iplookup":
       return handleIplookup(req, res);
     case "weather":
