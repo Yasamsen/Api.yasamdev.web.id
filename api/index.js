@@ -91,7 +91,7 @@ async function photoEditorAiEditImage(
 
     const buffer = Buffer.from(image.data);
 
-    const form = new formData();
+    const form = new FormData();
 
     form.append("model_name", model);
     form.append("feature", "photo_editor");
