@@ -60,6 +60,166 @@ async function ensureJsonBody(req) {
     req.body = {};
   }
 }
+//editphoto
+function photoEditorAiGenerateProductSerial() {
+    const characters = "abcdefghijklmnopqrstuvwxyz0123456789";
+    let serial = "";
+
+    for (let i = 0; i < 32; i++) {
+        serial += characters.charAt(
+            Math.floor(Math.random() * characters.length)
+        );
+    }
+
+    return serial;
+}
+
+async function photoEditorAiEditImage(imageUrl, prompt) {
+    const image = await axios.get(imageUrl, {
+        responseType: "arraybuffer",
+        timeout: 30000
+    });
+
+    const buffer = Buffer.from(image.data);
+
+    const form = new FormData();
+
+    form.append("model_name", "photoeditor_4.0");
+    form.append("feature", "photo_editor");
+    form.append("target_images", buffer, {
+        filename: `image-${Date.now()}.jpg`,
+        contentType: "image/jpeg"
+    });
+    form.append("prompt", prompt);
+    form.append("ratio", "match_input_image");
+    form.append("image_resolution", "1K");
+
+    const productSerial = photoEditorAiGenerateProductSerial();
+
+    const headers = {
+        ...form.getHeaders(),
+        "Product-Serial": productSerial,
+        "Origin": "https://photoeditorai.io",
+        "Referer": "https://photoeditorai.io/",
+        "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
+    };
+
+    const createJob = await axios.post(
+        "https://api.photoeditorai.io/pe/photo-editor/create-job",
+        form,
+        {
+            headers,
+            timeout: 30000
+        }
+    );
+
+    if (createJob.data.code !== 100000) {
+        throw new Error(
+            "Gagal membuat job: " +
+            (createJob.data.message || "Unknown error")
+        );
+    }
+
+    const jobId = createJob.data.result?.job_id;
+
+    if (!jobId) {
+        throw new Error("Job ID tidak ditemukan dari server.");
+    }
+
+    for (let i = 0; i < 30; i++) {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        const jobStatus = await axios.get(
+            `https://api.photoeditorai.io/pe/photo-editor/get-job/${jobId}?feature=photo_editor`,
+            {
+                headers: {
+                    "Product-Serial": productSerial,
+                    "Origin": "https://photoeditorai.io",
+                    "Referer": "https://photoeditorai.io/",
+                    "User-Agent":
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
+                },
+                timeout: 30000
+            }
+        );
+
+        if (jobStatus.data?.result?.status === 2) {
+            return jobStatus.data;
+        }
+    }
+
+    throw new Error("Proses edit gambar gagal atau timeout.");
+}
+
+async function handlePhotoEditorAi(req, res) {
+    try {
+        if (req.method !== "GET") {
+            return res.status(405).json({
+                status: false,
+                message: "Method tidak diizinkan. Gunakan GET.",
+                error: "Method Not Allowed"
+            });
+        }
+
+        const imageUrl = req.query.image;
+        const prompt = req.query.prompt;
+
+        if (!imageUrl) {
+            return res.status(400).json({
+                status: false,
+                message: "Parameter image wajib diisi.",
+                error: 'Example: "/api/photoeditor-ai?image=https://example.com/image.jpg&prompt=Tambahkan kacamata"'
+            });
+        }
+
+        if (!prompt) {
+            return res.status(400).json({
+                status: false,
+                message: "Parameter prompt wajib diisi.",
+                error: 'Example: "/api/photoeditor-ai?image=https://example.com/image.jpg&prompt=Tambahkan kacamata"'
+            });
+        }
+
+        try {
+            new URL(imageUrl);
+        } catch {
+            return res.status(400).json({
+                status: false,
+                message: "URL gambar tidak valid.",
+                error: "Parameter image harus berupa URL yang valid."
+            });
+        }
+
+        const result = await photoEditorAiEditImage(
+            imageUrl,
+            prompt
+        );
+
+        return res.status(200).json({
+            status: true,
+            source: "PhotoEditorAI",
+            data: result
+        });
+
+    } catch (error) {
+        console.error("PhotoEditorAI Error:", error);
+
+        const statusCode =
+            error.response?.status >= 400 &&
+            error.response?.status < 600
+                ? error.response.status
+                : 500;
+
+        return res.status(statusCode).json({
+            status: false,
+            message: "Gagal mengedit gambar dengan PhotoEditorAI.",
+            error:
+                error.response?.data?.message ||
+                error.message
+        });
+    }
+}
 //nsfw
 async function handleNsfwRandomEndpoint(req, res) {
   try {
@@ -7064,16 +7224,16 @@ async function handleNanoBanana(req, res) {
 
     const imageBuffer = fs.readFileSync(imageFile.filepath);
 
-    const formData = new FormData();
+    const FormData = new FormData();
     const blob = new Blob([imageBuffer], { type: imageFile.mimetype || "image/jpeg" });
 
-    formData.append("file", blob, imageFile.originalFilename || "image.jpg");
-    formData.append("prompt", String(prompt));
-    formData.append("output_format", String(getField(fields.output_format) || "jpg"));
-    formData.append("generator_slug", "ai-image-editor");
+    FormData.append("file", blob, imageFile.originalFilename || "image.jpg");
+    FormData.append("prompt", String(prompt));
+    FormData.append("output_format", String(getField(fields.output_format) || "jpg"));
+    FormData.append("generator_slug", "ai-image-editor");
 
-    const response = await axios.post(BANANA_API, formData, {
-      headers: { ...HEADERS, ...formData.getHeaders?.() },
+    const response = await axios.post(BANANA_API, FormData, {
+      headers: { ...HEADERS, ...FormData.getHeaders?.() },
       timeout: 120000,
       maxContentLength: Infinity,
       maxBodyLength: Infinity
@@ -8309,6 +8469,8 @@ case "quotes-anime":
   case "nsfw-random": return handleNsfwRandomEndpoint(req, res);
 case "upscale-image":
   return handleUpscaleImage(req, res);
+  case "photoeditor-ai":
+    return handlePhotoEditorAi(req, res);
   case "tourl":
   return handleTourl(req, res);
   case "ringtone":
