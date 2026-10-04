@@ -425,6 +425,218 @@ async function handlePhotoEditorAi(req, res) {
 
     }
 }
+//unblur
+// @description Unblur and enhance image
+// @category Tools
+// @url https://unblurimg.ai/
+
+async function unblurImgAiImage(imageInput) {
+    const imageResponse = await axios.get(imageInput, {
+        responseType: "arraybuffer",
+        timeout: 30000
+    });
+
+    const buffer = Buffer.from(imageResponse.data);
+    const fileId = Date.now().toString();
+
+    const actionResponse = await axios.post(
+        "https://unblurimg.ai/",
+        JSON.stringify([
+            "image/jpeg",
+            buffer.length,
+            fileId
+        ]),
+        {
+            headers: {
+                "Next-Action":
+                    "f5c9f94f5b370b337d1195b4e3e09f3fc73ce571",
+
+                "Content-Type":
+                    "text/plain;charset=UTF-8",
+
+                "User-Agent":
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            },
+
+            timeout: 30000
+        }
+    );
+
+    const responseText =
+        typeof actionResponse.data === "string"
+            ? actionResponse.data
+            : JSON.stringify(actionResponse.data);
+
+    const matchUrl =
+        responseText.match(/"url":"(https:\/\/[^"]+)"/);
+
+    const matchKey =
+        responseText.match(/"key":"([^"]+)"/);
+
+    if (!matchUrl || !matchKey) {
+        throw new Error(
+            "Gagal mendapatkan upload presigned URL dari unblurimg.ai"
+        );
+    }
+
+    const putUrl =
+        matchUrl[1].replace(/\\u0026/g, "&");
+
+    const objectKey =
+        matchKey[1];
+
+    await axios.put(
+        putUrl,
+        buffer,
+        {
+            headers: {
+                "Content-Type": "image/jpeg"
+            },
+
+            timeout: 30000
+        }
+    );
+
+    const processResponse =
+        await axios.post(
+            "https://unblurimg.ai/api/smart-tools/unblur-image",
+
+            {
+                originImageUrl:
+                    objectKey
+            },
+
+            {
+                headers: {
+                    "Content-Type":
+                        "application/json",
+
+                    "Origin":
+                        "https://unblurimg.ai",
+
+                    "Referer":
+                        "https://unblurimg.ai/",
+
+                    "User-Agent":
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                },
+
+                timeout: 60000
+            }
+        );
+
+    if (
+        processResponse.data?.code !== 0 ||
+        !processResponse.data?.data?.generatedImageUrl
+    ) {
+        throw new Error(
+            processResponse.data?.message ||
+            "Gagal memproses unblur gambar"
+        );
+    }
+
+    return {
+        original:
+            processResponse.data.data.originImageUrl,
+
+        result:
+            processResponse.data.data.generatedImageUrl
+    };
+}
+
+
+async function handleUnblurImg(req, res) {
+
+    try {
+
+        if (req.method !== "GET") {
+            return res.status(405).json({
+                status: false,
+
+                message:
+                    "Method tidak diizinkan. Gunakan GET.",
+
+                error:
+                    "Method Not Allowed"
+            });
+        }
+
+
+        const image =
+            req.query?.image;
+
+
+        if (!image) {
+            return res.status(400).json({
+                status: false,
+
+                message:
+                    "Parameter image wajib diisi.",
+
+                error:
+                    'Example: "/api/unblur-img?image=https://example.com/image.jpg"'
+            });
+        }
+
+
+        try {
+            new URL(image);
+        } catch {
+            return res.status(400).json({
+                status: false,
+
+                message:
+                    "URL gambar tidak valid.",
+
+                error:
+                    "Parameter image harus berupa URL yang valid."
+            });
+        }
+
+
+        const result =
+            await unblurImgAiImage(image);
+
+
+        return res.status(200).json({
+            status: true,
+
+            source:
+                "UnblurImg",
+
+            data:
+                result
+        });
+
+    } catch (error) {
+
+        console.error(
+            "UnblurImg Error:",
+            error
+        );
+
+
+        const statusCode =
+            error.response?.status >= 400 &&
+            error.response?.status < 600
+                ? error.response.status
+                : 500;
+
+
+        return res.status(statusCode).json({
+
+            status: false,
+
+            message:
+                "Gagal melakukan unblur dan enhance gambar.",
+
+            error:
+                error.response?.data?.message ||
+                error.message
+
+        });
+    }
+}
 //nsfw
 async function handleNsfwRandomEndpoint(req, res) {
   try {
@@ -8676,6 +8888,8 @@ case "upscale-image":
   return handleUpscaleImage(req, res);
   case "photoeditor-ai":
     return handlePhotoEditorAi(req, res);
+    case "unblur-img":
+    return handleUnblurImg(req, res);
   case "tourl":
   return handleTourl(req, res);
   case "ringtone":
