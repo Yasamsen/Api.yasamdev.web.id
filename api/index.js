@@ -7611,7 +7611,7 @@ async function unwatermarkNanoBananaEditImage(
 
     const buffer = Buffer.from(imageResponse.data);
 
-    const form = new formData();
+    const form = new FormData();
 
     form.append("target_images", buffer, {
         contentType: "image/jpeg",
