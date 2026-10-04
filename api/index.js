@@ -61,6 +61,10 @@ async function ensureJsonBody(req) {
   }
 }
 //editphoto
+// @description Image edit AI
+// @category AI
+// @url https://photoeditorai.io/
+
 function photoEditorAiGenerateProductSerial() {
     const characters = "abcdefghijklmnopqrstuvwxyz0123456789";
     let serial = "";
@@ -74,7 +78,12 @@ function photoEditorAiGenerateProductSerial() {
     return serial;
 }
 
-async function photoEditorAiEditImage(imageUrl, prompt) {
+async function photoEditorAiEditImage(
+    imageUrl,
+    prompt,
+    ratio = "match_input_image",
+    model = "photoeditor_4.0"
+) {
     const image = await axios.get(imageUrl, {
         responseType: "arraybuffer",
         timeout: 30000
@@ -82,29 +91,37 @@ async function photoEditorAiEditImage(imageUrl, prompt) {
 
     const buffer = Buffer.from(image.data);
 
-    const form = new FormData();
+    const form = new formData();
 
-    form.append("model_name", "photoeditor_4.0");
+    form.append("model_name", model);
     form.append("feature", "photo_editor");
+
     form.append("target_images", buffer, {
         filename: `image-${Date.now()}.jpg`,
         contentType: "image/jpeg"
     });
+
     form.append("prompt", prompt);
-    form.append("ratio", "match_input_image");
+    form.append("ratio", ratio);
     form.append("image_resolution", "1K");
 
-    const productSerial = photoEditorAiGenerateProductSerial();
+    const productSerial =
+        photoEditorAiGenerateProductSerial();
 
     const headers = {
         ...form.getHeaders(),
+
         "Product-Serial": productSerial,
+
         "Origin": "https://photoeditorai.io",
+
         "Referer": "https://photoeditorai.io/",
+
         "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
     };
 
+    // Create job
     const createJob = await axios.post(
         "https://api.photoeditorai.io/pe/photo-editor/create-job",
         form,
@@ -114,96 +131,272 @@ async function photoEditorAiEditImage(imageUrl, prompt) {
         }
     );
 
-    if (createJob.data.code !== 100000) {
+    if (createJob.data?.code !== 100000) {
         throw new Error(
             "Gagal membuat job: " +
-            (createJob.data.message || "Unknown error")
+            (
+                createJob.data?.message ||
+                "Unknown error"
+            )
         );
     }
 
-    const jobId = createJob.data.result?.job_id;
+    const jobId =
+        createJob.data?.result?.job_id;
 
     if (!jobId) {
-        throw new Error("Job ID tidak ditemukan dari server.");
+        throw new Error(
+            "Job ID tidak ditemukan dari server."
+        );
     }
 
+    // Polling job
     for (let i = 0; i < 30; i++) {
-        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        await new Promise(resolve =>
+            setTimeout(resolve, 5000)
+        );
 
         const jobStatus = await axios.get(
             `https://api.photoeditorai.io/pe/photo-editor/get-job/${jobId}?feature=photo_editor`,
             {
                 headers: {
                     "Product-Serial": productSerial,
-                    "Origin": "https://photoeditorai.io",
-                    "Referer": "https://photoeditorai.io/",
+
+                    "Origin":
+                        "https://photoeditorai.io",
+
+                    "Referer":
+                        "https://photoeditorai.io/",
+
                     "User-Agent":
                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
                 },
+
                 timeout: 30000
             }
         );
 
-        if (jobStatus.data?.result?.status === 2) {
+        const result =
+            jobStatus.data?.result;
+
+        if (!result) {
+            continue;
+        }
+
+        // Status 2 = selesai
+        if (result.status === 2) {
             return jobStatus.data;
+        }
+
+        // Jika API mengembalikan status gagal
+        if (
+            result.status === 3 ||
+            result.status === 4 ||
+            result.status === -1
+        ) {
+            throw new Error(
+                result.message ||
+                "Proses edit gambar gagal."
+            );
         }
     }
 
-    throw new Error("Proses edit gambar gagal atau timeout.");
+    throw new Error(
+        "Proses edit gambar gagal atau timeout."
+    );
 }
 
+
 async function handlePhotoEditorAi(req, res) {
+
     try {
+
+        // =========================
+        // METHOD
+        // =========================
+
         if (req.method !== "GET") {
             return res.status(405).json({
                 status: false,
-                message: "Method tidak diizinkan. Gunakan GET.",
+                message:
+                    "Method tidak diizinkan. Gunakan GET.",
                 error: "Method Not Allowed"
             });
         }
 
-        const imageUrl = req.query.image;
-        const prompt = req.query.prompt;
+
+        // =========================
+        // PARAMETERS
+        // =========================
+
+        const imageUrl =
+            req.query?.image;
+
+        const prompt =
+            req.query?.prompt;
+
+        const ratio =
+            req.query?.ratio ||
+            "match_input_image";
+
+        const model =
+            req.query?.model ||
+            "photoeditor_4.0";
+
+
+        // =========================
+        // VALIDATE IMAGE
+        // =========================
 
         if (!imageUrl) {
+
             return res.status(400).json({
                 status: false,
-                message: "Parameter image wajib diisi.",
-                error: 'Example: "/api/photoeditor-ai?image=https://example.com/image.jpg&prompt=Tambahkan kacamata"'
+                message:
+                    "Parameter image wajib diisi.",
+
+                error:
+                    'Example: "/api/photoeditor-ai?image=https://example.com/image.jpg&prompt=Tambahkan%20kacamata&ratio=9:16&model=photoeditor_4.0"'
             });
+
         }
+
+
+        // =========================
+        // VALIDATE PROMPT
+        // =========================
 
         if (!prompt) {
+
             return res.status(400).json({
                 status: false,
-                message: "Parameter prompt wajib diisi.",
-                error: 'Example: "/api/photoeditor-ai?image=https://example.com/image.jpg&prompt=Tambahkan kacamata"'
+                message:
+                    "Parameter prompt wajib diisi.",
+
+                error:
+                    'Example: "/api/photoeditor-ai?image=https://example.com/image.jpg&prompt=Tambahkan%20kacamata&ratio=9:16&model=photoeditor_4.0"'
             });
+
         }
+
+
+        // =========================
+        // VALIDATE IMAGE URL
+        // =========================
 
         try {
+
             new URL(imageUrl);
+
         } catch {
+
             return res.status(400).json({
                 status: false,
-                message: "URL gambar tidak valid.",
-                error: "Parameter image harus berupa URL yang valid."
+                message:
+                    "URL gambar tidak valid.",
+
+                error:
+                    "Parameter image harus berupa URL yang valid."
             });
+
         }
 
-        const result = await photoEditorAiEditImage(
-            imageUrl,
-            prompt
-        );
+
+        // =========================
+        // ALLOWED RATIO
+        // =========================
+
+        const allowedRatios = [
+            "match_input_image",
+            "1:1",
+            "4:3",
+            "3:4",
+            "16:9",
+            "9:16",
+            "3:2",
+            "2:3"
+        ];
+
+
+        if (!allowedRatios.includes(ratio)) {
+
+            return res.status(400).json({
+                status: false,
+
+                message:
+                    "Aspect ratio tidak didukung.",
+
+                error:
+                    `Gunakan salah satu: ${allowedRatios.join(", ")}`
+            });
+
+        }
+
+
+        // =========================
+        // ALLOWED MODELS
+        // =========================
+
+        const allowedModels = [
+            "photoeditor_4.0"
+        ];
+
+
+        if (!allowedModels.includes(model)) {
+
+            return res.status(400).json({
+                status: false,
+
+                message:
+                    "Model tidak didukung.",
+
+                error:
+                    `Gunakan salah satu: ${allowedModels.join(", ")}`
+            });
+
+        }
+
+
+        // =========================
+        // EDIT IMAGE
+        // =========================
+
+        const result =
+            await photoEditorAiEditImage(
+                imageUrl,
+                prompt,
+                ratio,
+                model
+            );
+
+
+        // =========================
+        // SUCCESS
+        // =========================
 
         return res.status(200).json({
+
             status: true,
-            source: "PhotoEditorAI",
+
+            source:
+                "PhotoEditorAI",
+
             data: result
+
         });
 
     } catch (error) {
-        console.error("PhotoEditorAI Error:", error);
+
+        console.error(
+            "PhotoEditorAI Error:",
+            error
+        );
+
+
+        // =========================
+        // ERROR STATUS
+        // =========================
 
         const statusCode =
             error.response?.status >= 400 &&
@@ -211,13 +404,25 @@ async function handlePhotoEditorAi(req, res) {
                 ? error.response.status
                 : 500;
 
+
+        // =========================
+        // ERROR RESPONSE
+        // =========================
+
         return res.status(statusCode).json({
+
             status: false,
-            message: "Gagal mengedit gambar dengan PhotoEditorAI.",
+
+            message:
+                "Gagal mengedit gambar dengan PhotoEditorAI.",
+
             error:
                 error.response?.data?.message ||
+                error.response?.data?.error ||
                 error.message
+
         });
+
     }
 }
 //nsfw
