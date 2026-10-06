@@ -2,7 +2,7 @@ export default {
   slug: "omdown",
   name: "Omdown Downloader",
   description:
-    "Ambil link download video, audio, atau foto dari 17+ platform (TikTok, YouTube, Instagram, Facebook, X, Spotify, SoundCloud, Pinterest, Reddit, CapCut, Threads, Snapchat, Twitch, DeviantArt, Pixiv, MangaDex, PineDrama) lewat satu endpoint. Platform dideteksi otomatis dari URL.",
+    "Ambil link download video, audio, atau foto dari 17 platform (TikTok, YouTube, Instagram, Facebook, X, Spotify, SoundCloud, Pinterest, Reddit, CapCut, Threads, Snapchat, Twitch, DeviantArt, Pixiv, MangaDex, PineDrama) lewat satu parameter. Platform dideteksi otomatis dari URL.",
   category: "Downloader",
   method: "GET",
   endpoint: "/api/omdown",
@@ -12,16 +12,8 @@ export default {
       name: "url",
       type: "string",
       required: true,
-      description: "Link konten dari platform yang didukung.",
+      description: "Link konten dari platform yang didukung. Platform dideteksi otomatis.",
       example: "https://www.tiktok.com/@stabilllllll1/video/7392574982087249157"
-    },
-    {
-      name: "platform",
-      type: "string",
-      required: false,
-      description:
-        "Nama platform (opsional). Isi hanya kalau deteksi otomatis gagal, contoh: TikTok, YouTube, Instagram.",
-      example: "TikTok"
     }
   ],
   responseExample: {
