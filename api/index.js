@@ -60,6 +60,185 @@ async function ensureJsonBody(req) {
     req.body = {};
   }
 }
+//omdoenload
+const OMDOWN_BASE_URL = "https://www.omdown.site/id";
+const OMDOWN_ACTION_ID = "70fe8fea45b688241b80ac22216712ce589fb80dc7";
+const OMDOWN_ROUTER_STATE =
+  "%5B%22%22%2C%7B%22children%22%3A%5B%5B%22locale%22%2C%22id%22%2C%22d%22%2Cnull%5D%2C%7B%22children%22%3A%5B%22__PAGE__%22%2C%7B%7D%2Cnull%2Cnull%2C4608%5D%7D%2Cnull%2Cnull%2C4624%5D%7D%2Cnull%2Cnull%2C4624%5D";
+const OMDOWN_USER_AGENT =
+  "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Mobile Safari/537.36";
+const OMDOWN_TIMEOUT_MS = 25000;
+
+const OMDOWN_PLATFORMS = [
+  { name: "TikTok", hosts: ["tiktok.com"] },
+  { name: "YouTube", hosts: ["youtube.com", "youtu.be"] },
+  { name: "X", hosts: ["x.com", "twitter.com"] },
+  { name: "Spotify", hosts: ["spotify.com"] },
+  { name: "Pinterest", hosts: ["pinterest.com", "pin.it"] },
+  { name: "CapCut", hosts: ["capcut.com"] },
+  { name: "Snapchat", hosts: ["snapchat.com"] },
+  { name: "DeviantArt", hosts: ["deviantart.com"] },
+  { name: "MangaDex", hosts: ["mangadex.org"] },
+  { name: "PineDrama", hosts: ["pinedrama.com"] },
+  { name: "Instagram", hosts: ["instagram.com"] },
+  { name: "Facebook", hosts: ["facebook.com", "fb.watch", "fb.com"] },
+  { name: "SoundCloud", hosts: ["soundcloud.com"] },
+  { name: "Reddit", hosts: ["reddit.com", "redd.it"] },
+  { name: "Threads", hosts: ["threads.net", "threads.com"] },
+  { name: "Twitch", hosts: ["twitch.tv"] },
+  { name: "Pixiv", hosts: ["pixiv.net"] },
+];
+
+function omdownDetectPlatform(urlString) {
+  const host = new URL(urlString).hostname.toLowerCase().replace(/^www\./, "");
+  const found = OMDOWN_PLATFORMS.find((p) =>
+    p.hosts.some((h) => host === h || host.endsWith("." + h))
+  );
+  return found ? found.name : null;
+}
+
+function omdownParseFlight(text) {
+  const rows = {};
+  for (const line of text.split("\n")) {
+    const m = line.match(/^([0-9a-zA-Z]+):(.*)$/);
+    if (!m) continue;
+    try {
+      rows[m[1]] = JSON.parse(m[2]);
+    } catch {
+      // baris non-JSON dilewati
+    }
+  }
+  return rows;
+}
+
+function omdownPickResult(rows) {
+  const head = rows["0"];
+  if (head && typeof head.a === "string") {
+    const ref = head.a.match(/^\$@([0-9a-zA-Z]+)$/);
+    if (ref && rows[ref[1]] !== undefined) return rows[ref[1]];
+  }
+  for (const key of Object.keys(rows)) {
+    if (key === "0") continue;
+    if (rows[key] && typeof rows[key] === "object") return rows[key];
+  }
+  return null;
+}
+
+function omdownCollectLinks(root) {
+  const out = new Set();
+  const walk = (v, depth) => {
+    if (v == null || depth > 8) return;
+    if (typeof v === "string") {
+      if (/^https?:\/\//i.test(v)) out.add(v);
+    } else if (Array.isArray(v)) {
+      v.forEach((x) => walk(x, depth + 1));
+    } else if (typeof v === "object") {
+      Object.values(v).forEach((x) => walk(x, depth + 1));
+    }
+  };
+  walk(root, 0);
+  return [...out];
+}
+
+async function handleOmdown(req, res) {
+  try {
+    const mediaUrl = String(req.query?.url || "").trim();
+    if (!mediaUrl) {
+      return res.status(400).json({
+        status: false,
+        message:
+          'Parameter "url" wajib diisi, example: "/api/omdown?url=https://www.tiktok.com/@user/video/7392574982087249157"',
+        error: "Missing parameter: url",
+      });
+    }
+
+    try {
+      new URL(mediaUrl);
+    } catch {
+      return res.status(400).json({
+        status: false,
+        message: "Format URL tidak valid, harus diawali http:// atau https://",
+        error: "Invalid URL",
+      });
+    }
+
+    const platform =
+      String(req.query?.platform || "").trim() || omdownDetectPlatform(mediaUrl);
+    if (!platform) {
+      return res.status(400).json({
+        status: false,
+        message:
+          'Platform tidak dikenali dari URL. Isi manual lewat parameter "platform", example: "/api/omdown?url=...&platform=TikTok"',
+        error: "Unsupported platform",
+      });
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), OMDOWN_TIMEOUT_MS);
+    let response;
+    let raw;
+    try {
+      response = await fetch(OMDOWN_BASE_URL, {
+        method: "POST",
+        headers: {
+          Accept: "text/x-component",
+          "Content-Type": "text/plain;charset=UTF-8",
+          "next-action": OMDOWN_ACTION_ID,
+          "next-router-state-tree": OMDOWN_ROUTER_STATE,
+          "User-Agent": OMDOWN_USER_AGENT,
+          Origin: "https://www.omdown.site",
+          Referer: OMDOWN_BASE_URL,
+        },
+        body: JSON.stringify([mediaUrl, platform, "id"]),
+        signal: controller.signal,
+      });
+      raw = await response.text();
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (!response.ok) {
+      throw new Error(`Omdown membalas HTTP ${response.status}`);
+    }
+
+    const rows = omdownParseFlight(raw);
+    const result = omdownPickResult(rows);
+    if (result === null) {
+      throw new Error("Respons Omdown kosong atau formatnya tidak dikenali");
+    }
+
+    const upstreamError =
+      (result && typeof result === "object" && result.error) ||
+      (result && typeof result === "object" && result.success === false
+        ? result.message || "Omdown mengembalikan status gagal"
+        : null);
+    if (upstreamError) {
+      throw new Error(
+        typeof upstreamError === "string" ? upstreamError : JSON.stringify(upstreamError)
+      );
+    }
+
+    return res.status(200).json({
+      status: true,
+      source: "Omdown",
+      data: {
+        platform,
+        input_url: mediaUrl,
+        links: omdownCollectLinks(result),
+        result,
+      },
+    });
+  } catch (error) {
+    const isTimeout = error.name === "AbortError";
+    return res.status(isTimeout ? 504 : 502).json({
+      status: false,
+      message: isTimeout
+        ? "Permintaan ke Omdown timeout, coba lagi beberapa saat"
+        : "Gagal mengambil data dari Omdown",
+      error: error.message,
+    });
+  }
+}
 //editphoto
 // @description Image edit AI
 // @category AI
@@ -9097,6 +9276,7 @@ case "upscale-image":
     return handlePhotoEditorAi(req, res);
     case "unblur-img":
     return handleUnblurImg(req, res);
+    case "omdown": return handleOmdown(req, res);
   case "tourl":
   return handleTourl(req, res);
   case "ringtone":
