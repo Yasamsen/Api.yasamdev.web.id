@@ -140,6 +140,15 @@ function omdownCollectLinks(root) {
   return [...out];
 }
 
+// Cadangan: ambil link langsung dari teks mentah kalau parser RSC gagal
+function omdownLinksFromRaw(raw) {
+  const found = raw.match(/https?:\\?\/\\?\/[^\s"'\\<>]+/g) || [];
+  const clean = found
+    .map((u) => u.replace(/\\u0026/g, "&").replace(/\\\//g, "/"))
+    .filter((u) => !/omdown\.site\/(_next|images|icons)/i.test(u));
+  return [...new Set(clean)];
+}
+
 async function handleOmdown(req, res) {
   try {
     const mediaUrl = String(req.query?.url || "").trim();
@@ -162,13 +171,12 @@ async function handleOmdown(req, res) {
       });
     }
 
-    const platform =
-      String(req.query?.platform || "").trim() || omdownDetectPlatform(mediaUrl);
+    const platform = omdownDetectPlatform(mediaUrl);
     if (!platform) {
       return res.status(400).json({
         status: false,
         message:
-          'Platform tidak dikenali dari URL. Isi manual lewat parameter "platform", example: "/api/omdown?url=...&platform=TikTok"',
+          'Platform tidak didukung. Gunakan link dari TikTok, YouTube, Instagram, Facebook, X, Spotify, SoundCloud, Pinterest, Reddit, CapCut, Threads, Snapchat, Twitch, DeviantArt, Pixiv, MangaDex, atau PineDrama, example: "/api/omdown?url=https://www.tiktok.com/@user/video/7392574982087249157"',
         error: "Unsupported platform",
       });
     }
@@ -196,7 +204,8 @@ async function handleOmdown(req, res) {
     } finally {
       clearTimeout(timer);
     }
-    
+
+    // Mode debug: tambahkan &debug=1 untuk melihat balasan mentah
     if (String(req.query?.debug || "") === "1") {
       return res.status(200).json({
         status: true,
@@ -207,15 +216,29 @@ async function handleOmdown(req, res) {
         rows: omdownParseFlight(raw),
       });
     }
-    
+
     if (!response.ok) {
       throw new Error(`Omdown membalas HTTP ${response.status}`);
     }
 
     const rows = omdownParseFlight(raw);
-    const result = omdownPickResult(rows);
+    let result = omdownPickResult(rows);
+    let links = result !== null ? omdownCollectLinks(result) : [];
+
+    // Fallback: kalau parser RSC tidak menemukan apa pun, cari link di teks mentah
+    if (result === null || links.length === 0) {
+      const rawLinks = omdownLinksFromRaw(raw);
+      if (rawLinks.length > 0) {
+        links = rawLinks;
+        if (result === null) result = { raw_preview: raw.slice(0, 1500) };
+      }
+    }
+
     if (result === null) {
-      throw new Error("Respons Omdown kosong atau formatnya tidak dikenali");
+      const preview = raw.replace(/\s+/g, " ").slice(0, 300);
+      throw new Error(
+        `Respons Omdown kosong atau formatnya tidak dikenali (HTTP ${response.status}, ${response.headers.get("content-type")}). Cuplikan: ${preview}`
+      );
     }
 
     const upstreamError =
@@ -235,7 +258,7 @@ async function handleOmdown(req, res) {
       data: {
         platform,
         input_url: mediaUrl,
-        links: omdownCollectLinks(result),
+        links,
         result,
       },
     });
