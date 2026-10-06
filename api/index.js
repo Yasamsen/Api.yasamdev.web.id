@@ -61,6 +61,7 @@ async function ensureJsonBody(req) {
   }
 }
 //omdoenload
+const OMDOWN_ORIGIN = "https://www.omdown.site";
 const OMDOWN_BASE_URL = "https://www.omdown.site/id";
 const OMDOWN_ACTION_ID = "70fe8fea45b688241b80ac22216712ce589fb80dc7";
 const OMDOWN_ROUTER_STATE =
@@ -97,15 +98,39 @@ function omdownDetectPlatform(urlString) {
   return found ? found.name : null;
 }
 
+// Parser RSC: baris JSON "ID:{...}\n" dan text row "ID:T<hexLen>,<teks sepanjang hexLen byte>"
 function omdownParseFlight(text) {
+  const buf = Buffer.from(text, "utf8");
   const rows = {};
-  for (const line of text.split("\n")) {
-    const m = line.match(/^([0-9a-zA-Z]+):(.*)$/);
-    if (!m) continue;
-    try {
-      rows[m[1]] = JSON.parse(m[2]);
-    } catch {
-      // baris non-JSON dilewati
+  let i = 0;
+  while (i < buf.length) {
+    while (i < buf.length && (buf[i] === 10 || buf[i] === 13)) i++;
+    if (i >= buf.length) break;
+    const colon = buf.indexOf(58, i); // ":"
+    if (colon === -1) break;
+    const id = buf.toString("utf8", i, colon);
+    if (!/^[0-9a-zA-Z]+$/.test(id)) break;
+    i = colon + 1;
+
+    if (buf[i] === 84) {
+      // "T" = text row
+      const comma = buf.indexOf(44, i);
+      if (comma === -1) break;
+      const len = parseInt(buf.toString("utf8", i + 1, comma), 16);
+      if (Number.isNaN(len)) break;
+      const start = comma + 1;
+      rows[id] = buf.toString("utf8", start, start + len);
+      i = start + len;
+    } else {
+      let end = buf.indexOf(10, i);
+      if (end === -1) end = buf.length;
+      const line = buf.toString("utf8", i, end);
+      try {
+        rows[id] = JSON.parse(line);
+      } catch {
+        rows[id] = line;
+      }
+      i = end + 1;
     }
   }
   return rows;
@@ -124,12 +149,38 @@ function omdownPickResult(rows) {
   return null;
 }
 
+// Ganti referensi "$2" dengan isinya, dan path "/api/media/..." jadi URL lengkap
+function omdownResolve(value, rows, depth = 0) {
+  if (depth > 10) return value;
+  if (typeof value === "string") {
+    if (value === "$undefined") return null;
+    const m = value.match(/^\$([0-9a-zA-Z]+)$/);
+    if (m && m[1] !== "0" && rows[m[1]] !== undefined) {
+      return omdownResolve(rows[m[1]], rows, depth + 1);
+    }
+    if (value.startsWith("$$")) return value.slice(1);
+    if (value.startsWith("/api/media/")) return OMDOWN_ORIGIN + value;
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => omdownResolve(v, rows, depth + 1));
+  }
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = omdownResolve(v, rows, depth + 1);
+    }
+    return out;
+  }
+  return value;
+}
+
 function omdownCollectLinks(root) {
   const out = new Set();
   const walk = (v, depth) => {
     if (v == null || depth > 8) return;
     if (typeof v === "string") {
-      if (/^https?:\/\//i.test(v)) out.add(v);
+      if (/^https?:\/\//i.test(v) && !/\s/.test(v)) out.add(v);
     } else if (Array.isArray(v)) {
       v.forEach((x) => walk(x, depth + 1));
     } else if (typeof v === "object") {
@@ -138,15 +189,6 @@ function omdownCollectLinks(root) {
   };
   walk(root, 0);
   return [...out];
-}
-
-// Cadangan: ambil link langsung dari teks mentah kalau parser RSC gagal
-function omdownLinksFromRaw(raw) {
-  const found = raw.match(/https?:\\?\/\\?\/[^\s"'\\<>]+/g) || [];
-  const clean = found
-    .map((u) => u.replace(/\\u0026/g, "&").replace(/\\\//g, "/"))
-    .filter((u) => !/omdown\.site\/(_next|images|icons)/i.test(u));
-  return [...new Set(clean)];
 }
 
 async function handleOmdown(req, res) {
@@ -194,7 +236,7 @@ async function handleOmdown(req, res) {
           "next-action": OMDOWN_ACTION_ID,
           "next-router-state-tree": OMDOWN_ROUTER_STATE,
           "User-Agent": OMDOWN_USER_AGENT,
-          Origin: "https://www.omdown.site",
+          Origin: OMDOWN_ORIGIN,
           Referer: OMDOWN_BASE_URL,
         },
         body: JSON.stringify([mediaUrl, platform, "id"]),
@@ -205,6 +247,8 @@ async function handleOmdown(req, res) {
       clearTimeout(timer);
     }
 
+    const rows = omdownParseFlight(raw);
+
     // Mode debug: tambahkan &debug=1 untuk melihat balasan mentah
     if (String(req.query?.debug || "") === "1") {
       return res.status(200).json({
@@ -212,8 +256,8 @@ async function handleOmdown(req, res) {
         debug: true,
         http_status: response.status,
         content_type: response.headers.get("content-type"),
-        raw: raw.slice(0, 5000),
-        rows: omdownParseFlight(raw),
+        raw_tail: raw.slice(-3000),
+        rows,
       });
     }
 
@@ -221,25 +265,15 @@ async function handleOmdown(req, res) {
       throw new Error(`Omdown membalas HTTP ${response.status}`);
     }
 
-    const rows = omdownParseFlight(raw);
-    let result = omdownPickResult(rows);
-    let links = result !== null ? omdownCollectLinks(result) : [];
-
-    // Fallback: kalau parser RSC tidak menemukan apa pun, cari link di teks mentah
-    if (result === null || links.length === 0) {
-      const rawLinks = omdownLinksFromRaw(raw);
-      if (rawLinks.length > 0) {
-        links = rawLinks;
-        if (result === null) result = { raw_preview: raw.slice(0, 1500) };
-      }
-    }
-
-    if (result === null) {
+    const picked = omdownPickResult(rows);
+    if (picked === null) {
       const preview = raw.replace(/\s+/g, " ").slice(0, 300);
       throw new Error(
-        `Respons Omdown kosong atau formatnya tidak dikenali (HTTP ${response.status}, ${response.headers.get("content-type")}). Cuplikan: ${preview}`
+        `Respons Omdown kosong atau formatnya tidak dikenali (HTTP ${response.status}). Cuplikan: ${preview}`
       );
     }
+
+    const result = omdownResolve(picked, rows);
 
     const upstreamError =
       (result && typeof result === "object" && result.error) ||
@@ -252,13 +286,16 @@ async function handleOmdown(req, res) {
       );
     }
 
+    const allLinks = omdownCollectLinks(result);
+    const mediaLinks = allLinks.filter((u) => u.startsWith(OMDOWN_ORIGIN + "/api/media/"));
+
     return res.status(200).json({
       status: true,
       source: "Omdown",
       data: {
         platform,
         input_url: mediaUrl,
-        links,
+        links: mediaLinks.length ? mediaLinks : allLinks,
         result,
       },
     });
