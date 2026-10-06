@@ -196,7 +196,18 @@ async function handleOmdown(req, res) {
     } finally {
       clearTimeout(timer);
     }
-
+    
+    if (String(req.query?.debug || "") === "1") {
+      return res.status(200).json({
+        status: true,
+        debug: true,
+        http_status: response.status,
+        content_type: response.headers.get("content-type"),
+        raw: raw.slice(0, 5000),
+        rows: omdownParseFlight(raw),
+      });
+    }
+    
     if (!response.ok) {
       throw new Error(`Omdown membalas HTTP ${response.status}`);
     }
