@@ -60,6 +60,93 @@ async function ensureJsonBody(req) {
     req.body = {};
   }
 }
+//Editvideo
+async function handleVideoToPrompt(req, res) {
+  try {
+    if (req.method !== "GET") {
+      return res.status(405).json({
+        status: false,
+        message: "Method tidak diizinkan. Gunakan GET.",
+        error: "Method Not Allowed"
+      });
+    }
+
+    const videoUrl = req.query?.url;
+    const personalization = req.query?.personalization || "";
+
+    if (!videoUrl) {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter url wajib diisi. Contoh: /api/video-to-prompt?url=https://contoh.com/video.mp4",
+        error: "Parameter 'url' tidak ditemukan"
+      });
+    }
+
+    // Validasi URL
+    let parsedVideoUrl;
+
+    try {
+      parsedVideoUrl = new URL(videoUrl);
+    } catch {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter url harus berupa URL yang valid. Contoh: /api/video-to-prompt?url=https://contoh.com/video.mp4",
+        error: "Invalid video URL"
+      });
+    }
+
+    const params = new URLSearchParams({
+      action: "generate",
+      lang: "id",
+      video: parsedVideoUrl.toString()
+    });
+
+    if (personalization.trim()) {
+      params.append("personalization", personalization.trim());
+    }
+
+    const targetUrl =
+      `https://starlabs.biz.id/videotoprompt/proxy.php?${params.toString()}`;
+
+    const response = await fetch(targetUrl, {
+      method: "GET",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json"
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Server StarLabs mengembalikan HTTP ${response.status}`
+      );
+    }
+
+    const data = await response.json();
+
+    if (!data.success) {
+      throw new Error(data.error || "Gagal memproses video.");
+    }
+
+    return res.status(200).json({
+      status: true,
+      source: "StarLabs Video to Prompt",
+      data: {
+        scenes: data.scenes || [],
+        info: data.info || null,
+        personalization: personalization || null
+      }
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      status: false,
+      message: "Gagal memproses video menjadi prompt AI.",
+      error: error.message
+    });
+  }
+}
 //omdoenload
 const OMDOWN_ORIGIN = "https://www.omdown.site";
 const OMDOWN_BASE_URL = "https://www.omdown.site/id";
@@ -9347,6 +9434,8 @@ case "upscale-image":
     return handlePhotoEditorAi(req, res);
     case "unblur-img":
     return handleUnblurImg(req, res);
+case "video-to-prompt":
+  return handleVideoToPrompt(req, res);
     case "omdown": return handleOmdown(req, res);
   case "tourl":
   return handleTourl(req, res);
