@@ -151,6 +151,67 @@ async function handleVideoToPrompt(req, res) {
 // ===================== MOTIONBGS =====================
 const MOTIONBGS_BASE = "https://motionbgs.com";
 
+const MOTIONBGS_PROFILES = [
+  {
+    // Chrome 141 - Windows
+    engine: "chromium",
+    ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+    hints: {
+      "Sec-Ch-Ua": '"Chromium";v="141", "Not?A_Brand";v="8", "Google Chrome";v="141"',
+      "Sec-Ch-Ua-Mobile": "?0",
+      "Sec-Ch-Ua-Platform": '"Windows"'
+    }
+  },
+  {
+    // Edge 141 - Windows
+    engine: "chromium",
+    ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0",
+    hints: {
+      "Sec-Ch-Ua": '"Microsoft Edge";v="141", "Chromium";v="141", "Not?A_Brand";v="8"',
+      "Sec-Ch-Ua-Mobile": "?0",
+      "Sec-Ch-Ua-Platform": '"Windows"'
+    }
+  },
+  {
+    // Chrome 140 - macOS
+    engine: "chromium",
+    ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+    hints: {
+      "Sec-Ch-Ua": '"Chromium";v="140", "Not=A?Brand";v="24", "Google Chrome";v="140"',
+      "Sec-Ch-Ua-Mobile": "?0",
+      "Sec-Ch-Ua-Platform": '"macOS"'
+    }
+  },
+  {
+    // Chrome 141 - Linux
+    engine: "chromium",
+    ua: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+    hints: {
+      "Sec-Ch-Ua": '"Chromium";v="141", "Not?A_Brand";v="8", "Google Chrome";v="141"',
+      "Sec-Ch-Ua-Mobile": "?0",
+      "Sec-Ch-Ua-Platform": '"Linux"'
+    }
+  },
+  {
+    // Firefox 143 - Windows
+    engine: "firefox",
+    ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:143.0) Gecko/20100101 Firefox/143.0",
+    hints: {}
+  },
+  {
+    // Firefox 142 - macOS
+    engine: "firefox",
+    ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:142.0) Gecko/20100101 Firefox/142.0",
+    hints: {}
+  },
+  {
+    // Safari 18 - macOS
+    engine: "safari",
+    ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15",
+    hints: {}
+  }
+];
+
 function motionbgsAbs(path) {
   if (!path) return null;
   try {
@@ -164,11 +225,24 @@ function motionbgsClean(text) {
   return String(text || "").replace(/\s+/g, " ").trim();
 }
 
+function motionbgsSleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function motionbgsShuffle(list) {
+  const pool = [...list];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool;
+}
+
 function motionbgsParseSlug(input) {
   const raw = String(input || "").trim();
   if (!raw) return null;
 
-  // Format slug saja, contoh: "nelliel"
+  // Format slug saja, contoh: "celestial-veil"
   if (/^[a-z0-9][a-z0-9-]*$/i.test(raw)) return raw.toLowerCase();
 
   // Format URL lengkap, hanya domain motionbgs.com
@@ -183,31 +257,158 @@ function motionbgsParseSlug(input) {
   }
 }
 
-async function motionbgsFetchHtml(slug) {
+function motionbgsBuildHeaders(profile) {
+  const engine = profile.engine || "chromium";
+
+  if (engine === "firefox") {
+    return {
+      "User-Agent": profile.ua,
+      Accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/png,image/svg+xml,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Accept-Encoding": "gzip, deflate, br",
+      Referer: "https://www.google.com/",
+      DNT: "1",
+      "Upgrade-Insecure-Requests": "1",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "cross-site",
+      "Sec-Fetch-User": "?1",
+      Priority: "u=0, i"
+    };
+  }
+
+  if (engine === "safari") {
+    return {
+      "User-Agent": profile.ua,
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Accept-Encoding": "gzip, deflate, br",
+      Referer: "https://www.google.com/",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "cross-site",
+      Priority: "u=0, i"
+    };
+  }
+
+  // Chrome / Edge (Chromium)
+  return {
+    ...profile.hints,
+    "Upgrade-Insecure-Requests": "1",
+    "User-Agent": profile.ua,
+    Accept:
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    Referer: "https://www.google.com/",
+    "Sec-Fetch-Site": "cross-site",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-User": "?1",
+    "Sec-Fetch-Dest": "document",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Accept-Language": "en-US,en;q=0.9,id;q=0.8",
+    Priority: "u=0, i"
+  };
+}
+
+function motionbgsLooksValid(html) {
+  return (
+    typeof html === "string" &&
+    html.length > 500 &&
+    /og:title|<h1/i.test(html) &&
+    !/Just a moment|cf-challenge|Attention Required|Access denied/i.test(html)
+  );
+}
+
+async function motionbgsRequest(url, headers = {}, timeoutMs = 5000) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(`${MOTIONBGS_BASE}/${slug}`, {
+    const response = await fetch(url, {
       signal: controller.signal,
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "en-US,en;q=0.9"
-      }
+      headers,
+      redirect: "follow"
     });
+    const text = await response.text();
 
-    if (!response.ok) {
-      const err = new Error(`Upstream merespons dengan status ${response.status}`);
-      err.statusCode = response.status === 404 ? 404 : 502;
-      throw err;
-    }
+    const cookies =
+      typeof response.headers.getSetCookie === "function"
+        ? response.headers
+            .getSetCookie()
+            .map((c) => c.split(";")[0])
+            .filter(Boolean)
+        : [];
 
-    return await response.text();
+    return { status: response.status, ok: response.ok, text, cookies };
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Kunjungi homepage dulu untuk mendapatkan cookie, seperti pengunjung biasa
+async function motionbgsWarmUp(profile, timeoutMs) {
+  try {
+    const headers = motionbgsBuildHeaders(profile);
+    delete headers.Referer;
+    headers["Sec-Fetch-Site"] = "none";
+
+    const result = await motionbgsRequest(`${MOTIONBGS_BASE}/`, headers, timeoutMs);
+    return result.cookies.join("; ");
+  } catch {
+    return "";
+  }
+}
+
+async function motionbgsFetchHtml(slug) {
+  const target = `${MOTIONBGS_BASE}/${slug}`;
+  const deadline = Date.now() + 8500; // aman untuk batas 10 detik Vercel Hobby
+  const profiles = motionbgsShuffle(MOTIONBGS_PROFILES).slice(0, 3);
+  let lastStatus = null;
+
+  for (let i = 0; i < profiles.length; i++) {
+    if (deadline - Date.now() < 1500) break;
+    const profile = profiles[i];
+
+    try {
+      const headers = motionbgsBuildHeaders(profile);
+
+      // Percobaan pertama langsung; percobaan berikutnya dengan warm-up cookie
+      if (i > 0) {
+        const cookie = await motionbgsWarmUp(profile, Math.min(3000, deadline - Date.now() - 1000));
+        if (cookie) headers.Cookie = cookie;
+        headers.Referer = `${MOTIONBGS_BASE}/`;
+        headers["Sec-Fetch-Site"] = "same-origin";
+        delete headers["Sec-Fetch-User"];
+      }
+
+      const timeout = Math.min(5000, deadline - Date.now() - 300);
+      if (timeout < 800) break;
+
+      const result = await motionbgsRequest(target, headers, timeout);
+      lastStatus = result.status;
+
+      if (result.status === 404) {
+        const err = new Error("Halaman tidak ditemukan di motionbgs.com (404)");
+        err.statusCode = 404;
+        throw err;
+      }
+
+      if (result.ok && motionbgsLooksValid(result.text)) return result.text;
+    } catch (error) {
+      if (error.statusCode === 404) throw error;
+      lastStatus = lastStatus ?? 0;
+    }
+
+    await motionbgsSleep(300);
+  }
+
+  const err = new Error(
+    lastStatus === 403
+      ? "Diblokir oleh motionbgs.com (403), kemungkinan IP server Vercel dibatasi"
+      : `Gagal mengakses motionbgs.com (status terakhir: ${lastStatus})`
+  );
+  err.statusCode = 502;
+  throw err;
 }
 
 function motionbgsParse(html, slug) {
@@ -260,18 +461,17 @@ function motionbgsParse(html, slug) {
   });
 
   // Video preview
-  const previewPath = $('a[href*="/media/"][href$=".mp4"], video source[src$=".mp4"]').first();
+  const previewEl = $('a[href*="/media/"][href$=".mp4"], video source[src$=".mp4"]').first();
   const previewVideo =
-    meta("og:video") ||
-    motionbgsAbs(previewPath.attr("href") || previewPath.attr("src"));
+    meta("og:video") || motionbgsAbs(previewEl.attr("href") || previewEl.attr("src"));
 
   // Wallpaper terkait
   const related = [];
   const relSeen = new Set([slug]);
   $("a[title]").each((_, el) => {
     const href = $(el).attr("href") || "";
-    const title = $(el).attr("title") || "";
-    if (!/(live|animated) wallpaper/i.test(title)) return;
+    const relTitle = $(el).attr("title") || "";
+    if (!/(live|animated) wallpaper/i.test(relTitle)) return;
 
     const absUrl = motionbgsAbs(href);
     const relSlug = absUrl ? absUrl.replace(`${MOTIONBGS_BASE}/`, "") : "";
@@ -279,7 +479,7 @@ function motionbgsParse(html, slug) {
     relSeen.add(relSlug);
 
     related.push({
-      title: motionbgsClean(title.replace(/\s*(live|animated) wallpaper\s*$/i, "")),
+      title: motionbgsClean(relTitle.replace(/\s*(live|animated) wallpaper\s*$/i, "")),
       slug: relSlug,
       url: absUrl,
       thumbnail: motionbgsAbs($(el).find("img").attr("data-src") || $(el).find("img").attr("src"))
@@ -308,7 +508,7 @@ async function handleMotionbgs(req, res) {
       return res.status(400).json({
         status: false,
         message: "Parameter 'url' wajib diisi.",
-        example: "/api/motionbgs?url=nelliel"
+        example: "/api/motionbgs?url=https://motionbgs.com/celestial-veil"
       });
     }
 
@@ -316,8 +516,8 @@ async function handleMotionbgs(req, res) {
     if (!slug) {
       return res.status(400).json({
         status: false,
-        message: "Parameter 'url' tidak valid. Gunakan slug atau URL halaman motionbgs.com.",
-        example: "/api/motionbgs?url=https://motionbgs.com/nelliel"
+        message: "Parameter 'url' tidak valid. Gunakan URL halaman motionbgs.com.",
+        example: "/api/motionbgs?url=https://motionbgs.com/celestial-veil"
       });
     }
 
@@ -351,6 +551,7 @@ async function handleMotionbgs(req, res) {
     });
   }
 }
+// =====================================================
 // =====================================================
 //omdoenload
 const OMDOWN_ORIGIN = "https://www.omdown.site";
