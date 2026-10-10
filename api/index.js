@@ -147,6 +147,211 @@ async function handleVideoToPrompt(req, res) {
     });
   }
 }
+//live walpeper 
+// ===================== MOTIONBGS =====================
+const MOTIONBGS_BASE = "https://motionbgs.com";
+
+function motionbgsAbs(path) {
+  if (!path) return null;
+  try {
+    return new URL(path, MOTIONBGS_BASE).href;
+  } catch {
+    return null;
+  }
+}
+
+function motionbgsClean(text) {
+  return String(text || "").replace(/\s+/g, " ").trim();
+}
+
+function motionbgsParseSlug(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return null;
+
+  // Format slug saja, contoh: "nelliel"
+  if (/^[a-z0-9][a-z0-9-]*$/i.test(raw)) return raw.toLowerCase();
+
+  // Format URL lengkap, hanya domain motionbgs.com
+  try {
+    const u = new URL(raw);
+    if (u.hostname !== "motionbgs.com" && u.hostname !== "www.motionbgs.com") return null;
+    const slug = u.pathname.replace(/^\/+|\/+$/g, "");
+    if (!/^[a-z0-9][a-z0-9-]*$/i.test(slug)) return null;
+    return slug.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+async function motionbgsFetchHtml(slug) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const response = await fetch(`${MOTIONBGS_BASE}/${slug}`, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9"
+      }
+    });
+
+    if (!response.ok) {
+      const err = new Error(`Upstream merespons dengan status ${response.status}`);
+      err.statusCode = response.status === 404 ? 404 : 502;
+      throw err;
+    }
+
+    return await response.text();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function motionbgsParse(html, slug) {
+  const $ = cheerio.load(html);
+  const meta = (name) =>
+    $(`meta[property="${name}"]`).attr("content") ||
+    $(`meta[name="${name}"]`).attr("content") ||
+    null;
+
+  const title = motionbgsClean($("h1").first().text()) || meta("og:title");
+
+  // Link download (4K / HD)
+  const downloads = [];
+  const seen = new Set();
+  $('a[href*="/dl/"]').each((_, el) => {
+    const href = $(el).attr("href");
+    const match = href && href.match(/\/dl\/([a-z0-9]+)\/(\d+)/i);
+    if (!match) return;
+    const url = motionbgsAbs(href);
+    if (seen.has(url)) return;
+    seen.add(url);
+
+    const text = motionbgsClean($(el).text());
+    downloads.push({
+      quality: match[1].toUpperCase(),
+      resolution: (text.match(/(\d{3,4}\s*x\s*\d{3,4})/i) || [])[1]?.replace(/\s+/g, "") || null,
+      size: (text.match(/\(([\d.,]+\s*[KMG]b)\)/i) || [])[1] || null,
+      format: (text.match(/\b(mp4|webm|gif)\b/i) || [])[1]?.toLowerCase() || null,
+      url
+    });
+  });
+
+  const idFromDl = downloads.length
+    ? (downloads[0].url.match(/\/dl\/[a-z0-9]+\/(\d+)/i) || [])[1] || null
+    : null;
+
+  // Tag: link /tag: yang punya thumbnail 48x48 (bukan menu navigasi)
+  const tags = [];
+  const tagSeen = new Set();
+  $('a[href*="/tag:"]').each((_, el) => {
+    if (!$(el).find('img[src*="/i/c/48x48/"]').length) return;
+    const url = motionbgsAbs($(el).attr("href"));
+    if (!url || tagSeen.has(url)) return;
+    tagSeen.add(url);
+    tags.push({
+      name: motionbgsClean($(el).text()),
+      url,
+      thumbnail: motionbgsAbs($(el).find("img").attr("src"))
+    });
+  });
+
+  // Video preview
+  const previewPath = $('a[href*="/media/"][href$=".mp4"], video source[src$=".mp4"]').first();
+  const previewVideo =
+    meta("og:video") ||
+    motionbgsAbs(previewPath.attr("href") || previewPath.attr("src"));
+
+  // Wallpaper terkait
+  const related = [];
+  const relSeen = new Set([slug]);
+  $("a[title]").each((_, el) => {
+    const href = $(el).attr("href") || "";
+    const title = $(el).attr("title") || "";
+    if (!/(live|animated) wallpaper/i.test(title)) return;
+
+    const absUrl = motionbgsAbs(href);
+    const relSlug = absUrl ? absUrl.replace(`${MOTIONBGS_BASE}/`, "") : "";
+    if (!/^[a-z0-9][a-z0-9-]*$/i.test(relSlug) || relSeen.has(relSlug)) return;
+    relSeen.add(relSlug);
+
+    related.push({
+      title: motionbgsClean(title.replace(/\s*(live|animated) wallpaper\s*$/i, "")),
+      slug: relSlug,
+      url: absUrl,
+      thumbnail: motionbgsAbs($(el).find("img").attr("data-src") || $(el).find("img").attr("src"))
+    });
+  });
+
+  return {
+    id: idFromDl,
+    slug,
+    title,
+    description: meta("description") || meta("og:description"),
+    url: meta("og:url") || `${MOTIONBGS_BASE}/${slug}`,
+    thumbnail: meta("og:image"),
+    previewVideo,
+    tags,
+    downloads,
+    related
+  };
+}
+
+async function handleMotionbgs(req, res) {
+  try {
+    const input = req.query.url || req.query.slug;
+
+    if (!input) {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter 'url' wajib diisi.",
+        example: "/api/motionbgs?url=nelliel"
+      });
+    }
+
+    const slug = motionbgsParseSlug(input);
+    if (!slug) {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter 'url' tidak valid. Gunakan slug atau URL halaman motionbgs.com.",
+        example: "/api/motionbgs?url=https://motionbgs.com/nelliel"
+      });
+    }
+
+    const html = await motionbgsFetchHtml(slug);
+    const data = motionbgsParse(html, slug);
+
+    if (!data.title && !data.downloads.length) {
+      return res.status(404).json({
+        status: false,
+        message: "Data wallpaper tidak ditemukan pada halaman tersebut.",
+        error: "Struktur halaman tidak sesuai atau slug bukan halaman wallpaper"
+      });
+    }
+
+    return res.status(200).json({
+      status: true,
+      source: "MotionBGs",
+      data
+    });
+  } catch (error) {
+    const code = error.statusCode || (error.name === "AbortError" ? 504 : 500);
+    return res.status(code).json({
+      status: false,
+      message:
+        code === 404
+          ? "Wallpaper tidak ditemukan di MotionBGs."
+          : code === 504
+          ? "Permintaan ke MotionBGs melebihi batas waktu."
+          : "Gagal mengambil data dari MotionBGs.",
+      error: error.message
+    });
+  }
+}
+// =====================================================
 //omdoenload
 const OMDOWN_ORIGIN = "https://www.omdown.site";
 const OMDOWN_BASE_URL = "https://www.omdown.site/id";
@@ -9437,6 +9642,7 @@ case "upscale-image":
 case "video-to-prompt":
   return handleVideoToPrompt(req, res);
     case "omdown": return handleOmdown(req, res);
+    case "motionbgs": return handleMotionbgs(req, res);
   case "tourl":
   return handleTourl(req, res);
   case "ringtone":
