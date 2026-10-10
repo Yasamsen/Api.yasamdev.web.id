@@ -12,49 +12,59 @@ export default {
       name: "url",
       type: "string",
       required: true,
-      description: "Slug atau URL halaman wallpaper di motionbgs.com",
-      example: "nelliel"
+      description: "URL halaman wallpaper di motionbgs.com (slug saja juga diterima)",
+      example: "https://motionbgs.com/celestial-veil"
     }
   ],
   responseExample: {
     status: true,
     source: "MotionBGs",
     data: {
-      id: "10273",
-      slug: "nelliel",
-      title: "Nelliel Hollow Beauty Live Wallpaper",
-      description: "4K Nelliel Hollow Beauty Live Wallpaper ✓ Set a Anime (Bleach) Inspired Animated Wallpaper",
-      url: "https://motionbgs.com/nelliel",
-      thumbnail: "https://motionbgs.com/media/10273/nelliel.3840x2160.jpg",
-      previewVideo: "https://motionbgs.com/media/10273/nelliel.960x540.mp4",
+      id: "8626",
+      slug: "celestial-veil",
+      title: "Celestial Veil Live Wallpaper",
+      description: "4K Celestial Veil Live Wallpaper ✓ Set a Anime (Anime Girl) Inspired Animated Wallpaper",
+      url: "https://motionbgs.com/celestial-veil",
+      thumbnail: "https://motionbgs.com/media/8626/celestial-veil.3840x2160.jpg",
+      previewVideo: "https://motionbgs.com/media/8626/celestial-veil.960x540.mp4",
       tags: [
         {
-          name: "Bleach",
-          url: "https://motionbgs.com/tag:bleach/",
-          thumbnail: "https://motionbgs.com/i/c/48x48/media/2706/sosuke-aizen-bleach.jpg"
+          name: "Dark",
+          url: "https://motionbgs.com/tag:dark/",
+          thumbnail: "https://motionbgs.com/i/c/48x48/media/1962/straw-hat-luffy.jpg"
+        },
+        {
+          name: "Fantasy",
+          url: "https://motionbgs.com/tag:fantasy/",
+          thumbnail: "https://motionbgs.com/i/c/48x48/media/8818/crown-of-midnight.3840x2160.jpg"
+        },
+        {
+          name: "Anime Girl",
+          url: "https://motionbgs.com/tag:girl/",
+          thumbnail: "https://motionbgs.com/i/c/48x48/media/8626/celestial-veil.3840x2160.jpg"
         }
       ],
       downloads: [
         {
           quality: "4K",
           resolution: "3840x2160",
-          size: "36.5Mb",
+          size: "15.8Mb",
           format: "mp4",
-          url: "https://motionbgs.com/dl/4k/10273"
+          url: "https://motionbgs.com/dl/4k/8626"
         },
         {
           quality: "HD",
           resolution: "1920x1080",
-          size: "18.3Mb",
+          size: "1.9Mb",
           format: "mp4",
-          url: "https://motionbgs.com/dl/hd/10273"
+          url: "https://motionbgs.com/dl/hd/8626"
         }
       ],
       related: [
         {
-          title: "Makima Waifu",
-          slug: "makima-waifu",
-          url: "https://motionbgs.com/makima-waifu",
+          title: "Serious Girl",
+          slug: "serious-girl",
+          url: "https://motionbgs.com/serious-girl",
           thumbnail: "https://motionbgs.com/i/c/..."
         }
       ]
@@ -74,5 +84,5 @@ export default {
     { name: "data.downloads", type: "array", description: "Link download per kualitas (quality, resolution, size, format, url)" },
     { name: "data.related", type: "array", description: "Daftar wallpaper terkait (title, slug, url, thumbnail)" }
   ],
-  exampleRequest: "https://samapi.example.com/api/motionbgs?url=nelliel"
+  exampleRequest: "https://samapi.example.com/api/motionbgs?url=https://motionbgs.com/celestial-veil"
 };
