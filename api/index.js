@@ -1733,7 +1733,7 @@ const TOURL_PROVIDERS = [
     name: "catbox.moe",
     expires: "permanen",
     async upload(file) {
-      const form = new globalThis.FormData();
+      const form = new FormData();
       form.append("reqtype", "fileupload");
       form.append("fileToUpload", new Blob([file.buffer], { type: file.mimetype }), file.filename);
       const text = await tourlPostForm("https://catbox.moe/user/api.php", form);
@@ -1745,7 +1745,7 @@ const TOURL_PROVIDERS = [
     name: "uguu.se",
     expires: "sementara (sekitar 3 jam)",
     async upload(file) {
-      const form = new globalThis.FormData();
+      const form = new FormData();
       form.append("files[]", new Blob([file.buffer], { type: file.mimetype }), file.filename);
       const text = await tourlPostForm("https://uguu.se/upload?output=json", form);
       if (/^https?:\/\//i.test(text)) return text.split(/\s+/)[0];
@@ -1759,7 +1759,7 @@ const TOURL_PROVIDERS = [
     name: "tmpfiles.org",
     expires: "sementara (sekitar 1 jam)",
     async upload(file) {
-      const form = new globalThis.FormData();
+      const form = new FormData();
       form.append("file", new Blob([file.buffer], { type: file.mimetype }), file.filename);
       const text = await tourlPostForm("https://tmpfiles.org/api/v1/upload", form);
       const link = JSON.parse(text)?.data?.url;
