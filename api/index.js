@@ -9847,6 +9847,79 @@ async function handleAddSubdomain(req, res) {
 }
 
 
+/**
+ * Album page metadata parser. It extracts the article title, visible track-like
+ * links, and direct media/archive links published on the page. It does not
+ * bypass access controls or proxy/redistribute audio files.
+ */
+async function handleAlbumSearch(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ status: false, message: "Gunakan metode GET." });
+  }
+
+  const rawUrl = req.query?.url || "https://centralagu.blogspot.com/2018/07/album-tembang-nostalgia-mp3.html?m=1";
+  let target;
+  try {
+    target = new URL(String(rawUrl));
+  } catch {
+    return res.status(400).json({ status: false, message: "Parameter url tidak valid." });
+  }
+  if (target.protocol !== "https:" || target.hostname !== "centralagu.blogspot.com" || target.pathname !== "/2018/07/album-tembang-nostalgia-mp3.html") {
+    return res.status(400).json({ status: false, message: "URL harus berupa halaman album Centralagu yang ditentukan." });
+  }
+
+  try {
+    const response = await axios.get(target.toString(), {
+      timeout: 15000,
+      maxRedirects: 3,
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; YasamDevAlbumInfo/1.0)" },
+      responseType: "text",
+      maxContentLength: 3 * 1024 * 1024
+    });
+    const $ = cheerio.load(response.data);
+    const title = ($("h1.post-title").first().text() || $("article h1").first().text() || $("title").first().text() || "Album Tembang Nostalgia MP3").trim();
+    const seen = new Set();
+    const tracks = [];
+    const downloads = [];
+    $(".post-body a, .entry-content a, article a, a[href]").each((_, el) => {
+      const a = $(el);
+      const href = a.attr("href");
+      const text = a.text().replace(/\s+/g, " ").trim();
+      if (!href) return;
+      let link;
+      try { link = new URL(href, target); } catch { return; }
+      if (!/^https?:$/.test(link.protocol)) return;
+      const key = link.toString();
+      if (seen.has(key)) return;
+      seen.add(key);
+      const label = text || link.pathname.split("/").pop() || "Tautan";
+      const mediaLike = /\.(mp3|m4a|ogg|wav|flac|zip|rar)(?:$|\?)/i.test(link.pathname + link.search);
+      const downloadLike = /download|unduh|mp3|audio|drive\.google|mediafire|zippyshare/i.test(label + " " + link.hostname + link.pathname);
+      if (mediaLike) {
+        downloads.push({ title: label, url: key, type: /\.(zip|rar)(?:$|\?)/i.test(link.pathname + link.search) ? "archive" : "audio" });
+      } else if (downloadLike && label.length > 1) {
+        tracks.push({ title: label, url: key });
+      }
+    });
+
+    const uniqueTracks = tracks.filter((item, i, arr) => arr.findIndex(x => x.url === item.url) === i);
+    const uniqueDownloads = downloads.filter((item, i, arr) => arr.findIndex(x => x.url === item.url) === i);
+    return res.status(200).json({
+      status: true,
+      source: target.toString(),
+      title,
+      tracks: uniqueTracks,
+      availableMediaLinks: uniqueDownloads,
+      note: "Endpoint ini hanya membaca tautan yang dipublikasikan pada halaman. Unduh atau salin audio hanya jika diizinkan pemilik hak cipta dan penyedia sumber.",
+      counts: { tracks: uniqueTracks.length, mediaLinks: uniqueDownloads.length }
+    });
+  } catch (error) {
+    console.error("album-search error:", error?.message || error);
+    return res.status(502).json({ status: false, message: "Halaman album tidak dapat dibaca saat ini. Coba lagi nanti." });
+  }
+}
+
 /* ============================================================
  * ROUTER UTAMA
  *
@@ -9873,6 +9946,8 @@ export default async function handler(req, res) {
   const routeKey = getRouteKey(req);
 
   switch (routeKey) {
+    case "album-search":
+      return handleAlbumSearch(req, res);
     case "add-subdomain":
       return handleAddSubdomain(req, res);
     case "download":
