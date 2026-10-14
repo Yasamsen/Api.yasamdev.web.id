@@ -9724,6 +9724,124 @@ async function handleDownload(req, res) {
   }
 }
 
+
+/* ============================================================
+ * ADD SUBDOMAIN (Cloudflare DNS)
+ * Required Vercel env vars:
+ * ROOT_DOMAIN, CLOUDFLARE_ZONE_ID, CLOUDFLARE_API_TOKEN,
+ * ADD_SUBDOMAIN_API_KEY
+ * ============================================================ */
+async function handleAddSubdomain(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ success: false, message: "Gunakan method POST." });
+  }
+
+  const expectedKey = process.env.ADD_SUBDOMAIN_API_KEY;
+  const suppliedKey = req.headers["x-api-key"];
+  if (!expectedKey || !suppliedKey || suppliedKey !== expectedKey) {
+    return res.status(401).json({ success: false, message: "API key tidak valid." });
+  }
+
+  await ensureJsonBody(req);
+  const { subdomain, type, content, ttl = 3600, proxied = false } = req.body || {};
+  const rootDomain = String(process.env.ROOT_DOMAIN || "").trim().toLowerCase().replace(/^\\.+|\\.+$/g, "");
+  const zoneId = process.env.CLOUDFLARE_ZONE_ID;
+  const token = process.env.CLOUDFLARE_API_TOKEN;
+
+  if (!rootDomain || !zoneId || !token) {
+    return res.status(500).json({
+      success: false,
+      message: "Konfigurasi server belum lengkap.",
+      requiredEnv: ["ROOT_DOMAIN", "CLOUDFLARE_ZONE_ID", "CLOUDFLARE_API_TOKEN"]
+    });
+  }
+
+  const label = String(subdomain || "").trim().toLowerCase();
+  if (!label || label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label)) {
+    return res.status(400).json({ success: false, message: "Nama subdomain tidak valid. Masukkan label saja, misalnya panel." });
+  }
+
+  const allowedTypes = ["A", "AAAA", "CNAME", "TXT"];
+  const recordType = String(type || "").toUpperCase();
+  if (!allowedTypes.includes(recordType)) {
+    return res.status(400).json({ success: false, message: "Tipe DNS tidak valid.", allowed: allowedTypes });
+  }
+
+  const value = String(content ?? "").trim();
+  if (!value || value.length > 2048) {
+    return res.status(400).json({ success: false, message: "Content wajib diisi (maksimal 2048 karakter)." });
+  }
+
+  const isProxied = proxied === true || proxied === "true" || proxied === "active";
+  const ttlNumber = Number(ttl);
+  if (!Number.isInteger(ttlNumber) || ttlNumber < 1 || ttlNumber > 86400) {
+    return res.status(400).json({ success: false, message: "TTL harus angka antara 1 sampai 86400." });
+  }
+  if (isProxied && !["A", "AAAA", "CNAME"].includes(recordType)) {
+    return res.status(400).json({ success: false, message: "Proxy hanya didukung untuk record A, AAAA, atau CNAME." });
+  }
+  if (recordType === "A" && !net.isIPv4(value)) {
+    return res.status(400).json({ success: false, message: "Content record A harus berupa alamat IPv4." });
+  }
+  if (recordType === "AAAA" && !net.isIPv6(value)) {
+    return res.status(400).json({ success: false, message: "Content record AAAA harus berupa alamat IPv6." });
+  }
+  if (recordType === "CNAME") {
+    try {
+      const hostname = new URL(value.includes("://") ? value : `https://${value}`).hostname;
+      if (!hostname || hostname.includes("_")) throw new Error("invalid hostname");
+    } catch {
+      return res.status(400).json({ success: false, message: "Content CNAME harus berupa hostname yang valid, misalnya target.example.com." });
+    }
+  }
+
+  const name = `${label}.${rootDomain}`;
+  try {
+    const response = await fetch(`https://api.cloudflare.com/client/v4/zones/${encodeURIComponent(zoneId)}/dns_records`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Accept: "application/json"
+      },
+      body: JSON.stringify({
+        type: recordType,
+        name,
+        content: value,
+        ttl: ttlNumber,
+        proxied: recordType === "TXT" ? false : isProxied
+      })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.success) {
+      const messages = (result.errors || []).map((e) => e.message).filter(Boolean);
+      return res.status(response.status >= 400 && response.status < 600 ? response.status : 502).json({
+        success: false,
+        message: "Cloudflare gagal membuat DNS record.",
+        errors: messages.length ? messages : undefined
+      });
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: "DNS record berhasil dibuat.",
+      data: {
+        id: result.result.id,
+        name: result.result.name,
+        type: result.result.type,
+        content: result.result.content,
+        ttl: result.result.ttl,
+        proxied: result.result.proxied
+      }
+    });
+  } catch (error) {
+    console.error("add-subdomain error:", error);
+    return res.status(502).json({ success: false, message: "Tidak dapat menghubungi Cloudflare." });
+  }
+}
+
+
 /* ============================================================
  * ROUTER UTAMA
  *
@@ -9750,6 +9868,8 @@ export default async function handler(req, res) {
   const routeKey = getRouteKey(req);
 
   switch (routeKey) {
+    case "add-subdomain":
+      return handleAddSubdomain(req, res);
     case "download":
       return handleDownload(req, res);
     case "tiktok":

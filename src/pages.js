@@ -189,14 +189,24 @@ function codeBlock(code, language = 'json') {
    ========================================================= */
 
 function tryPanel(api) {
-  const inputs = api.parameters.map((p) =>
-    `<label class="block"><span class="mb-2 block text-xs font-bold">${esc(p.name)} ${p.required ? '<span class="text-red-400">*</span>' : ''}</span><input data-param="${esc(p.name)}" placeholder="${esc(p.example || '')}" class="input font-mono !text-xs"></label>`
-  ).join('');
+  const inputs = api.parameters.map((p) => {
+    const label = `${esc(p.name)} ${p.required ? '<span class="text-red-400">*</span>' : ''}`;
+    if (p.type === 'select' && Array.isArray(p.options)) {
+      const options = p.options.map((option) => {
+        const value = typeof option === 'string' ? option : option.value;
+        const text = typeof option === 'string' ? option : (option.label || option.value);
+        return `<option value="${esc(value)}" ${String(value) === String(p.example || '') ? 'selected' : ''}>${esc(text)}</option>`;
+      }).join('');
+      return `<label class="block"><span class="mb-2 block text-xs font-bold">${label}</span><select data-param="${esc(p.name)}" class="input font-mono !text-xs">${options}</select></label>`;
+    }
+    return `<label class="block"><span class="mb-2 block text-xs font-bold">${label}</span><input data-param="${esc(p.name)}" type="${p.type === 'number' ? 'number' : 'text'}" placeholder="${esc(p.example || '')}" class="input font-mono !text-xs"></label>`;
+  }).join('');
   const initialUrl = `${window.location.origin}${api.endpoint}`;
 
   return `<section id="try-panel" class="card mt-14 !overflow-visible p-4 sm:p-8" style="border-color:rgb(var(--gold)/.3)">
     <div class="mb-6 flex items-center gap-3"><span class="iconbox h-10 w-10">${icon('Play', 'h-4 w-4')}</span><div><h3 class="text-base font-extrabold">Try this API</h3><p class="text-xs text-muted">Send a real request and inspect the response.</p></div></div>
     <div class="grid grid-cols-[minmax(0,1fr)] gap-4 ${api.parameters.length > 1 ? 'sm:grid-cols-2' : ''}">${inputs || '<p class="text-xs text-muted">This endpoint takes no parameters.</p>'}</div>
+    ${api.slug === 'add-subdomain' ? '<label class="mt-4 block"><span class="mb-2 block text-xs font-bold">API key <span class="text-red-400">*</span></span><input data-api-key type="password" autocomplete="off" placeholder="Masukkan ADD_SUBDOMAIN_API_KEY" class="input font-mono !text-xs"></label>' : ''}
     <div class="mt-6 flex flex-col gap-2.5 sm:flex-row">
       <button id="send-request" class="btn btn-gold btn-sm flex-1">${icon('Play', 'h-3.5 w-3.5')}<span>Send request</span></button>
       <button id="copy-url" class="btn btn-ghost btn-sm">${icon('Copy', 'h-3.5 w-3.5')}<span>Copy URL</span></button>
@@ -325,12 +335,19 @@ export function bindDocs(api) {
 
   const fieldValue = (name) => document.querySelector(`[data-param="${CSS.escape(name)}"]`)?.value;
   const buildUrl = () => {
+    if (api.method !== 'GET') return `${window.location.origin}${api.endpoint}`;
     const query = api.parameters.filter((p) => fieldValue(p.name)).map((p) => `${p.name}=${encodeURIComponent(fieldValue(p.name))}`).join('&');
     return `${window.location.origin}${api.endpoint}${query ? '?' + query : ''}`;
   };
+  const buildBody = () => Object.fromEntries(api.parameters
+    .filter((p) => fieldValue(p.name) !== undefined && fieldValue(p.name) !== '')
+    .map((p) => [p.name, p.type === 'number' ? Number(fieldValue(p.name)) : fieldValue(p.name)]));
 
   document.querySelectorAll('[data-param]').forEach((el) =>
     el.addEventListener('input', () => { document.getElementById('try-url').textContent = `${api.method} ${buildUrl()}`; })
+  );
+  document.querySelectorAll('[data-param]').forEach((el) =>
+    el.addEventListener('change', () => { document.getElementById('try-url').textContent = `${api.method} ${buildUrl()}`; })
   );
 
   document.getElementById('copy-url')?.addEventListener('click', async (e) => {
@@ -361,7 +378,11 @@ export function bindDocs(api) {
     };
 
     try {
-      const response = await fetch(requestUrl, { method: api.method, headers: { Accept: 'application/json' } });
+      const requestOptions = { method: api.method, headers: { Accept: 'application/json' } };
+      const apiKey = document.querySelector('[data-api-key]')?.value;
+      if (apiKey) requestOptions.headers['x-api-key'] = apiKey;
+      if (api.method !== 'GET') { requestOptions.headers['Content-Type'] = 'application/json'; requestOptions.body = JSON.stringify(buildBody()); }
+      const response = await fetch(requestUrl, requestOptions);
       const contentType = response.headers.get('content-type') || '';
       const status = { ok: response.ok, label: `${response.status} ${response.statusText || (response.ok ? 'OK' : 'Error')}` };
 

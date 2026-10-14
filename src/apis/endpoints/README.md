@@ -31,3 +31,16 @@ export default {
 Subfolder juga otomatis terdeteksi, misalnya `download/facebook.js`.
 
 Jika field dokumentasi tidak lengkap, registry akan mengisi nilai dasar secara otomatis. Untuk dokumentasi yang sama lengkapnya dengan endpoint lama, isi metadata seperti contoh di atas.
+
+
+## Endpoint `add-subdomain` (Cloudflare)
+
+Endpoint ini memakai `POST /api/add-subdomain` dan membuat record DNS di Cloudflare.
+Atur environment variables berikut di Vercel (Project → Settings → Environment Variables):
+
+- `ROOT_DOMAIN`: domain utama, misalnya `example.com` (tanpa protokol).
+- `CLOUDFLARE_ZONE_ID`: Zone ID domain tersebut.
+- `CLOUDFLARE_API_TOKEN`: Cloudflare API Token dengan izin **Zone → DNS → Edit** untuk zone yang dipilih.
+- `ADD_SUBDOMAIN_API_KEY`: kunci rahasia acak yang hanya dibagikan ke pemanggil endpoint.
+
+Kirim API key lewat header `x-api-key`. Body JSON berisi `subdomain` (label saja, misalnya `panel`), `type` (`A`, `AAAA`, `CNAME`, `TXT`), `content`, opsional `ttl`, dan `proxied` (`true`/`false`). Jangan pernah menaruh token Cloudflare di frontend atau di metadata endpoint.
