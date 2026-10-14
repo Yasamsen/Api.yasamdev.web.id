@@ -1,12 +1,19 @@
 export default {
   "slug": "add-subdomain",
   "name": "Add Subdomain (Cloudflare)",
-  "description": "Create a DNS record for a subdomain under the server-configured root domain. TTL and Cloudflare credentials are configured on the server.",
+  "description": "Create a DNS record for a subdomain under the server-configured root domain. TTL and Cloudflare credentials are configured on the server. Provide the endpoint API key configured in Vercel.",
   "category": "Utility",
   "method": "POST",
   "endpoint": "/api/add-subdomain",
   "icon": "Globe",
   "parameters": [
+    {
+      "name": "apiKey",
+      "type": "string",
+      "required": true,
+      "description": "API key endpoint yang harus sama dengan ADD_SUBDOMAIN_API_KEY di Environment Variables Vercel. Jangan bagikan kunci ini.",
+      "example": "ISI_API_KEY_ENDPOINT_KAMU"
+    },
     {
       "name": "subdomain",
       "type": "string",
@@ -85,5 +92,5 @@ export default {
       "description": "Nilai record."
     }
   ],
-  "exampleRequest": "POST https://samapi.example.com/api/add-subdomain"
+  "exampleRequest": "POST https://samapi.example.com/api/add-subdomain (sertakan apiKey di JSON body atau gunakan header x-api-key)"
 };

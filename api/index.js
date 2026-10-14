@@ -9729,7 +9729,7 @@ async function handleDownload(req, res) {
  * ADD SUBDOMAIN (Cloudflare DNS)
  * Required Vercel env vars:
  * ROOT_DOMAIN, CLOUDFLARE_ZONE_ID, CLOUDFLARE_API_TOKEN,
- * CLOUDFLARE_DNS_TTL (optional; defaults to 3600)
+ * ADD_SUBDOMAIN_API_KEY, CLOUDFLARE_DNS_TTL (optional; defaults to 3600)
  * ============================================================ */
 async function handleAddSubdomain(req, res) {
   if (req.method !== "POST") {
@@ -9738,7 +9738,17 @@ async function handleAddSubdomain(req, res) {
   }
 
   await ensureJsonBody(req);
-  const { subdomain, type, content, proxied = false } = req.body || {};
+  const { subdomain, type, content, proxied = false, apiKey } = req.body || {};
+  const expectedApiKey = String(process.env.ADD_SUBDOMAIN_API_KEY || "");
+  const suppliedApiKey = String(req.headers["x-api-key"] || apiKey || "");
+  if (!expectedApiKey) {
+    return res.status(500).json({ success: false, message: "Konfigurasi server belum lengkap: ADD_SUBDOMAIN_API_KEY belum diatur." });
+  }
+  const expectedBuf = Buffer.from(expectedApiKey);
+  const suppliedBuf = Buffer.from(suppliedApiKey);
+  if (expectedBuf.length !== suppliedBuf.length || !crypto.timingSafeEqual(expectedBuf, suppliedBuf)) {
+    return res.status(401).json({ success: false, message: "API key endpoint salah atau tidak disertakan." });
+  }
   const rootDomain = String(process.env.ROOT_DOMAIN || "").trim().toLowerCase().replace(/^\\.+|\\.+$/g, "");
   const zoneId = process.env.CLOUDFLARE_ZONE_ID;
   const token = process.env.CLOUDFLARE_API_TOKEN;
@@ -9747,7 +9757,7 @@ async function handleAddSubdomain(req, res) {
     return res.status(500).json({
       success: false,
       message: "Konfigurasi server belum lengkap.",
-      requiredEnv: ["ROOT_DOMAIN", "CLOUDFLARE_ZONE_ID", "CLOUDFLARE_API_TOKEN"]
+      requiredEnv: ["ROOT_DOMAIN", "CLOUDFLARE_ZONE_ID", "CLOUDFLARE_API_TOKEN", "ADD_SUBDOMAIN_API_KEY"]
     });
   }
 

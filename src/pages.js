@@ -199,6 +199,9 @@ function tryPanel(api) {
       }).join('');
       return `<label class="block"><span class="mb-2 block text-xs font-bold">${label}</span><select data-param="${esc(p.name)}" class="input font-mono !text-xs">${options}</select></label>`;
     }
+    if (p.type === 'file') {
+      return `<label class="block"><span class="mb-2 block text-xs font-bold">${label}</span><input data-param="${esc(p.name)}" type="file" class="input font-mono !text-xs" aria-label="Upload ${esc(p.name)}"><span class="mt-2 block text-[10px] leading-5 text-muted">${esc(p.description || 'Pilih file dari perangkat kamu.')}</span></label>`;
+    }
     return `<label class="block"><span class="mb-2 block text-xs font-bold">${label}</span><input data-param="${esc(p.name)}" type="${p.type === 'number' ? 'number' : 'text'}" placeholder="${esc(p.example || '')}" class="input font-mono !text-xs"></label>`;
   }).join('');
   const initialUrl = `${window.location.origin}${api.endpoint}`;
@@ -333,14 +336,18 @@ export function bindDocs(api) {
 
   if (!api) return;
 
-  const fieldValue = (name) => document.querySelector(`[data-param="${CSS.escape(name)}"]`)?.value;
+  const fieldElement = (name) => document.querySelector(`[data-param="${CSS.escape(name)}"]`);
+  const fieldValue = (name) => {
+    const el = fieldElement(name);
+    return el?.type === 'file' ? el.files?.[0] : el?.value;
+  };
   const buildUrl = () => {
     if (api.method !== 'GET') return `${window.location.origin}${api.endpoint}`;
     const query = api.parameters.filter((p) => fieldValue(p.name)).map((p) => `${p.name}=${encodeURIComponent(fieldValue(p.name))}`).join('&');
     return `${window.location.origin}${api.endpoint}${query ? '?' + query : ''}`;
   };
   const buildBody = () => Object.fromEntries(api.parameters
-    .filter((p) => fieldValue(p.name) !== undefined && fieldValue(p.name) !== '')
+    .filter((p) => p.type !== 'file' && fieldValue(p.name) !== undefined && fieldValue(p.name) !== '')
     .map((p) => [p.name, p.type === 'number' ? Number(fieldValue(p.name)) : fieldValue(p.name)]));
 
   document.querySelectorAll('[data-param]').forEach((el) =>
@@ -381,7 +388,20 @@ export function bindDocs(api) {
       const requestOptions = { method: api.method, headers: { Accept: 'application/json' } };
       const apiKey = document.querySelector('[data-api-key]')?.value;
       if (apiKey) requestOptions.headers['x-api-key'] = apiKey;
-      if (api.method !== 'GET') { requestOptions.headers['Content-Type'] = 'application/json'; requestOptions.body = JSON.stringify(buildBody()); }
+      if (api.method !== 'GET') {
+        const fileParams = api.parameters.filter((p) => p.type === 'file');
+        const selectedFiles = fileParams.map((p) => ({ name: p.name, file: fieldValue(p.name) })).filter((item) => item.file instanceof File);
+        if (selectedFiles.length) {
+          const form = new FormData();
+          for (const item of selectedFiles) form.append(item.name, item.file, item.file.name);
+          for (const [name, value] of Object.entries(buildBody())) form.append(name, String(value));
+          requestOptions.body = form;
+          // Jangan menetapkan Content-Type manual; browser menambahkan boundary multipart.
+        } else {
+          requestOptions.headers['Content-Type'] = 'application/json';
+          requestOptions.body = JSON.stringify(buildBody());
+        }
+      }
       const response = await fetch(requestUrl, requestOptions);
       const contentType = response.headers.get('content-type') || '';
       const status = { ok: response.ok, label: `${response.status} ${response.statusText || (response.ok ? 'OK' : 'Error')}` };
