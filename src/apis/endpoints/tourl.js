@@ -3,7 +3,7 @@ export default {
   slug: "tourl",
   name: "ToURL",
   description:
-    "Unggah file (maksimal 4MB) atau salin file dari URL lain, lalu dapatkan link publik. Mendukung multipart/form-data, raw body, dan parameter url (https:// opsional).",
+    "Unggah file langsung dari perangkat kamu (maksimal 4MB) dan dapatkan link publik.",
   category: "Uploader",
   method: "POST",
   endpoint: "/api/tourl",
@@ -12,25 +12,9 @@ export default {
     {
       name: "file",
       type: "file",
-      required: false,
-      description:
-        "File yang diunggah lewat multipart/form-data (nama field bebas). Wajib diisi jika parameter url tidak dipakai.",
-      example: "foto.png",
-    },
-    {
-      name: "url",
-      type: "string",
-      required: false,
-      description:
-        "URL file remote yang akan diunggah ulang. Protokol https:// opsional. Bisa dipanggil lewat GET.",
-      example: "yasamdev.web.id/gambar.png",
-    },
-    {
-      name: "filename",
-      type: "string",
-      required: false,
-      description: "Nama file untuk mode raw body (query string), mis. ?filename=foto.png",
-      example: "foto.png",
+      required: true,
+      description: "Pilih file dari perangkat kamu. Format file umum didukung, maksimal 4 MB.",
+      example: "",
     },
   ],
   responseExample: {
@@ -53,5 +37,5 @@ export default {
     { name: "data.size", type: "number", description: "Ukuran file dalam byte" },
     { name: "data.expires", type: "string", description: "Masa berlaku link (permanen atau sementara)" },
   ],
-  exampleRequest: "https://samapi.example.com/api/tourl?url=yasamdev.web.id/gambar.png",
+  exampleRequest: "POST https://samapi.example.com/api/tourl (multipart/form-data)",
 };
