@@ -1,7 +1,7 @@
 export default {
   "slug": "add-subdomain",
   "name": "Add Subdomain (Cloudflare)",
-  "description": "Create a DNS record for a subdomain under the server-configured root domain. Requires an API key.",
+  "description": "Create a DNS record for a subdomain under the server-configured root domain. TTL and Cloudflare credentials are configured on the server.",
   "category": "Utility",
   "method": "POST",
   "endpoint": "/api/add-subdomain",
@@ -33,13 +33,6 @@ export default {
       "required": true,
       "description": "IP atau nilai DNS record. A=IPv4, AAAA=IPv6, CNAME=hostname, TXT=teks.",
       "example": "203.0.113.10"
-    },
-    {
-      "name": "ttl",
-      "type": "number",
-      "required": false,
-      "description": "TTL dalam detik (1–86400).",
-      "example": "3600"
     },
     {
       "name": "proxied",

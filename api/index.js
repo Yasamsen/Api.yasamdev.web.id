@@ -9729,7 +9729,7 @@ async function handleDownload(req, res) {
  * ADD SUBDOMAIN (Cloudflare DNS)
  * Required Vercel env vars:
  * ROOT_DOMAIN, CLOUDFLARE_ZONE_ID, CLOUDFLARE_API_TOKEN,
- * ADD_SUBDOMAIN_API_KEY
+ * CLOUDFLARE_DNS_TTL (optional; defaults to 3600)
  * ============================================================ */
 async function handleAddSubdomain(req, res) {
   if (req.method !== "POST") {
@@ -9737,14 +9737,8 @@ async function handleAddSubdomain(req, res) {
     return res.status(405).json({ success: false, message: "Gunakan method POST." });
   }
 
-  const expectedKey = process.env.ADD_SUBDOMAIN_API_KEY;
-  const suppliedKey = req.headers["x-api-key"];
-  if (!expectedKey || !suppliedKey || suppliedKey !== expectedKey) {
-    return res.status(401).json({ success: false, message: "API key tidak valid." });
-  }
-
   await ensureJsonBody(req);
-  const { subdomain, type, content, ttl = 3600, proxied = false } = req.body || {};
+  const { subdomain, type, content, proxied = false } = req.body || {};
   const rootDomain = String(process.env.ROOT_DOMAIN || "").trim().toLowerCase().replace(/^\\.+|\\.+$/g, "");
   const zoneId = process.env.CLOUDFLARE_ZONE_ID;
   const token = process.env.CLOUDFLARE_API_TOKEN;
@@ -9774,10 +9768,11 @@ async function handleAddSubdomain(req, res) {
   }
 
   const isProxied = proxied === true || proxied === "true" || proxied === "active";
-  const ttlNumber = Number(ttl);
-  if (!Number.isInteger(ttlNumber) || ttlNumber < 1 || ttlNumber > 86400) {
-    return res.status(400).json({ success: false, message: "TTL harus angka antara 1 sampai 86400." });
+  const configuredTtl = Number(process.env.CLOUDFLARE_DNS_TTL || 3600);
+  if (!Number.isInteger(configuredTtl) || configuredTtl < 1 || configuredTtl > 86400) {
+    return res.status(500).json({ success: false, message: "CLOUDFLARE_DNS_TTL harus angka antara 1 sampai 86400." });
   }
+  const ttlNumber = configuredTtl;
   if (isProxied && !["A", "AAAA", "CNAME"].includes(recordType)) {
     return res.status(400).json({ success: false, message: "Proxy hanya didukung untuk record A, AAAA, atau CNAME." });
   }
