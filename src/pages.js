@@ -35,15 +35,15 @@ export function renderHome() {
   const demo = getApiBySlug('instagram') || apiDefinitions[0];
   const demoPath = `${demo?.endpoint || '/api/instagram'}?url=https://instagram.com/p/Cx1a`;
 
-  const stat = (value, label, attrs = '') => `<div class="px-3 py-1 text-center sm:px-6"><div class="font-display text-4xl sm:text-5xl" ${attrs}>${value}</div><div class="mt-1.5 text-xs font-medium text-dim">${label}</div></div>`;
-  const dots = '<div class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-[#4a443b]"></span><span class="h-2 w-2 rounded-full bg-[#4a443b]"></span><span class="h-2 w-2 rounded-full bg-[#4a443b]"></span></div>';
+  const stat = (value, label, attrs = '') => `<div class="px-3 py-1 text-center sm:px-6"><div class="font-display text-3xl sm:text-4xl" ${attrs}>${value}</div><div class="mt-1.5 text-xs font-medium text-dim">${label}</div></div>`;
+  const dots = '<div class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-[#374151]"></span><span class="h-2 w-2 rounded-full bg-[#374151]"></span><span class="h-2 w-2 rounded-full bg-[#374151]"></span></div>';
 
   return `<main>
-  <section class="pb-16 pt-[calc(var(--nav-h)+56px)] sm:pb-24 sm:pt-[calc(var(--nav-h)+96px)]">
+  <section class="hero-glow pb-16 pt-[calc(var(--nav-h)+56px)] sm:pb-24 sm:pt-[calc(var(--nav-h)+96px)]">
     <div class="mx-auto grid max-w-7xl grid-cols-[minmax(0,1fr)] items-center gap-14 px-4 sm:px-8 lg:grid-cols-[1.05fr_0.95fr] lg:gap-16">
       <div>
         <p class="seq mb-6 text-sm font-semibold text-muted" style="--d:.1s"><span class="text-gold">${apiDefinitions.length} endpoints</span> live and documented</p>
-        <h1 class="text-balance text-[clamp(2.6rem,10vw,6rem)] leading-[0.98]">
+        <h1 class="text-balance text-[clamp(2.4rem,8.6vw,5rem)] leading-[1.02]">
           <span class="hl"><span style="--d:.2s">Powerful APIs.</span></span>
           <span class="hl"><span class="text-muted" style="--d:.34s">Simple to use.</span></span>
         </h1>
@@ -58,7 +58,7 @@ export function renderHome() {
         <div class="code">
           <div class="code-head">
             ${dots}
-            <span class="font-mono text-[10px] text-[#7d766a]">live request</span>
+            <span class="font-mono text-[10px] text-[#6b7280]">live request</span>
             <span class="ln flex items-center gap-1.5 font-mono text-[10px] text-emerald-400" style="--d:3.6s"><span class="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>200 · 118ms</span>
           </div>
           <pre class="p-5 text-[12px] leading-[1.9] sm:p-6 sm:text-[13px]"><code><span class="tk-k">GET</span> <span class="caret">${typed(demoPath, 1.2, 2.2, 'tk-s')}</span>
@@ -86,7 +86,7 @@ export function renderHome() {
   <section class="mx-auto max-w-7xl px-4 py-16 sm:px-8 sm:py-24" id="apis">
     ${reveal(`<div class="mb-10 flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
       <div>
-        <h2 class="text-balance max-w-xl text-[2.2rem] leading-[1.05] sm:text-5xl">Everything you need to build.</h2>
+        <h2 class="text-balance max-w-xl text-[2rem] leading-[1.1] sm:text-[2.75rem]">Everything you need to build.</h2>
         <p class="mt-4 max-w-md text-sm leading-7 text-muted">Production-ready endpoints with clear documentation and predictable responses.</p>
       </div>
       <div class="relative w-full lg:w-72">${icon('Search', 'pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-dim')}<input id="home-search" placeholder="Search APIs..." aria-label="Search APIs" class="input !rounded-full !pl-11"></div>
@@ -99,13 +99,13 @@ export function renderHome() {
 
   <section class="border-y hair bg-surface">
     <div class="mx-auto grid max-w-7xl grid-cols-[minmax(0,1fr)] gap-14 px-4 py-16 sm:px-8 sm:py-24 lg:grid-cols-2 lg:items-center lg:gap-20">
-      ${reveal(`<h2 class="text-balance max-w-lg text-[2.2rem] leading-[1.05] sm:text-5xl">The fastest way from idea to API.</h2>
+      ${reveal(`<h2 class="text-balance max-w-lg text-[2rem] leading-[1.1] sm:text-[2.75rem]">The fastest way from idea to API.</h2>
       <p class="mt-5 max-w-md text-sm leading-7 text-muted">Built with developers in mind. Every endpoint is designed to be intuitive, documented, and ready to ship.</p>
       <div class="mt-10 grid grid-cols-[minmax(0,1fr)] gap-7 sm:grid-cols-2">
         ${[['Gauge', 'Blazing fast', 'Low latency, every request.'], ['ShieldCheck', 'Reliable by default', '99.9% uptime SLA.'], ['Database', 'Simple responses', 'Predictable JSON outputs.'], ['BookOpen', 'Clear docs', 'Start building in minutes.']].map(([ic, t, d]) => `<div class="flex gap-4"><span class="iconbox h-10 w-10 shrink-0">${icon(ic, 'h-[18px] w-[18px]')}</span><div><div class="text-sm font-bold">${t}</div><div class="mt-1 text-xs leading-5 text-muted">${d}</div></div></div>`).join('')}
       </div>`)}
       ${reveal(`<div class="code">
-        <div class="code-head">${dots}<span class="font-mono text-[10px] text-[#7d766a]">request.js</span></div>
+        <div class="code-head">${dots}<span class="font-mono text-[10px] text-[#6b7280]">request.js</span></div>
         <pre class="p-6 text-[12px] leading-[1.9]"><code><span class="tk-k">const</span> response = <span class="tk-k">await</span> fetch(<span class="tk-s">"https://samapi.com/api/instagram?url="</span> +
   postUrl);
 
@@ -113,14 +113,14 @@ export function renderHome() {
 
 <span class="tk-c">// Ready to use.</span>
 console.log(data.media[<span class="tk-n">0</span>].url);</code></pre>
-        <div class="p-4 pt-0"><button id="copy-base-url" class="flex w-full items-center justify-center gap-2 rounded-full border border-white/10 py-3 text-xs font-bold text-[#d6d0c4] transition-colors duration-300 hover:border-[#c9a86a]/60 hover:text-[#c9a86a]">${icon('Copy', 'h-3.5 w-3.5')} Copy base URL</button></div>
+        <div class="p-4 pt-0"><button id="copy-base-url" class="flex w-full items-center justify-center gap-2 rounded-full border border-white/10 py-3 text-xs font-bold text-[#d5d9e2] transition-colors duration-300 hover:border-[#a5b4fc]/60 hover:text-[#a5b4fc]">${icon('Copy', 'h-3.5 w-3.5')} Copy base URL</button></div>
       </div>`, 100)}
     </div>
   </section>
 
   <section>
     <div class="mx-auto max-w-3xl px-4 py-24 text-center sm:px-8 sm:py-32">
-      ${reveal(`<h2 class="text-balance text-[2.6rem] leading-[1] sm:text-6xl">Your next project starts here.</h2>
+      ${reveal(`<h2 class="text-balance text-[2.3rem] leading-[1.05] sm:text-5xl">Your next project starts here.</h2>
       <p class="mx-auto mt-6 max-w-md text-sm leading-7 text-muted">Explore our APIs and bring your ideas to life with just a few lines of code.</p>
       <button data-nav="/docs" class="btn btn-gold mt-9">Start building ${icon('ArrowRight', 'arr h-4 w-4')}</button>`)}
     </div>
@@ -169,7 +169,7 @@ export function bindHome() {
    ========================================================= */
 
 function codeBlock(code, language = 'json') {
-  return `<div class="code"><div class="code-head"><span class="font-mono text-[10px] text-[#7d766a]">${esc(language)}</span><button data-code-copy="${encodeURIComponent(code)}" class="flex items-center gap-1.5 text-[10px] font-bold text-[#7d766a] transition-colors hover:text-white">${icon('Copy', 'h-3 w-3')} Copy</button></div><pre class="max-h-96 p-5 text-[11.5px] leading-6"><code>${esc(code)}</code></pre></div>`;
+  return `<div class="code"><div class="code-head"><span class="font-mono text-[10px] text-[#6b7280]">${esc(language)}</span><button data-code-copy="${encodeURIComponent(code)}" class="flex items-center gap-1.5 text-[10px] font-bold text-[#6b7280] transition-colors hover:text-white">${icon('Copy', 'h-3 w-3')} Copy</button></div><pre class="max-h-96 p-5 text-[11.5px] leading-6"><code>${esc(code)}</code></pre></div>`;
 }
 
 /* =========================================================
@@ -214,7 +214,7 @@ function tryPanel(api) {
       <button id="send-request" class="btn btn-gold btn-sm flex-1">${icon('Play', 'h-3.5 w-3.5')}<span>Send request</span></button>
       <button id="copy-url" class="btn btn-ghost btn-sm">${icon('Copy', 'h-3.5 w-3.5')}<span>Copy URL</span></button>
     </div>
-    <div id="try-url" class="mt-4 break-all rounded-xl bg-[#100f0d] px-4 py-3 font-mono text-[11px] leading-5 text-[#a8a094]">${esc(api.method)} ${esc(initialUrl)}</div>
+    <div id="try-url" class="mt-4 break-all rounded-xl bg-[#0d1017] px-4 py-3 font-mono text-[11px] leading-5 text-[#9ca3af]">${esc(api.method)} ${esc(initialUrl)}</div>
     <div id="try-response" class="mt-4 hidden"></div>
   </section>`;
 }
@@ -254,7 +254,7 @@ function renderDocsIndex() {
   return `<div class="max-w-4xl">
     <div class="mb-12">
       <p class="seq text-sm font-semibold text-gold" style="--d:.05s">Documentation</p>
-      <h1 class="mt-3 text-[clamp(2.6rem,9vw,4.75rem)] leading-[0.98]"><span class="hl"><span style="--d:.12s">API Reference</span></span></h1>
+      <h1 class="mt-3 text-[clamp(2.2rem,7vw,3.75rem)] leading-[1.05]"><span class="hl"><span style="--d:.12s">API Reference</span></span></h1>
       <p class="seq mt-6 max-w-xl text-[15px] leading-8 text-muted" style="--d:.35s">Everything you need to integrate SamApi into your project. Pick an endpoint from the menu to get started.</p>
     </div>
     <div id="docs-cards" class="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2">${apiDefinitions.map((api, i) => reveal(`<button data-nav="/docs/${encodeURIComponent(api.slug)}" class="card group flex w-full items-center gap-4 p-4 text-left"><span class="iconbox h-10 w-10 shrink-0">${icon(api.icon, 'h-4 w-4')}</span><span class="min-w-0 flex-1"><span class="block truncate text-sm font-extrabold">${esc(api.name)}</span><span class="mt-1 block truncate font-mono text-[10px] text-dim">${esc(api.method)} ${esc(api.endpoint)}</span></span>${icon('ChevronRight', 'h-4 w-4 text-dim transition-all duration-300 group-hover:translate-x-1 group-hover:text-gold')}</button>`, (i % 2) * 90)).join('')}</div>
@@ -275,7 +275,7 @@ function renderApiDetail(api) {
   ).join('');
 
   const currentEndpoint = `${window.location.origin}${api.endpoint}`;
-  const h2 = (t) => `<h2 class="mb-4 text-[1.75rem]">${t}</h2>`;
+  const h2 = (t) => `<h2 class="mb-4 text-2xl">${t}</h2>`;
 
   return `<div class="max-w-3xl">
     <div class="mb-8 flex items-start gap-5">
@@ -471,7 +471,7 @@ export function renderError(type) {
     <div class="relative text-center">
       <div class="seq relative mx-auto mb-8 grid h-20 w-20 place-items-center" style="--d:.05s"><div class="glass relative grid h-20 w-20 place-items-center rounded-full ${t.text}">${icon(is500 ? 'ServerCrash' : 'WifiOff', 'h-8 w-8')}</div></div>
       <p class="seq font-mono text-xs font-bold ${t.text}" style="--d:.15s">Error ${type}</p>
-      <h1 class="text-balance mt-4 text-[clamp(2.3rem,9vw,4.75rem)] leading-[1]"><span class="hl"><span style="--d:.25s">${is500 ? 'Something went wrong' : 'Endpoint not found'}</span></span></h1>
+      <h1 class="text-balance mt-4 text-[clamp(2.1rem,7vw,3.75rem)] leading-[1.05]"><span class="hl"><span style="--d:.25s">${is500 ? 'Something went wrong' : 'Endpoint not found'}</span></span></h1>
       <p class="seq mx-auto mt-5 max-w-md text-sm leading-7 text-muted" style="--d:.55s">${is500 ? 'Our servers ran into an unexpected issue. Your request was not completed, but our team has been notified.' : "The endpoint you are looking for doesn't exist or may have been moved. Check the URL and try again."}</p>
       <div class="seq mt-10 flex flex-col justify-center gap-3 sm:flex-row" style="--d:.7s">
         ${is500
