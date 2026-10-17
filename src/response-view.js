@@ -85,7 +85,7 @@ function mediaCard(item) {
     <div class="mb-3 flex items-center gap-2 text-[11px] font-bold text-muted">${icon(TYPE_ICON[item.type], 'h-3.5 w-3.5')}<span>${TYPE_LABEL[item.type]}</span><span class="truncate font-mono font-normal text-dim">${esc(item.path)}</span></div>
     ${preview(item)}
     <div class="mt-3">
-      <a href="${esc(downloadHref(item))}" ${download} class="btn btn-gold btn-sm w-full">${icon('Download', 'h-3.5 w-3.5')}<span>Download</span></a>
+      <a href="${esc(downloadHref(item))}" ${download} class="btn btn-primary btn-sm w-full">${icon('Download', 'h-3.5 w-3.5')}<span>Download</span></a>
     </div>
   </div>`;
 }
@@ -116,7 +116,7 @@ export function renderResponse(box, { statusHtml = '', jsonHtml = '', media = []
   const select = (id) => {
     box.querySelectorAll('[data-rv-tab]').forEach((b) => {
       const active = b.dataset.rvTab === id;
-      b.classList.toggle('btn-gold', active);
+      b.classList.toggle('btn-primary', active);
       b.classList.toggle('btn-ghost', !active);
       b.setAttribute('aria-pressed', String(active));
     });
