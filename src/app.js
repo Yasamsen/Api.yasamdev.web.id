@@ -4,6 +4,7 @@ import { renderHome, bindHome, renderDocs, bindDocs, renderError } from './pages
 import { getApiBySlug } from './apis/registry.js';
 import { refreshIcons, copyText, icon } from './utils.js';
 import { initMotion, observeReveals, runBoot } from './motion.js';
+import { startHeroFx, stopHeroFx } from './hero-fx.js';
 
 const TITLES = { docs: 'Documentation — SamApi', '/500': 'Server Error — SamApi', '/404': 'Not Found — SamApi', home: 'SamApi — Simple, powerful APIs' };
 
@@ -11,6 +12,7 @@ export function renderApp(opts = {}) {
   const html = document.documentElement;
   const path = getPath();
   const scrollY = window.scrollY;
+  stopHeroFx();
   if (opts.silent) html.classList.add('silent');
   html.classList.remove('menu-open');
 
@@ -23,7 +25,7 @@ export function renderApp(opts = {}) {
     `<div class="min-h-screen bg-bg text-fg">${renderNavbar(path)}<div id="page" class="page-enter">${page}</div>${!isError ? renderFooter() : ''}</div>`;
 
   bindNavbar();
-  if (path === '/') bindHome();
+  if (path === '/') { bindHome(); startHeroFx(); }
   else if (isDocs) bindDocs(path.startsWith('/docs/') ? getApiBySlug(path.split('/')[2]?.split('?')[0]) : null);
   else document.getElementById('retry')?.addEventListener('click', () => location.reload());
   bindFooter();

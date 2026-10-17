@@ -24,8 +24,8 @@ export function renderNavbar(path) {
       <div class="mx-auto flex h-[var(--nav-h)] max-w-7xl items-center justify-between gap-3 px-4 sm:px-8">
         <div class="flex items-center gap-8">
           <button data-nav="/" class="flex items-center gap-2.5" aria-label="SamApi home">
-            <span class="logo-mark">${icon('Zap', 'h-4 w-4 fill-current')}</span>
-            <span class="font-display text-[22px] leading-none">SamApi</span>
+            <span class="logo-mark">${icon('Terminal', 'h-4 w-4')}</span>
+            <span class="font-display text-[19px] leading-none">samapi<span class="text-accent">@api</span><span class="text-dim">:~$</span><span class="cursor ml-1"></span></span>
           </button>
           <nav class="hidden items-center gap-1 md:flex" aria-label="Primary">
             <button data-nav="/" class="navlink ${path === '/' ? 'is-active' : ''}">Home</button>
@@ -41,9 +41,9 @@ export function renderNavbar(path) {
         </div>
 
         <div class="flex items-center gap-1">
-          <div class="mr-3 hidden items-center gap-2 lg:flex"><span class="pulse-dot"></span><span class="text-xs font-semibold text-muted">API online</span></div>
+          <div class="mr-3 hidden items-center gap-2 lg:flex"><span class="pulse-dot"></span><span class="text-xs text-muted">api online</span></div>
           <button id="theme-btn" class="iconbtn" aria-label="Toggle color theme">${icon(themeIcon, 'h-[18px] w-[18px]')}</button>
-          <button data-nav="/docs" class="btn btn-primary btn-sm ml-1 hidden md:inline-flex">Get started</button>
+          <button data-nav="/docs" class="btn btn-primary btn-sm ml-1 hidden md:inline-flex">[ get started ]</button>
           <button id="mobile-menu-btn" class="iconbtn md:hidden" aria-label="Toggle menu" aria-expanded="false">${icon('Menu', 'h-5 w-5')}</button>
         </div>
       </div>
@@ -53,10 +53,10 @@ export function renderNavbar(path) {
       <div class="mx-auto flex max-w-md flex-col">
         ${[['/', 'Home'], ['/docs', 'Documentation'], ['/docs', 'All APIs']].map(([to, label], i) => `<button data-nav="${to}" style="--i:${i}" class="m-item font-display hair border-b py-5 text-left text-3xl">${label}</button>`).join('')}
         <div style="--i:3" class="m-item mt-8 flex items-center justify-between">
-          <div class="flex items-center gap-2"><span class="pulse-dot"></span><span class="text-xs font-semibold text-muted">API online</span></div>
+          <div class="flex items-center gap-2"><span class="pulse-dot"></span><span class="text-xs text-muted">api online</span></div>
           <button id="mobile-theme-btn" class="flex items-center gap-2 text-sm text-muted">${icon(themeIcon, 'h-4 w-4')} Theme</button>
         </div>
-        <button data-nav="/docs" style="--i:4" class="m-item btn btn-primary mt-8 w-full">Get started</button>
+        <button data-nav="/docs" style="--i:4" class="m-item btn btn-primary mt-8 w-full">[ get started ]</button>
       </div>
     </div>
   </header>`;
@@ -91,13 +91,13 @@ export function bindNavbar() {
 }
 
 export function renderFooter() {
-  const col = (title, items) => `<div><h4 class="mb-4 text-sm font-bold">${title}</h4><div class="flex flex-col gap-3 text-sm text-muted">${items.map(([label, to]) => `<button ${to ? `data-nav="${to}"` : ''} class="w-fit text-left transition-colors duration-200 hover:text-accent">${label}</button>`).join('')}</div></div>`;
+  const col = (title, items) => `<div><h4 class="mb-4 text-sm font-bold"><span class="text-accent">#</span> ${title}</h4><div class="flex flex-col gap-3 text-sm text-muted">${items.map(([label, to]) => `<button ${to ? `data-nav="${to}"` : ''} class="w-fit text-left transition-colors duration-200 hover:text-accent">${label}</button>`).join('')}</div></div>`;
   return `<footer class="mt-16 border-t hair">
     <div class="mx-auto max-w-7xl px-4 pb-10 pt-14 sm:px-8">
       <div class="flex flex-col justify-between gap-12 md:flex-row">
         <div class="max-w-xs">
-          <button data-nav="/" class="mb-4 flex items-center gap-2.5"><span class="logo-mark">${icon('Zap', 'h-4 w-4 fill-current')}</span><span class="font-display text-2xl">SamApi</span></button>
-          <p class="text-sm leading-7 text-muted">Simple, powerful APIs for developers who build the future.</p>
+          <button data-nav="/" class="mb-4 flex items-center gap-2.5"><span class="logo-mark">${icon('Terminal', 'h-4 w-4')}</span><span class="font-display text-xl">samapi<span class="text-accent">@api</span></span></button>
+          <p class="text-sm leading-7 text-muted"><span class="text-accent">$</span> echo "Simple, powerful APIs for developers who build the future."</p>
           <div class="mt-5 flex items-center gap-1">${['Github', 'Twitter', 'Linkedin', 'Mail'].map((x) => `<button class="iconbtn" aria-label="${x}">${icon(x, 'h-4 w-4')}</button>`).join('')}</div>
         </div>
         <div class="grid grid-cols-2 gap-x-14 gap-y-10 sm:grid-cols-3">
@@ -106,7 +106,7 @@ export function renderFooter() {
           ${col('Company', [['About'], ['Contact'], ['Privacy']])}
         </div>
       </div>
-      <div class="mt-12 flex flex-col justify-between gap-2 border-t hair pt-6 text-xs text-dim sm:flex-row"><span>© ${new Date().getFullYear()} SamApi. Built for developers.</span><span>Made with care for the developer community.</span></div>
+      <div class="mt-12 flex flex-col justify-between gap-2 border-t hair pt-6 text-xs text-dim sm:flex-row"><span><span class="text-accent">●</span> © ${new Date().getFullYear()} samapi — built for developers</span><span>exit 0</span></div>
     </div>
   </footer>`;
 }
