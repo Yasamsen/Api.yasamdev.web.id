@@ -24,7 +24,7 @@ export function renderNavbar(path) {
       <div class="mx-auto flex h-[var(--nav-h)] max-w-7xl items-center justify-between gap-3 px-4 sm:px-8">
         <button data-nav="/" class="flex items-center gap-2.5" aria-label="SamApi home">
           <span class="grid h-8 w-8 place-items-center rounded-full border border-gold/40 text-gold">${icon('Zap', 'h-3.5 w-3.5 fill-current')}</span>
-          <span class="font-display text-[24px] leading-none">Sam<span class="text-gold">Api</span></span>
+          <span class="font-display text-[21px] leading-none">Sam<span class="text-gold">Api</span></span>
         </button>
 
         <nav class="hidden items-center md:flex" aria-label="Primary">
@@ -50,7 +50,7 @@ export function renderNavbar(path) {
 
     <div id="mobile-menu" class="md:hidden" aria-hidden="true">
       <div class="mx-auto flex max-w-md flex-col">
-        ${[['/', 'Home'], ['/docs', 'Documentation'], ['/docs', 'All APIs']].map(([to, label], i) => `<button data-nav="${to}" style="--i:${i}" class="m-item font-display hair border-b py-5 text-left text-3xl">${label}</button>`).join('')}
+        ${[['/', 'Home'], ['/docs', 'Documentation'], ['/docs', 'All APIs']].map(([to, label], i) => `<button data-nav="${to}" style="--i:${i}" class="m-item font-display hair border-b py-5 text-left text-2xl">${label}</button>`).join('')}
         <div style="--i:3" class="m-item mt-8 flex items-center justify-between">
           <div class="flex items-center gap-2"><span class="h-1.5 w-1.5 rounded-full bg-ok"></span><span class="text-xs font-semibold text-muted">API online</span></div>
           <button id="mobile-theme-btn" class="flex items-center gap-2 text-sm text-muted">${icon(themeIcon, 'h-4 w-4')} Theme</button>
