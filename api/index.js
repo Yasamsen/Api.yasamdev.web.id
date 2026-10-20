@@ -16,6 +16,9 @@ import { createHash } from "node:crypto";
 import dns from "node:dns/promises";
 import Busboy from "busboy";
 import net from "node:net";
+import http from "node:http";
+import tls from "node:tls";
+import zlib from "node:zlib";
 // Semua endpoint digabung ke 1 file supaya hanya dihitung 1 Serverless
 // Function oleh Vercel (Hobby plan cuma boleh maksimal 12 function).
 // Body parser dimatikan secara global karena nano-banana butuh raw stream
@@ -11028,6 +11031,964 @@ async function handleOcr(req, res) {
   }
 }
 
+/* ============================================================
+ * CHECK HOST  —  POST /api/check-host   (tanpa API key)
+ *
+ * Body JSON : { "url": "example.com" }
+ * Opsional  : "checks": ["dns","ip","http","https","ports","whois","security"]
+ *             "ports" : [22, 3306]  atau "22,3306"  (hanya port umum)
+ *
+ * Semua pemeriksaan dilakukan langsung dari server (node:dns, node:tls,
+ * node:net, node:http/https) + RDAP & geolokasi IP publik tanpa API key.
+ * Proteksi: SSRF (IP privat diblokir, DNS di-pin per hop redirect),
+ * rate limit per IP, batas waktu total, batas ukuran body.
+ * ============================================================ */
+const CH_UA = "Mozilla/5.0 (compatible; YasamCheckHost/1.0; +https://api.yasamdev.web.id)";
+const CH_DEADLINE_MS = 9000;
+const CH_STEP_MS = 6500;
+const CH_MAX_REDIRECTS = 8;
+const CH_MAX_BODY = 131072;
+const CH_MAX_PORTS = 8;
+const CH_RATE = { windowMs: 60_000, max: 15 };
+const CH_ALL_CHECKS = ["dns", "ip", "http", "https", "ports", "whois", "security"];
+const CH_PORT_NAMES = {
+  21: "FTP", 22: "SSH", 25: "SMTP", 53: "DNS", 80: "HTTP", 110: "POP3", 143: "IMAP",
+  443: "HTTPS", 465: "SMTPS", 587: "SMTP (submission)", 993: "IMAPS", 995: "POP3S",
+  3306: "MySQL", 3389: "RDP", 5432: "PostgreSQL", 8080: "HTTP-alt", 8443: "HTTPS-alt"
+};
+const CH_SLD = new Set([
+  "co.id", "web.id", "or.id", "ac.id", "go.id", "sch.id", "my.id", "biz.id", "net.id", "mil.id", "desa.id",
+  "co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au", "co.jp", "co.nz", "com.br",
+  "com.cn", "com.sg", "com.my", "co.in", "co.za", "com.hk", "com.tw", "co.kr", "com.tr", "com.mx"
+]);
+const checkHostHits = new Map();
+
+const chMs = (v) => (v == null ? null : Math.round(v * 10) / 10);
+const chErr = (message, code, httpStatus = 400) => Object.assign(new Error(message), { code, httpStatus });
+const chBracket = (h) => (net.isIPv6(h) ? `[${h}]` : h);
+
+function chTimeout(promise, ms, label = "timeout") {
+  let t;
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((_, reject) => { t = setTimeout(() => reject(Object.assign(new Error(label), { code: "ETIMEDOUT" })), ms); })
+  ]).finally(() => clearTimeout(t));
+}
+
+function checkHostRateLimit(req) {
+  const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
+  const now = Date.now();
+  const rec = checkHostHits.get(ip);
+  if (!rec || now - rec.start > CH_RATE.windowMs) {
+    if (checkHostHits.size > 5000) {
+      for (const [k, v] of checkHostHits) if (now - v.start > CH_RATE.windowMs) checkHostHits.delete(k);
+    }
+    checkHostHits.set(ip, { start: now, count: 1 });
+    return { ok: true };
+  }
+  rec.count += 1;
+  if (rec.count > CH_RATE.max) return { ok: false, retryAfter: Math.max(1, Math.ceil((rec.start + CH_RATE.windowMs - now) / 1000)) };
+  return { ok: true };
+}
+
+/* Daftar blokir lebih ketat daripada isPrivateIp() lama (CGNAT, multicast, IPv4-mapped, ULA, dll). */
+function checkHostIsBlockedIp(ip) {
+  if (net.isIPv4(ip)) {
+    const [a, b, c] = ip.split(".").map(Number);
+    return (
+      a === 0 || a === 10 || a === 127 || a >= 224 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 0 && (c === 0 || c === 2)) ||
+      (a === 192 && b === 168) ||
+      (a === 198 && (b === 18 || b === 19)) ||
+      (a === 198 && b === 51 && c === 100) ||
+      (a === 203 && b === 0 && c === 113)
+    );
+  }
+  if (net.isIPv6(ip)) {
+    const l = ip.toLowerCase();
+    if (l === "::" || l === "::1" || l.startsWith("::ffff:") || l.startsWith("2001:db8")) return true;
+    const first = parseInt(l.split(":")[0] || "0", 16);
+    return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80 || (first & 0xff00) === 0xff00;
+  }
+  return true;
+}
+
+function checkHostParseTarget(input) {
+  let raw = String(input ?? "").trim();
+  if (!raw) throw chErr("Parameter url wajib diisi. Contoh: {\"url\":\"example.com\"}", "MISSING_URL");
+  if (raw.length > 2048) throw chErr("URL terlalu panjang.", "URL_TOO_LONG");
+  const explicitScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw);
+  if (!explicitScheme) raw = `https://${raw}`;
+
+  let u;
+  try { u = new URL(raw); } catch { throw chErr("URL atau hostname tidak valid.", "INVALID_URL"); }
+  if (!/^https?:$/.test(u.protocol)) throw chErr("Hanya http:// atau https:// yang didukung.", "INVALID_SCHEME");
+
+  const hostname = u.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  const isIp = net.isIP(hostname) !== 0;
+  if (!isIp) {
+    const okName = /^(?=.{1,253}$)(?:[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?\.)+[a-z0-9-]{2,63}$/.test(hostname);
+    if (!okName) throw chErr("Hostname tidak valid.", "INVALID_HOST");
+    if (/\.(local|localhost|internal|lan|home|corp|intranet|arpa)$/.test(hostname)) {
+      throw chErr("Host tidak diizinkan.", "HOST_BLOCKED");
+    }
+  }
+  const port = u.port ? Number(u.port) : u.protocol === "https:" ? 443 : 80;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw chErr("Port tidak valid.", "INVALID_PORT");
+
+  return {
+    input: String(input).trim(),
+    hostname,
+    isIp,
+    scheme: u.protocol.replace(":", ""),
+    port,
+    explicitPort: Boolean(u.port),
+    explicitScheme,
+    path: `${u.pathname || "/"}${u.search || ""}`
+  };
+}
+
+function checkHostRegistrable(hostname) {
+  const labels = hostname.split(".");
+  if (labels.length <= 2) return hostname;
+  const last2 = labels.slice(-2).join(".");
+  return CH_SLD.has(last2) ? labels.slice(-3).join(".") : last2;
+}
+
+async function checkHostResolve(hostname, isIp) {
+  const t0 = performance.now();
+  let list;
+  if (isIp) list = [{ address: hostname, family: net.isIPv6(hostname) ? 6 : 4 }];
+  else list = await chTimeout(dns.lookup(hostname, { all: true, verbatim: true }), 5000, "DNS timeout");
+  const seen = new Set();
+  const uniq = list.filter((a) => !seen.has(a.address) && seen.add(a.address)).sort((a, b) => a.family - b.family);
+  return { addresses: uniq, ms: chMs(performance.now() - t0) };
+}
+
+function checkHostAssertPublic(addresses) {
+  if (!addresses.length) throw chErr("Host tidak memiliki alamat IP.", "NO_ADDRESS");
+  if (addresses.some((a) => checkHostIsBlockedIp(a.address))) {
+    throw chErr("Host mengarah ke alamat privat/internal dan tidak diizinkan.", "HOST_BLOCKED");
+  }
+}
+
+/* Pin DNS: koneksi hanya boleh ke IP yang sudah lolos validasi (anti DNS-rebinding). */
+function checkHostPinnedLookup(addresses) {
+  return (_hostname, options, cb) => {
+    if (typeof options === "function") { cb = options; options = {}; }
+    if (options && options.all) return cb(null, addresses.map((a) => ({ address: a.address, family: a.family })));
+    return cb(null, addresses[0].address, addresses[0].family);
+  };
+}
+
+function checkHostDecodeBody(buf, encoding) {
+  if (!buf?.length) return "";
+  const enc = String(encoding || "").toLowerCase();
+  const cap = 2_000_000;
+  try {
+    let out = buf;
+    if (enc.includes("br")) out = zlib.brotliDecompressSync(buf, { finishFlush: zlib.constants.BROTLI_OPERATION_FLUSH, maxOutputLength: cap });
+    else if (enc.includes("gzip")) out = zlib.gunzipSync(buf, { finishFlush: zlib.constants.Z_SYNC_FLUSH, maxOutputLength: cap });
+    else if (enc.includes("deflate")) {
+      try { out = zlib.inflateSync(buf, { finishFlush: zlib.constants.Z_SYNC_FLUSH, maxOutputLength: cap }); }
+      catch { out = zlib.inflateRawSync(buf, { finishFlush: zlib.constants.Z_SYNC_FLUSH, maxOutputLength: cap }); }
+    }
+    return out.toString("utf8");
+  } catch {
+    return "";
+  }
+}
+
+function checkHostRequest(urlObj, addresses, opts = {}) {
+  const { method = "GET", maxBody = CH_MAX_BODY, timeoutMs = CH_STEP_MS } = opts;
+  return new Promise((resolve) => {
+    const isHttps = urlObj.protocol === "https:";
+    const lib = isHttps ? https : http;
+    const host = urlObj.hostname.replace(/^\[|\]$/g, "");
+    const t0 = performance.now();
+    const timing = { connectMs: null, tlsMs: null, ttfbMs: null, totalMs: null };
+    let tConnect = null;
+    let tSecure = null;
+    let remoteAddress = null;
+    let settled = false;
+    let req;
+    let hard;
+
+    const finishTiming = () => { timing.totalMs = chMs(performance.now() - t0); return { ...timing }; };
+    const done = (payload) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(hard);
+      resolve(payload);
+    };
+    hard = setTimeout(() => {
+      try { req?.destroy(); } catch { /* noop */ }
+      done({ ok: false, error: "Timeout", code: "ETIMEDOUT", timing: finishTiming() });
+    }, timeoutMs + 300);
+
+    try {
+      req = lib.request(
+        {
+          method,
+          hostname: host,
+          port: urlObj.port || (isHttps ? 443 : 80),
+          path: `${urlObj.pathname || "/"}${urlObj.search || ""}`,
+          headers: {
+            "User-Agent": CH_UA,
+            Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.8,id;q=0.7",
+            "Accept-Encoding": "gzip, deflate, br",
+            Connection: "close"
+          },
+          lookup: checkHostPinnedLookup(addresses),
+          servername: net.isIP(host) ? undefined : host,
+          rejectUnauthorized: false,
+          agent: false,
+          timeout: timeoutMs
+        },
+        (res) => {
+          timing.ttfbMs = chMs(performance.now() - (tSecure ?? tConnect ?? t0));
+          const chunks = [];
+          let size = 0;
+          const type = String(res.headers["content-type"] || "");
+          const wantBody = method !== "HEAD" && maxBody > 0 && /text\/html|application\/xhtml/i.test(type);
+          const finalize = () => done({
+            ok: true,
+            status: res.statusCode,
+            statusMessage: res.statusMessage || "",
+            httpVersion: res.httpVersion,
+            headers: res.headers,
+            body: Buffer.concat(chunks),
+            remoteAddress,
+            timing: finishTiming()
+          });
+          if (!wantBody) { finalize(); res.destroy(); return; }
+          res.on("data", (c) => {
+            size += c.length;
+            chunks.push(c);
+            if (size >= maxBody) { finalize(); res.destroy(); }
+          });
+          res.on("end", finalize);
+          res.on("error", finalize);
+          res.on("close", finalize);
+        }
+      );
+      req.on("socket", (socket) => {
+        socket.on("connect", () => {
+          tConnect = performance.now();
+          timing.connectMs = chMs(tConnect - t0);
+          remoteAddress = socket.remoteAddress || null;
+        });
+        socket.on("secureConnect", () => {
+          tSecure = performance.now();
+          timing.tlsMs = chMs(tSecure - (tConnect ?? t0));
+        });
+      });
+      req.on("timeout", () => req.destroy(Object.assign(new Error("Timeout"), { code: "ETIMEDOUT" })));
+      req.on("error", (e) => done({ ok: false, error: e.message, code: e.code || null, timing: finishTiming() }));
+      req.end();
+    } catch (e) {
+      done({ ok: false, error: e.message, code: e.code || null, timing: finishTiming() });
+    }
+  });
+}
+
+const CH_RETRY_CODES = new Set(["ENETUNREACH", "EHOSTUNREACH", "EADDRNOTAVAIL", "ECONNREFUSED"]);
+
+/* Coba maksimal 3 IP (v4 dulu) hanya untuk error koneksi yang cepat gagal. */
+async function checkHostRequestAny(urlObj, addresses, opts) {
+  let last;
+  for (const addr of addresses.slice(0, 3)) {
+    last = await checkHostRequest(urlObj, [addr], opts);
+    if (last.ok || !CH_RETRY_CODES.has(last.code)) return last;
+  }
+  return last;
+}
+
+async function checkHostFollow(startUrl, startAddresses, deadlineAt) {
+  const chain = [];
+  let current = new URL(startUrl);
+  let addrs = startAddresses;
+  let last = null;
+  let truncated = null;
+
+  for (let hop = 0; hop <= CH_MAX_REDIRECTS; hop += 1) {
+    const remaining = deadlineAt - Date.now();
+    if (remaining < 800) { truncated = "deadline"; break; }
+    const r = await checkHostRequestAny(current, addrs, { timeoutMs: Math.min(CH_STEP_MS, remaining - 200) });
+    if (!r.ok) {
+      chain.push({ url: current.href, status: null, error: r.error, code: r.code });
+      return { chain, last: null, error: r };
+    }
+    last = r;
+    const location = r.headers.location || null;
+    chain.push({
+      url: current.href,
+      status: r.status,
+      ip: r.remoteAddress,
+      timeMs: r.timing.totalMs,
+      location
+    });
+    if ([301, 302, 303, 307, 308].includes(r.status) && location) {
+      if (hop === CH_MAX_REDIRECTS) { truncated = "too_many_redirects"; break; }
+      let next;
+      try { next = new URL(location, current); } catch { break; }
+      if (!/^https?:$/.test(next.protocol)) break;
+      try {
+        if (next.hostname !== current.hostname) {
+          const resolved = await checkHostResolve(next.hostname.replace(/^\[|\]$/g, ""), net.isIP(next.hostname.replace(/^\[|\]$/g, "")) !== 0);
+          checkHostAssertPublic(resolved.addresses);
+          addrs = resolved.addresses;
+        }
+      } catch (e) {
+        chain.push({ url: next.href, status: null, error: e.message, code: e.code || "REDIRECT_BLOCKED" });
+        truncated = "redirect_blocked";
+        break;
+      }
+      current = next;
+      continue;
+    }
+    break;
+  }
+  return { chain, last, finalUrl: current.href, truncated };
+}
+
+function checkHostDescribeCert(cert, hostname) {
+  if (!cert || !Object.keys(cert).length) return null;
+  const first = (v) => (Array.isArray(v) ? v[0] : v) || null;
+  const toDate = (s) => { const d = new Date(s); return Number.isNaN(d.getTime()) ? null : d; };
+  const from = toDate(cert.valid_from);
+  const to = toDate(cert.valid_to);
+  const now = Date.now();
+  const san = String(cert.subjectaltname || "")
+    .split(/,\s*/).filter(Boolean).map((s) => s.replace(/^(DNS|IP Address):/i, ""));
+  let hostnameMatches = null;
+  try { hostnameMatches = tls.checkServerIdentity(hostname, cert) === undefined; } catch { /* noop */ }
+
+  const chain = [];
+  const seen = new Set();
+  let c = cert;
+  while (c && c.fingerprint256 && !seen.has(c.fingerprint256) && chain.length < 6) {
+    seen.add(c.fingerprint256);
+    chain.push({
+      subject: first(c.subject?.CN) || first(c.subject?.O),
+      issuer: first(c.issuer?.CN) || first(c.issuer?.O),
+      validTo: toDate(c.valid_to)?.toISOString() || null
+    });
+    c = c.issuerCertificate;
+  }
+
+  return {
+    subject: first(cert.subject?.CN),
+    organization: first(cert.subject?.O),
+    issuer: first(cert.issuer?.CN),
+    issuerOrganization: first(cert.issuer?.O),
+    issuerCountry: first(cert.issuer?.C),
+    validFrom: from?.toISOString() || null,
+    validTo: to?.toISOString() || null,
+    daysRemaining: to ? Math.floor((to.getTime() - now) / 86400000) : null,
+    expired: to ? to.getTime() < now : null,
+    notYetValid: from ? from.getTime() > now : null,
+    altNames: san,
+    wildcard: san.some((s) => s.startsWith("*.")),
+    hostnameMatches,
+    selfSigned: JSON.stringify(cert.subject) === JSON.stringify(cert.issuer),
+    keyType: cert.asn1Curve ? "EC" : cert.bits ? "RSA" : null,
+    keyBits: cert.bits || null,
+    curve: cert.nistCurve || cert.asn1Curve || null,
+    serialNumber: cert.serialNumber || null,
+    fingerprintSha256: cert.fingerprint256 || null,
+    chain
+  };
+}
+
+function checkHostTlsConnect({ hostname, port, address, minVersion, maxVersion, timeoutMs = 5500, full = false }) {
+  return new Promise((resolve) => {
+    const t0 = performance.now();
+    let settled = false;
+    let socket;
+    let timer;
+    const finish = (v) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { socket?.destroy(); } catch { /* noop */ }
+      resolve(v);
+    };
+    timer = setTimeout(() => finish({ supported: false, error: "Timeout", code: "ETIMEDOUT" }), timeoutMs);
+    try {
+      socket = tls.connect(
+        {
+          host: address,
+          port,
+          servername: net.isIP(hostname) ? undefined : hostname,
+          rejectUnauthorized: false,
+          ALPNProtocols: ["h2", "http/1.1"],
+          minVersion,
+          maxVersion
+        },
+        () => {
+          const result = {
+            supported: true,
+            protocol: socket.getProtocol(),
+            cipher: socket.getCipher()?.name || null,
+            alpn: socket.alpnProtocol || null,
+            handshakeMs: chMs(performance.now() - t0)
+          };
+          if (full) {
+            result.authorized = Boolean(socket.authorized);
+            result.authorizationError = socket.authorizationError ? String(socket.authorizationError) : null;
+            result.cert = checkHostDescribeCert(socket.getPeerCertificate(true), hostname);
+          }
+          finish(result);
+        }
+      );
+      socket.on("error", (e) => finish({ supported: false, error: e.message, code: e.code || null }));
+    } catch (e) {
+      finish({ supported: false, error: e.message, code: e.code || null });
+    }
+  });
+}
+
+async function checkHostTlsMain(hostname, port, addresses) {
+  let last;
+  for (const addr of addresses.slice(0, 3)) {
+    last = await checkHostTlsConnect({ hostname, port, address: addr.address, full: true });
+    if (last.supported || !CH_RETRY_CODES.has(last.code)) return { ...last, ip: addr.address };
+  }
+  return last;
+}
+
+function checkHostTcp(address, port, timeoutMs = 4000) {
+  return new Promise((resolve) => {
+    const t0 = performance.now();
+    let settled = false;
+    const socket = net.connect({ host: address, port });
+    const finish = (v) => {
+      if (settled) return;
+      settled = true;
+      try { socket.destroy(); } catch { /* noop */ }
+      resolve({ port, service: CH_PORT_NAMES[port] || null, ...v });
+    };
+    socket.setTimeout(timeoutMs, () => finish({ open: false, error: "timeout" }));
+    socket.on("connect", () => finish({ open: true, latencyMs: chMs(performance.now() - t0) }));
+    socket.on("error", (e) => finish({ open: false, error: e.code || e.message }));
+  });
+}
+
+async function checkHostDnsRecords(hostname, apex) {
+  const t0 = performance.now();
+  const q = async (fn, ...args) => { try { return await chTimeout(fn(...args), 4000); } catch { return null; } };
+  const joinTxt = (list) => (Array.isArray(list) ? list.map((parts) => (Array.isArray(parts) ? parts.join("") : String(parts))) : []);
+
+  const txtHostP = q(dns.resolveTxt, hostname);
+  const txtApexP = hostname === apex ? txtHostP : q(dns.resolveTxt, apex);
+  const [a, aaaa, cname, txtHost, txtApex, ns, mx, soa, caa, dmarc] = await Promise.all([
+    q(dns.resolve4, hostname, { ttl: true }),
+    q(dns.resolve6, hostname, { ttl: true }),
+    q(dns.resolveCname, hostname),
+    txtHostP,
+    txtApexP,
+    q(dns.resolveNs, apex),
+    q(dns.resolveMx, apex),
+    q(dns.resolveSoa, apex),
+    typeof dns.resolveCaa === "function" ? q(dns.resolveCaa, apex) : Promise.resolve(null),
+    q(dns.resolveTxt, `_dmarc.${apex}`)
+  ]);
+
+  const txtApexList = joinTxt(txtApex);
+  const dmarcList = joinTxt(dmarc);
+  return {
+    apexDomain: apex,
+    A: (a || []).map((r) => ({ address: r.address, ttl: r.ttl })),
+    AAAA: (aaaa || []).map((r) => ({ address: r.address, ttl: r.ttl })),
+    CNAME: cname || [],
+    NS: (ns || []).sort(),
+    MX: (mx || []).sort((x, y) => x.priority - y.priority),
+    TXT: joinTxt(txtHost),
+    SOA: soa || null,
+    CAA: (caa || []).map((r) => {
+      const [tag, value] = Object.entries(r).find(([k]) => k !== "critical") || [null, null];
+      return { critical: Boolean(r.critical), tag, value };
+    }),
+    email: {
+      spf: txtApexList.find((t) => /^v=spf1/i.test(t)) || null,
+      dmarc: dmarcList.find((t) => /^v=DMARC1/i.test(t)) || null
+    },
+    queryMs: chMs(performance.now() - t0)
+  };
+}
+
+async function checkHostGeo(ip) {
+  try {
+    const r = await fetch(`https://ipwho.is/${encodeURIComponent(ip)}`, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(4500)
+    });
+    const j = await r.json();
+    if (j && j.success !== false) {
+      return {
+        country: j.country || null,
+        countryCode: j.country_code || null,
+        region: j.region || null,
+        city: j.city || null,
+        latitude: j.latitude ?? null,
+        longitude: j.longitude ?? null,
+        timezone: j.timezone?.id || null,
+        asn: j.connection?.asn ? `AS${j.connection.asn}` : null,
+        isp: j.connection?.isp || null,
+        organization: j.connection?.org || null,
+        source: "ipwho.is"
+      };
+    }
+  } catch { /* fallback */ }
+  try {
+    const r = await fetch(`https://ipapi.co/${encodeURIComponent(ip)}/json/`, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(4500)
+    });
+    const j = await r.json();
+    if (j && !j.error) {
+      return {
+        country: j.country_name || null,
+        countryCode: j.country_code || null,
+        region: j.region || null,
+        city: j.city || null,
+        latitude: j.latitude ?? null,
+        longitude: j.longitude ?? null,
+        timezone: j.timezone || null,
+        asn: j.asn || null,
+        isp: j.org || null,
+        organization: j.org || null,
+        source: "ipapi.co"
+      };
+    }
+  } catch { /* noop */ }
+  return null;
+}
+
+async function checkHostIpInfo(addr) {
+  const [geo, ptr] = await Promise.all([
+    checkHostGeo(addr.address),
+    chTimeout(dns.reverse(addr.address), 3000).catch(() => [])
+  ]);
+  return { ip: addr.address, version: addr.family, reverse: ptr, geo };
+}
+
+async function checkHostRdap(target, apex, primaryIp) {
+  try {
+    const url = target.isIp || !apex
+      ? `https://rdap.org/ip/${encodeURIComponent(primaryIp)}`
+      : `https://rdap.org/domain/${encodeURIComponent(apex)}`;
+    const r = await fetch(url, {
+      headers: { Accept: "application/rdap+json, application/json" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(6000)
+    });
+    if (!r.ok) return { available: false, source: "rdap", message: `RDAP merespons ${r.status}.` };
+    const j = await r.json();
+    const ev = (name) => (j.events || []).find((e) => e.eventAction === name)?.eventDate || null;
+
+    if (target.isIp || !apex) {
+      return {
+        available: true,
+        type: "ip",
+        name: j.name || null,
+        handle: j.handle || null,
+        range: j.startAddress && j.endAddress ? `${j.startAddress} - ${j.endAddress}` : null,
+        cidr: (j.cidr0_cidrs || []).map((c) => `${c.v4prefix || c.v6prefix}/${c.length}`),
+        country: j.country || null,
+        status: j.status || [],
+        registeredAt: ev("registration"),
+        updatedAt: ev("last changed")
+      };
+    }
+    const registrarEntity = (j.entities || []).find((e) => (e.roles || []).includes("registrar"));
+    const registrar = registrarEntity?.vcardArray?.[1]?.find((x) => x[0] === "fn")?.[3] || null;
+    const registeredAt = ev("registration");
+    const expiresAt = ev("expiration");
+    const dayDiff = (iso) => (iso ? Math.floor((new Date(iso).getTime() - Date.now()) / 86400000) : null);
+    return {
+      available: true,
+      type: "domain",
+      domain: (j.ldhName || apex).toLowerCase(),
+      registrar,
+      status: j.status || [],
+      nameservers: (j.nameservers || []).map((n) => String(n.ldhName || "").toLowerCase()).filter(Boolean),
+      dnssec: j.secureDNS?.delegationSigned ?? null,
+      registeredAt,
+      updatedAt: ev("last changed"),
+      expiresAt,
+      daysToExpire: dayDiff(expiresAt),
+      domainAgeDays: registeredAt ? -dayDiff(registeredAt) : null
+    };
+  } catch (e) {
+    return { available: false, source: "rdap", message: "Data RDAP tidak dapat diambil.", error: e.name === "TimeoutError" ? "timeout" : e.message };
+  }
+}
+
+function checkHostDetectTech(h) {
+  const found = new Set();
+  const server = String(h.server || "").toLowerCase();
+  if (h["cf-ray"] || server.includes("cloudflare")) found.add("Cloudflare");
+  if (h["x-vercel-id"] || server.includes("vercel")) found.add("Vercel");
+  if (h["x-amz-cf-id"] || String(h.via || "").toLowerCase().includes("cloudfront")) found.add("Amazon CloudFront");
+  if (h["x-fastly-request-id"] || h["x-served-by"]) found.add("Fastly");
+  if (h["x-sucuri-id"] || server.includes("sucuri")) found.add("Sucuri");
+  if (server.includes("akamai") || h["x-akamai-transformed"]) found.add("Akamai");
+  if (h["x-nf-request-id"] || server.includes("netlify")) found.add("Netlify");
+  if (h["x-github-request-id"]) found.add("GitHub Pages");
+  if (h["x-azure-ref"]) found.add("Azure Front Door");
+  if (server.includes("bunny")) found.add("BunnyCDN");
+  if (server.includes("litespeed")) found.add("LiteSpeed");
+  return [...found];
+}
+
+function checkHostSecurityHeaders(h) {
+  const rules = [
+    { key: "strict-transport-security", label: "HSTS", weight: 20 },
+    { key: "content-security-policy", label: "Content-Security-Policy", weight: 25 },
+    { key: "x-frame-options", label: "X-Frame-Options", weight: 10, alt: (hd) => /frame-ancestors/i.test(String(hd["content-security-policy"] || "")) },
+    { key: "x-content-type-options", label: "X-Content-Type-Options", weight: 15 },
+    { key: "referrer-policy", label: "Referrer-Policy", weight: 10 },
+    { key: "permissions-policy", label: "Permissions-Policy", weight: 10 },
+    { key: "cross-origin-opener-policy", label: "Cross-Origin-Opener-Policy", weight: 5 },
+    { key: "cross-origin-resource-policy", label: "Cross-Origin-Resource-Policy", weight: 5 }
+  ];
+  let score = 0;
+  const items = rules.map((r) => {
+    const value = h[r.key] ? String(h[r.key]).slice(0, 300) : null;
+    const present = Boolean(value) || Boolean(r.alt?.(h));
+    if (present) score += r.weight;
+    return { header: r.label, present, value };
+  });
+  const grade = score >= 90 ? "A" : score >= 75 ? "B" : score >= 60 ? "C" : score >= 40 ? "D" : "F";
+  return { score, grade, headers: items, missing: items.filter((i) => !i.present).map((i) => i.header) };
+}
+
+function checkHostParseHsts(value) {
+  if (!value) return { enabled: false };
+  const v = String(value);
+  const age = v.match(/max-age=(\d+)/i);
+  return {
+    enabled: true,
+    maxAgeSeconds: age ? Number(age[1]) : null,
+    includeSubDomains: /includeSubDomains/i.test(v),
+    preload: /preload/i.test(v)
+  };
+}
+
+function checkHostParseCookies(setCookie) {
+  const list = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [];
+  return list.slice(0, 20).map((c) => {
+    const parts = String(c).split(";").map((p) => p.trim());
+    const flags = parts.slice(1).map((p) => p.toLowerCase());
+    return {
+      name: parts[0].split("=")[0],
+      secure: flags.includes("secure"),
+      httpOnly: flags.includes("httponly"),
+      sameSite: (flags.find((f) => f.startsWith("samesite=")) || "").replace("samesite=", "") || null
+    };
+  });
+}
+
+function checkHostPageMeta(html) {
+  if (!html) return { title: null, description: null, generator: null, lang: null };
+  try {
+    const $ = cheerio.load(html);
+    const clip = (s, n) => (s ? String(s).replace(/\s+/g, " ").trim().slice(0, n) || null : null);
+    return {
+      title: clip($("title").first().text(), 200),
+      description: clip($('meta[name="description"]').attr("content"), 300),
+      generator: clip($('meta[name="generator"]').attr("content"), 100),
+      lang: clip($("html").attr("lang"), 20)
+    };
+  } catch {
+    return { title: null, description: null, generator: null, lang: null };
+  }
+}
+
+function checkHostParseList(v) {
+  if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter(Boolean);
+  if (typeof v === "string") return v.split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
+  return [];
+}
+
+async function handleCheckHost(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Cache-Control", "no-store");
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({
+      success: false,
+      message: "Gunakan method POST dengan body JSON.",
+      example: { url: "example.com" }
+    });
+  }
+
+  const limit = checkHostRateLimit(req);
+  if (!limit.ok) {
+    res.setHeader("Retry-After", String(limit.retryAfter));
+    return res.status(429).json({
+      success: false,
+      message: `Terlalu banyak request. Coba lagi dalam ${limit.retryAfter} detik.`
+    });
+  }
+
+  const startedAt = performance.now();
+  const deadlineAt = Date.now() + CH_DEADLINE_MS;
+
+  try {
+    await ensureJsonBody(req);
+    const body = req.body || {};
+    const target = checkHostParseTarget(body.url ?? body.host ?? body.domain ?? body.target);
+
+    const requested = checkHostParseList(body.checks).map((c) => c.toLowerCase());
+    const unknown = requested.filter((c) => !CH_ALL_CHECKS.includes(c));
+    if (unknown.length) {
+      return res.status(400).json({ success: false, message: `Nilai checks tidak dikenal: ${unknown.join(", ")}.`, allowed: CH_ALL_CHECKS });
+    }
+    const wanted = new Set(requested.length ? requested : CH_ALL_CHECKS);
+    if (wanted.has("security")) wanted.add("http");
+
+    const extraPorts = checkHostParseList(body.ports).map(Number);
+    const badPorts = extraPorts.filter((p) => !Number.isInteger(p) || !CH_PORT_NAMES[p]);
+    if (badPorts.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Port tidak didukung. Hanya port umum yang boleh dicek.",
+        allowed: Object.keys(CH_PORT_NAMES).map(Number)
+      });
+    }
+    const ports = [...new Set([80, 443, ...(target.explicitPort ? [target.port] : []), ...extraPorts])].slice(0, CH_MAX_PORTS);
+
+    /* ---------- 1. Resolve + validasi SSRF ---------- */
+    let addresses = [];
+    let resolveMs = null;
+    let resolveError = null;
+    try {
+      const r = await checkHostResolve(target.hostname, target.isIp);
+      addresses = r.addresses;
+      resolveMs = r.ms;
+    } catch (e) {
+      resolveError = e.code || e.message;
+    }
+    if (addresses.length) checkHostAssertPublic(addresses);
+
+    const apex = target.isIp ? null : checkHostRegistrable(target.hostname);
+    const primary = addresses[0] || null;
+    const mainUrl = new URL(
+      `${target.scheme}://${chBracket(target.hostname)}${target.explicitPort ? `:${target.port}` : ""}${target.path}`
+    );
+    const httpsPort = target.scheme === "https" && target.explicitPort ? target.port : 443;
+    const plainHttpPort = target.scheme === "http" && target.explicitPort ? target.port : 80;
+
+    /* ---------- 2. Jalankan semua pemeriksaan paralel ---------- */
+    const reachable = addresses.length > 0;
+    const tasks = {
+      dns: wanted.has("dns") && !target.isIp ? checkHostDnsRecords(target.hostname, apex).catch(() => null) : null,
+      ip: wanted.has("ip") && reachable ? Promise.all(addresses.slice(0, 4).map((a) => checkHostIpInfo(a))).catch(() => []) : null,
+      http: wanted.has("http") && reachable ? checkHostFollow(mainUrl.href, addresses, deadlineAt).catch((e) => ({ chain: [], last: null, error: { error: e.message, code: e.code || null } })) : null,
+      redirect: wanted.has("https") && reachable
+        ? checkHostRequestAny(new URL(`http://${chBracket(target.hostname)}${plainHttpPort === 80 ? "" : `:${plainHttpPort}`}/`), addresses, { maxBody: 0, timeoutMs: 5000 }).catch(() => null)
+        : null,
+      tls: wanted.has("https") && reachable ? checkHostTlsMain(target.hostname, httpsPort, addresses).catch((e) => ({ supported: false, error: e.message })) : null,
+      tls12: wanted.has("https") && reachable ? checkHostTlsConnect({ hostname: target.hostname, port: httpsPort, address: primary.address, minVersion: "TLSv1.2", maxVersion: "TLSv1.2", timeoutMs: 4500 }) : null,
+      tls13: wanted.has("https") && reachable ? checkHostTlsConnect({ hostname: target.hostname, port: httpsPort, address: primary.address, minVersion: "TLSv1.3", maxVersion: "TLSv1.3", timeoutMs: 4500 }) : null,
+      ports: wanted.has("ports") && reachable ? Promise.all(ports.map((p) => checkHostTcp(primary.address, p))) : null,
+      whois: wanted.has("whois") ? checkHostRdap(target, apex, primary?.address).catch(() => null) : null
+    };
+    const keys = Object.keys(tasks);
+    const settled = await Promise.all(keys.map((k) => tasks[k] ?? Promise.resolve(null)));
+    const r = Object.fromEntries(keys.map((k, i) => [k, settled[i]]));
+
+    /* ---------- 3. Susun hasil ---------- */
+    const out = {
+      input: target.input,
+      target: {
+        hostname: target.hostname,
+        isIp: target.isIp,
+        scheme: target.scheme,
+        port: target.port,
+        url: mainUrl.href,
+        apexDomain: apex
+      }
+    };
+
+    out.resolve = {
+      resolved: addresses.length > 0,
+      error: resolveError,
+      timeMs: resolveMs,
+      addresses: addresses.map((a) => ({ address: a.address, version: a.family }))
+    };
+
+    if (r.dns) out.dns = r.dns;
+    if (r.ip) out.ips = r.ip;
+
+    let finalHeaders = null;
+    let finalScheme = null;
+    if (r.http) {
+      const chain = r.http.chain || [];
+      if (r.http.last) {
+        const last = r.http.last;
+        const h = last.headers;
+        finalHeaders = h;
+        finalScheme = new URL(r.http.finalUrl).protocol.replace(":", "");
+        const html = checkHostDecodeBody(last.body, h["content-encoding"]);
+        const shown = {};
+        for (const [k, v] of Object.entries(h)) {
+          if (k === "set-cookie") continue;
+          shown[k] = String(Array.isArray(v) ? v.join(", ") : v).slice(0, 500);
+        }
+        out.http = {
+          reachable: true,
+          status: last.status,
+          statusText: last.statusMessage,
+          finalUrl: r.http.finalUrl,
+          redirectCount: Math.max(0, chain.length - 1),
+          redirectsTruncated: r.http.truncated || null,
+          chain,
+          timing: {
+            dnsMs: resolveMs,
+            connectMs: last.timing.connectMs,
+            tlsMs: last.timing.tlsMs,
+            ttfbMs: last.timing.ttfbMs,
+            totalMs: last.timing.totalMs
+          },
+          server: h.server || null,
+          poweredBy: h["x-powered-by"] || null,
+          contentType: h["content-type"] || null,
+          contentLength: h["content-length"] ? Number(h["content-length"]) : null,
+          compression: h["content-encoding"] || null,
+          cacheControl: h["cache-control"] || null,
+          etag: h.etag || null,
+          lastModified: h["last-modified"] || null,
+          http3Advertised: /\bh3(-\d+)?=/.test(String(h["alt-svc"] || "")),
+          detected: checkHostDetectTech(h),
+          page: checkHostPageMeta(html),
+          cookies: checkHostParseCookies(h["set-cookie"]),
+          headers: shown
+        };
+      } else {
+        out.http = {
+          reachable: false,
+          error: r.http.error?.error || "Tidak dapat terhubung.",
+          code: r.http.error?.code || null,
+          chain
+        };
+      }
+    }
+
+    if (r.tls || r.redirect) {
+      const t = r.tls || {};
+      const redirectLoc = r.redirect?.ok && [301, 302, 303, 307, 308].includes(r.redirect.status) && r.redirect.headers.location
+        ? (() => { try { return new URL(r.redirect.headers.location, `http://${target.hostname}/`).href; } catch { return null; } })()
+        : null;
+      out.https = {
+        supported: Boolean(t.supported),
+        port: httpsPort,
+        error: t.supported ? null : t.error || null,
+        tlsVersion: t.protocol || null,
+        cipher: t.cipher || null,
+        http2: t.alpn === "h2",
+        alpn: t.alpn || null,
+        handshakeMs: t.handshakeMs ?? null,
+        certificateTrusted: t.supported ? Boolean(t.authorized) : null,
+        certificateError: t.authorizationError || null,
+        protocols: {
+          "TLSv1.3": r.tls13 ? Boolean(r.tls13.supported) : null,
+          "TLSv1.2": r.tls12 ? Boolean(r.tls12.supported) : null
+        },
+        certificate: t.cert || null,
+        httpToHttps: r.redirect
+          ? {
+              reachable: Boolean(r.redirect.ok),
+              status: r.redirect.ok ? r.redirect.status : null,
+              location: redirectLoc,
+              redirectsToHttps: Boolean(redirectLoc && redirectLoc.startsWith("https://")),
+              error: r.redirect.ok ? null : r.redirect.error || null
+            }
+          : null,
+        hsts: finalHeaders ? checkHostParseHsts(finalHeaders["strict-transport-security"]) : null
+      };
+    }
+
+    if (wanted.has("security") && finalHeaders) out.security = checkHostSecurityHeaders(finalHeaders);
+    if (r.ports) out.ports = r.ports;
+    if (r.whois) out.whois = r.whois;
+
+    /* ---------- 4. Ringkasan & temuan ---------- */
+    const issues = [];
+    const http$ = out.http;
+    const https$ = out.https;
+    const cert = https$?.certificate;
+    if (!reachable) issues.push(`Hostname tidak dapat di-resolve (${resolveError || "tidak ada IP"}).`);
+    if (http$ && http$.reachable === false) issues.push(`Website tidak dapat dijangkau: ${http$.error}.`);
+    if (http$?.status >= 500) issues.push(`Server mengembalikan error ${http$.status}.`);
+    else if (http$?.status >= 400) issues.push(`Server mengembalikan status ${http$.status}.`);
+    if (https$) {
+      if (!https$.supported) issues.push("HTTPS/TLS tidak tersedia pada port " + httpsPort + ".");
+      else {
+        if (https$.certificateTrusted === false) issues.push(`Sertifikat tidak tepercaya: ${https$.certificateError || "alasan tidak diketahui"}.`);
+        if (cert?.expired) issues.push("Sertifikat SSL sudah kedaluwarsa.");
+        else if (cert?.daysRemaining != null && cert.daysRemaining <= 14) issues.push(`Sertifikat SSL kedaluwarsa dalam ${cert.daysRemaining} hari.`);
+        if (cert?.hostnameMatches === false) issues.push("Nama host tidak cocok dengan sertifikat.");
+        if (https$.protocols["TLSv1.3"] === false && https$.protocols["TLSv1.2"] === false) issues.push("Server tidak mendukung TLS 1.2 maupun 1.3.");
+        if (https$.httpToHttps && https$.httpToHttps.reachable && !https$.httpToHttps.redirectsToHttps) issues.push("HTTP tidak diarahkan (redirect) ke HTTPS.");
+        if (https$.hsts && !https$.hsts.enabled) issues.push("HSTS belum aktif.");
+      }
+    }
+    if (out.security && out.security.grade !== "A" && out.security.grade !== "B") {
+      issues.push(`Header keamanan kurang lengkap (nilai ${out.security.grade}).`);
+    }
+    if (out.dns && !out.dns.AAAA.length && out.dns.A.length) issues.push("Belum ada record AAAA (IPv6).");
+    if (out.dns && !out.dns.email.spf) issues.push("Record SPF tidak ditemukan pada domain utama.");
+    if (out.whois?.daysToExpire != null && out.whois.daysToExpire <= 30) {
+      issues.push(`Domain akan kedaluwarsa dalam ${out.whois.daysToExpire} hari.`);
+    }
+
+    const statusCode = http$?.status ?? null;
+    out.summary = {
+      online: http$ ? Boolean(http$.reachable && statusCode < 500) : null,
+      statusCode,
+      responseTimeMs: http$?.timing?.totalMs ?? null,
+      ip: primary?.address || null,
+      country: out.ips?.[0]?.geo?.country || null,
+      isp: out.ips?.[0]?.geo?.isp || null,
+      finalUrl: http$?.finalUrl || null,
+      https: https$ ? Boolean(https$.supported) : null,
+      certificateValid: https$?.supported ? Boolean(https$.certificateTrusted && !cert?.expired && cert?.hostnameMatches !== false) : null,
+      certificateDaysRemaining: cert?.daysRemaining ?? null,
+      http2: https$ ? https$.http2 : null,
+      hsts: https$?.hsts?.enabled ?? null,
+      server: http$?.server || null,
+      detected: http$?.detected || [],
+      securityGrade: out.security?.grade || null,
+      issues
+    };
+
+    return res.status(200).json({
+      success: true,
+      checkedAt: new Date().toISOString(),
+      durationMs: Math.round(performance.now() - startedAt),
+      data: out
+    });
+  } catch (error) {
+    if (error.httpStatus) {
+      return res.status(error.httpStatus).json({ success: false, message: error.message, code: error.code || undefined });
+    }
+    console.error("check-host error:", error);
+    return res.status(500).json({ success: false, message: "Terjadi kesalahan saat memeriksa host." });
+  }
+}
+
+
 export default async function handler(req, res) {
   const routeKey = getRouteKey(req);
 
@@ -11036,6 +11997,8 @@ export default async function handler(req, res) {
       return handleAlbumSearch(req, res);
     case "add-subdomain":
       return handleAddSubdomain(req, res);
+    case "check-host":
+      return handleCheckHost(req, res);
     case "download":
       return handleDownload(req, res);
     case "tiktok":

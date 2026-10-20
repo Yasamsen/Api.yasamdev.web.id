@@ -153,6 +153,11 @@ html.menu-open { overflow: hidden; }
 article.card:hover, button.card:hover { transform: translate(-2px, -2px); box-shadow: 7px 7px 0 rgb(var(--shadow)); }
 article.card:hover .iconbox, button.card:hover .iconbox { animation: pop 0.5s var(--pop); }
 button.card:active { transform: translate(3px, 3px); box-shadow: 1px 1px 0 rgb(var(--shadow)); }
+a.card { display: flex; color: inherit; text-decoration: none; }
+a.card:hover { transform: translate(-2px, -2px); box-shadow: 7px 7px 0 rgb(var(--shadow)); }
+a.card:hover .iconbox { animation: pop 0.5s var(--pop); }
+a.card:active { transform: translate(3px, 3px); box-shadow: 1px 1px 0 rgb(var(--shadow)); }
+.avatar { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 20px; background: rgb(var(--yellow)); color: rgb(var(--on-light)); border: var(--bw) solid rgb(var(--ink)); box-shadow: 3px 3px 0 rgb(var(--shadow)); font-size: 1.35rem; font-weight: 800; letter-spacing: -0.04em; animation: bob 3s ease-in-out infinite; }
 .glass { background: rgb(var(--surface)); border: var(--bw) solid rgb(var(--ink)); box-shadow: 3px 3px 0 rgb(var(--shadow)); }
 .hair { border-color: rgb(var(--hair) / 0.18); }
 .iconbox { display: grid; place-items: center; border-radius: 14px; background: var(--tile, rgb(var(--gold2))); color: var(--tile-fg, #fff); border: var(--bw) solid rgb(var(--ink)); box-shadow: 2px 2px 0 rgb(var(--shadow)); }

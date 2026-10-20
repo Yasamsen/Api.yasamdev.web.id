@@ -1,6 +1,7 @@
 import { toggleTheme, getTheme } from './theme.js';
 import { apiDefinitions } from './apis/registry.js';
 import { BASE_URL, esc, icon } from './utils.js';
+import { creatorLinks, creatorName, brandIcon } from './creator.js';
 
 let firstNav = true;
 
@@ -37,6 +38,7 @@ export function renderNavbar(path) {
             </div>
           </div>
           <button data-nav="/docs" class="navlink ${isDocs ? 'is-active' : ''}">Documentation</button>
+          <button data-nav="/contact" class="navlink ${path === '/contact' ? 'is-active' : ''}">Contact</button>
         </nav>
 
         <div class="flex items-center gap-1">
@@ -50,12 +52,12 @@ export function renderNavbar(path) {
 
     <div id="mobile-menu" class="md:hidden" aria-hidden="true">
       <div class="mx-auto flex max-w-md flex-col">
-        ${[['/', 'Home'], ['/docs', 'Documentation'], ['/docs', 'All APIs']].map(([to, label], i) => `<button data-nav="${to}" style="--i:${i}" class="m-item font-display hair border-b-2 py-5 text-left text-2xl">${label}</button>`).join('')}
-        <div style="--i:3" class="m-item mt-8 flex items-center justify-between">
+        ${[['/', 'Home'], ['/docs', 'Documentation'], ['/docs', 'All APIs'], ['/contact', 'Contact']].map(([to, label], i) => `<button data-nav="${to}" style="--i:${i}" class="m-item font-display hair border-b-2 py-5 text-left text-2xl">${label}</button>`).join('')}
+        <div style="--i:4" class="m-item mt-8 flex items-center justify-between">
           <div class="flex items-center gap-2"><span class="h-1.5 w-1.5 rounded-full bg-ok"></span><span class="text-xs font-semibold text-muted">API online</span></div>
           <button id="mobile-theme-btn" class="flex items-center gap-2 text-sm text-muted">${icon(themeIcon, 'h-4 w-4')} Theme</button>
         </div>
-        <button data-nav="/docs" style="--i:4" class="m-item btn btn-gold mt-8 w-full">Get started</button>
+        <button data-nav="/docs" style="--i:5" class="m-item btn btn-gold mt-8 w-full">Get started</button>
       </div>
     </div>
   </header>`;
@@ -97,15 +99,15 @@ export function renderFooter() {
         <div class="max-w-xs">
           <button data-nav="/" class="mb-4 flex items-center gap-2.5"><span class="logo-mark">${icon('Zap', 'h-3.5 w-3.5 fill-current')}</span><span class="font-display text-2xl">Sam<span class="text-gold">Api</span></span></button>
           <p class="text-sm leading-7 text-muted">Simple, powerful APIs for developers who build the future.</p>
-          <div class="mt-5 flex items-center gap-1">${['Github', 'Twitter', 'Linkedin', 'Mail'].map((x) => `<button class="iconbtn" aria-label="${x}">${icon(x, 'h-4 w-4')}</button>`).join('')}</div>
+          <div class="mt-5 flex items-center gap-1">${creatorLinks().map((l) => `<a href="${esc(l.href)}" target="_blank" rel="noopener noreferrer" class="iconbtn" aria-label="${esc(l.label)}" title="${esc(l.label)}">${brandIcon(l.key, 'h-4 w-4')}</a>`).join('')}</div>
         </div>
         <div class="grid grid-cols-2 gap-x-14 gap-y-10 sm:grid-cols-3">
           ${col('Product', [['Documentation', '/docs'], ['Changelog'], ['Status']])}
           ${col('Resources', [['Examples'], ['SDKs'], ['Community']])}
-          ${col('Company', [['About'], ['Contact'], ['Privacy']])}
+          ${col('Company', [['About'], ['Contact', '/contact'], ['Privacy']])}
         </div>
       </div>
-      <div class="mt-12 flex flex-col justify-between gap-2 border-t hair pt-6 text-xs text-dim sm:flex-row"><span>© ${new Date().getFullYear()} SamApi. Built for developers.</span><span>Made with care for the developer community.</span></div>
+      <div class="mt-12 flex flex-col justify-between gap-2 border-t hair pt-6 text-xs text-dim sm:flex-row"><span>© ${new Date().getFullYear()} SamApi. Built by <button data-nav="/contact" class="font-bold text-fg transition-colors hover:text-gold">${creatorName()}</button>.</span><span>Made with care for the developer community.</span></div>
     </div>
   </footer>`;
 }

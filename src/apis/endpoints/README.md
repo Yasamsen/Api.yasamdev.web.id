@@ -44,3 +44,9 @@ Atur environment variables berikut di Vercel (Project → Settings → Environme
 - `ADD_SUBDOMAIN_API_KEY`: kunci rahasia acak yang hanya dibagikan ke pemanggil endpoint.
 
 Kirim API key lewat header `x-api-key`. Body JSON berisi `subdomain` (label saja, misalnya `panel`), `type` (`A`, `AAAA`, `CNAME`, `TXT`), `content`, opsional `ttl`, dan `proxied` (`true`/`false`). Jangan pernah menaruh token Cloudflare di frontend atau di metadata endpoint.
+
+
+## Endpoint `check-host`
+
+`POST /api/check-host` — tanpa API key. Body JSON: `{"url":"example.com"}`, opsional `checks` (`dns,ip,http,https,ports,whois,security`) dan `ports` (port umum saja).
+Tidak butuh environment variable. IP privat/internal diblokir (anti-SSRF), ada rate limit 15 request/menit per IP, dan total waktu dibatasi ±9 detik.

@@ -1,4 +1,5 @@
 import { apiDefinitions, getApiBySlug, getCategories } from './apis/registry.js';
+import { renderCreatorSection } from './creator.js';
 import { esc, icon, refreshIcons, copyText } from './utils.js';
 import { renderApiCard } from './components.js';
 import { observeReveals } from './motion.js';
@@ -131,6 +132,8 @@ console.log(data.media[<span class="tk-n">0</span>].url);</code></pre>
       </div>`, 100)}
     </div>
   </section>
+
+  ${renderCreatorSection()}
 
   <section>
     <div class="mx-auto max-w-3xl px-4 py-24 text-center sm:px-8 sm:py-32">
