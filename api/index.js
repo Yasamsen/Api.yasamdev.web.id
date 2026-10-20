@@ -10177,6 +10177,230 @@ function getRouteKey(req) {
   return segments.join("/");
 }
 
+// ===============================
+// BGREMOVER (UPLOAD FILE) - sumber: bgremovers.org
+// Pola upload sama seperti ToURL: multipart/form-data, field "file", maks 4 MB.
+// Tempel di api/index.js (bodyParser global sudah false, busboy sudah di-import).
+// ===============================
+const BGREMOVER_API_URL = "https://bgremovers.org/api/v1/remove-background";
+const BGREMOVER_MAX_BYTES = 4_000_000;
+const BGREMOVER_MAX_JSON_BYTES = 3_000_000; // hasil PNG > ini hanya bisa lewat format=image
+const BGREMOVER_TIMEOUT_MS = 25000;
+const BGREMOVER_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp"];
+
+function bgremoverParseMultipart(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    let bb;
+    try {
+      bb = Busboy({
+        headers: req.headers,
+        limits: { files: 1, fileSize: maxBytes, fields: 10, fieldSize: 1024 }
+      });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    let fileResult = null;
+    const fields = {};
+    let tooLarge = false;
+
+    bb.on("field", (name, value) => {
+      fields[name] = value;
+    });
+    bb.on("file", (name, stream, info) => {
+      const chunks = [];
+      let size = 0;
+      stream.on("data", (chunk) => {
+        size += chunk.length;
+        chunks.push(chunk);
+      });
+      stream.on("limit", () => { tooLarge = true; });
+      stream.on("end", () => {
+        fileResult = {
+          fieldname: name,
+          buffer: Buffer.concat(chunks),
+          filename: info.filename,
+          mimetype: info.mimeType,
+          size
+        };
+      });
+    });
+    bb.on("filesLimit", () => { tooLarge = true; });
+    bb.on("error", reject);
+    bb.on("close", () => {
+      if (tooLarge) {
+        reject(Object.assign(new Error("File terlalu besar. Maksimal 4 MB."), { code: "TOO_LARGE" }));
+        return;
+      }
+      resolve({ file: fileResult, fields });
+    });
+    req.pipe(bb);
+  });
+}
+
+// Deteksi tipe gambar asli dari magic bytes (bukan percaya ekstensi/mime dari klien)
+function bgremoverDetectImageType(buf) {
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (buf.length >= 8 && buf.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (buf.length >= 12 && buf.slice(0, 4).toString() === "RIFF" && buf.slice(8, 12).toString() === "WEBP") return "image/webp";
+  return null;
+}
+
+async function bgremoverRequestRemoval(buffer, mimetype, filename) {
+  const form = new FormData();
+  form.append("image", new Blob([buffer], { type: mimetype }), filename);
+
+  const response = await fetch(BGREMOVER_API_URL, {
+    method: "POST",
+    headers: { Accept: "image/png" },
+    body: form,
+    signal: AbortSignal.timeout(BGREMOVER_TIMEOUT_MS)
+  });
+
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`;
+    try {
+      const err = await response.json();
+      detail = err?.error?.message || err?.message || detail;
+    } catch {}
+    throw Object.assign(new Error(detail), { statusCode: response.status });
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("image/png")) {
+    throw Object.assign(
+      new Error(`Respons tidak valid dari BgRemove (${contentType || "tanpa content-type"})`),
+      { statusCode: 502 }
+    );
+  }
+
+  const limit = response.headers.get("X-RateLimit-Limit");
+  const remaining = response.headers.get("X-RateLimit-Remaining");
+  return {
+    buffer: Buffer.from(await response.arrayBuffer()),
+    rateLimit: {
+      limit: limit !== null ? Number(limit) : null,
+      remaining: remaining !== null ? Number(remaining) : null
+    }
+  };
+}
+
+async function handleBgremover(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST, OPTIONS");
+    return res.status(405).json({
+      status: false,
+      message: "Metode tidak diizinkan. Gunakan POST dengan multipart/form-data.",
+      error: "Method Not Allowed"
+    });
+  }
+
+  try {
+    const declaredLength = Number(req.headers["content-length"] || 0);
+    if (declaredLength > 4_200_000) {
+      return res.status(413).json({ status: false, message: "File terlalu besar.", error: "Maksimal 4 MB." });
+    }
+
+    if (!/multipart\/form-data/i.test(req.headers["content-type"] || "")) {
+      return res.status(400).json({
+        status: false,
+        message: "Kirim gambar lewat multipart/form-data pada field \"file\".",
+        error: 'example: curl -X POST "/api/bgremover" -F "file=@foto.jpg"'
+      });
+    }
+
+    const { file, fields } = await bgremoverParseMultipart(req, BGREMOVER_MAX_BYTES);
+    if (!file || !file.buffer.length) {
+      return res.status(400).json({
+        status: false,
+        message: "Gambar wajib diunggah.",
+        error: 'Pilih file pada field "file". example: curl -X POST "/api/bgremover" -F "file=@foto.jpg"'
+      });
+    }
+
+    const filename =
+      String(file.filename || "image.png").split(/[\\/]/).pop().replace(/[^\w.\-]+/g, "_").slice(0, 100) || "image.png";
+    const extension = filename.toLowerCase().match(/\.[^.]+$/)?.[0] || "";
+    const realType = bgremoverDetectImageType(file.buffer);
+    if (!BGREMOVER_EXTENSIONS.includes(extension) || !realType) {
+      return res.status(415).json({
+        status: false,
+        message: "Format gambar tidak didukung.",
+        error: `Gunakan file gambar asli: ${BGREMOVER_EXTENSIONS.join(", ")}`
+      });
+    }
+
+    const format = String(fields.format || req.query?.format || "json").trim().toLowerCase();
+    if (!["json", "image"].includes(format)) {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter 'format' hanya boleh 'json' atau 'image'.",
+        error: 'example: "/api/bgremover?format=image"'
+      });
+    }
+
+    const { buffer, rateLimit } = await bgremoverRequestRemoval(file.buffer, realType, filename);
+
+    if (format === "image") {
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Content-Disposition", `inline; filename="${filename.replace(/\.[^.]+$/, "")}-nobg.png"`);
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(200).send(buffer);
+    }
+
+    if (buffer.length > BGREMOVER_MAX_JSON_BYTES) {
+      return res.status(413).json({
+        status: false,
+        message: "Hasil terlalu besar untuk dikirim sebagai JSON. Gunakan format=image.",
+        error: `Ukuran hasil: ${buffer.length} bytes`
+      });
+    }
+
+    return res.status(200).json({
+      status: true,
+      source: "BgRemove",
+      data: {
+        input_filename: filename,
+        output_filename: `${filename.replace(/\.[^.]+$/, "")}-nobg.png`,
+        mimetype: "image/png",
+        size: buffer.length,
+        image: `data:image/png;base64,${buffer.toString("base64")}`,
+        rate_limit: rateLimit
+      }
+    });
+  } catch (error) {
+    let code = 500;
+    let message = "Terjadi kesalahan saat menghapus background gambar.";
+
+    if (error.code === "TOO_LARGE") {
+      code = 413;
+      message = "File terlalu besar. Maksimal 4 MB.";
+    } else if (error.name === "TimeoutError" || error.name === "AbortError") {
+      code = 504;
+      message = "Waktu permintaan ke server BgRemove habis, coba lagi.";
+    } else if (error.statusCode === 429) {
+      code = 429;
+      message = "Batas harian BgRemove (100 gambar/hari per IP) sudah tercapai.";
+    } else if (error.statusCode === 413) {
+      code = 413;
+      message = "Ukuran gambar ditolak oleh BgRemove.";
+    } else if (error.statusCode === 400 || error.statusCode === 422) {
+      code = 400;
+      message = "Gambar tidak dapat diproses oleh BgRemove.";
+    } else if (error.statusCode) {
+      code = 502;
+      message = "Server BgRemove sedang bermasalah, coba lagi nanti.";
+    }
+
+    return res.status(code).json({ status: false, message, error: error.message });
+  }
+}
+
 export default async function handler(req, res) {
   const routeKey = getRouteKey(req);
 
@@ -10283,6 +10507,8 @@ case "video-to-prompt":
   return handleTourl(req, res);
   case "freeconvert-video-to-mp3":
   return handleFreeconvertVideoToMp3(req, res);
+  case "bgremover":
+  return handleBgremover(req, res);
   case "ringtone":
   return handleRingtoneEndpoint(req, res);
     default:
