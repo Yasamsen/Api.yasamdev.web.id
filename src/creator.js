@@ -9,9 +9,9 @@ import { esc, icon } from './utils.js';
 export const CREATOR = {
   name: 'YasamDev',
   role: 'Creator & Developer',
-  whatsapp: '62XXXXXXXXXXX',
-  telegram: 'USERNAME_TELEGRAM',
-  instagram: 'USERNAME_INSTAGRAM',
+  whatsapp: '6281519986005',
+  telegram: 'YasamOffc',
+  instagram: 'yasamdev',
   waMessage: 'Halo YasamDev, saya ingin bertanya tentang SamApi.',
 };
 
