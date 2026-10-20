@@ -10178,15 +10178,32 @@ function getRouteKey(req) {
 }
 
 // ===============================
-// BGREMOVER (UPLOAD FILE) - sumber: bgremovers.org
+// BGREMOVER (UPLOAD FILE)
 // Pola upload sama seperti ToURL: multipart/form-data, field "file", maks 4 MB.
+// Penghapus background: Space Hugging Face (Gradio API) yang dicoba berurutan.
 // Hasil PNG transparan diunggah lewat TOURL_PROVIDERS (milik ToURL) -> respons JSON berisi url.
 // Tempel di api/index.js (bodyParser global sudah false, busboy sudah di-import).
 // ===============================
-const BGREMOVER_API_URL = "https://bgremovers.org/api/v1/remove-background";
 const BGREMOVER_MAX_BYTES = 4_000_000;
-const BGREMOVER_TIMEOUT_MS = 25000;
+const BGREMOVER_TOTAL_MS = 55000; // total waktu semua percobaan
 const BGREMOVER_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp"];
+
+const BGREMOVER_PROVIDERS = [
+  {
+    name: "BRIA RMBG 2.0",
+    base: "https://briaai-bria-rmbg-2-0.hf.space",
+    api: "image",
+    // output: [slider(transparan, asli), File PNG transparan]
+    pick: (data) => data?.[1] || data?.[0]?.[0] || data?.[0]
+  },
+  {
+    name: "BiRefNet",
+    base: "https://not-lain-background-removal.hf.space",
+    api: "png",
+    // output: File PNG transparan
+    pick: (data) => data?.[0]
+  }
+];
 
 function bgremoverParseMultipart(req, maxBytes) {
   return new Promise((resolve, reject) => {
@@ -10247,44 +10264,86 @@ function bgremoverDetectImageType(buf) {
   return null;
 }
 
-async function bgremoverRequestRemoval(buffer, mimetype, filename) {
-  // Router meng-import FormData dari paket "form-data"; fetch butuh FormData bawaan Node
-  const form = new globalThis.FormData();
-  form.append("image", new Blob([buffer], { type: mimetype }), filename);
+function bgremoverSignal(deadline) {
+  return AbortSignal.timeout(Math.max(1000, deadline - Date.now()));
+}
 
-  const response = await fetch(BGREMOVER_API_URL, {
-    method: "POST",
-    headers: { Accept: "image/png" },
-    body: form,
-    signal: AbortSignal.timeout(BGREMOVER_TIMEOUT_MS)
-  });
-
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const err = await response.json();
-      detail = err?.error?.message || err?.message || detail;
-    } catch {}
-    throw Object.assign(new Error(detail), { statusCode: response.status });
-  }
-
-  const contentType = response.headers.get("content-type") || "";
-  if (!contentType.includes("image/png")) {
-    throw Object.assign(
-      new Error(`Respons tidak valid dari BgRemove (${contentType || "tanpa content-type"})`),
-      { statusCode: 502 }
-    );
-  }
-
-  const limit = response.headers.get("X-RateLimit-Limit");
-  const remaining = response.headers.get("X-RateLimit-Remaining");
-  return {
-    buffer: Buffer.from(await response.arrayBuffer()),
-    rateLimit: {
-      limit: limit !== null ? Number(limit) : null,
-      remaining: remaining !== null ? Number(remaining) : null
+// Baca respons SSE Gradio, ambil event "complete" (atau lempar error)
+function bgremoverParseSse(text) {
+  let event = "";
+  let result = null;
+  let failure = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line.startsWith("event:")) {
+      event = line.slice(6).trim();
+    } else if (line.startsWith("data:")) {
+      const payload = line.slice(5).trim();
+      if (event === "complete") {
+        try { result = JSON.parse(payload); } catch { failure = "respons tidak valid"; }
+      } else if (event === "error") {
+        let msg = payload;
+        try { msg = JSON.parse(payload); } catch {}
+        failure = (typeof msg === "string" ? msg : JSON.stringify(msg)) || "error dari server model";
+        if (failure === "null") failure = "server model menolak permintaan (kuota GPU habis atau gambar tidak valid)";
+      }
     }
-  };
+  }
+  if (result) return result;
+  throw new Error(failure || "server model tidak mengirim hasil");
+}
+
+// Jalankan satu Space Gradio: upload -> call -> baca hasil -> unduh PNG
+async function bgremoverRunProvider(provider, file, mimetype, deadline) {
+  const { base, api } = provider;
+
+  // 1. Upload file ke Space (field "files")
+  const form = new globalThis.FormData(); // jangan pakai FormData dari paket "form-data"
+  form.append("files", new Blob([file.buffer], { type: mimetype }), file.filename);
+  const up = await fetch(`${base}/gradio_api/upload`, {
+    method: "POST",
+    body: form,
+    signal: bgremoverSignal(deadline)
+  });
+  if (!up.ok) throw new Error(`upload gagal (HTTP ${up.status})`);
+  const uploaded = await up.json();
+  const path = Array.isArray(uploaded) ? uploaded[0] : null;
+  if (!path || typeof path !== "string") throw new Error("upload tidak mengembalikan path file");
+
+  // 2. Kirim job
+  const call = await fetch(`${base}/gradio_api/call/${api}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      data: [{ path, orig_name: file.filename, meta: { _type: "gradio.FileData" } }]
+    }),
+    signal: bgremoverSignal(deadline)
+  });
+  if (!call.ok) throw new Error(`job ditolak (HTTP ${call.status})`);
+  const { event_id: eventId } = await call.json();
+  if (!eventId) throw new Error("job tidak mengembalikan event_id");
+
+  // 3. Tunggu hasil (SSE, dibaca sampai selesai)
+  const stream = await fetch(`${base}/gradio_api/call/${api}/${eventId}`, {
+    signal: bgremoverSignal(deadline)
+  });
+  if (!stream.ok) throw new Error(`gagal membaca hasil (HTTP ${stream.status})`);
+  const data = bgremoverParseSse(await stream.text());
+
+  // 4. Unduh PNG hasil
+  const out = provider.pick(data);
+  const link = out?.url && /^https?:\/\//i.test(out.url)
+    ? out.url
+    : out?.path
+      ? `${base}/gradio_api/file=${out.path}`
+      : null;
+  if (!link) throw new Error("hasil tidak berisi file gambar");
+
+  const img = await fetch(link, { signal: bgremoverSignal(deadline) });
+  if (!img.ok) throw new Error(`gagal mengunduh hasil (HTTP ${img.status})`);
+  const buffer = Buffer.from(await img.arrayBuffer());
+  if (bgremoverDetectImageType(buffer) !== "image/png") throw new Error("hasil bukan file PNG");
+  return buffer;
 }
 
 async function handleBgremover(req, res) {
@@ -10315,7 +10374,7 @@ async function handleBgremover(req, res) {
       });
     }
 
-    const { file, fields } = await bgremoverParseMultipart(req, BGREMOVER_MAX_BYTES);
+    const { file } = await bgremoverParseMultipart(req, BGREMOVER_MAX_BYTES);
     if (!file || !file.buffer.length) {
       return res.status(400).json({
         status: false,
@@ -10336,65 +10395,70 @@ async function handleBgremover(req, res) {
       });
     }
 
-    const { buffer, rateLimit } = await bgremoverRequestRemoval(file.buffer, realType, filename);
+    // Hapus background: coba Space satu per satu
+    const deadline = Date.now() + BGREMOVER_TOTAL_MS;
+    const modelErrors = [];
+    let png = null;
+    let model = null;
+    for (const provider of BGREMOVER_PROVIDERS) {
+      if (Date.now() >= deadline - 2000) break;
+      try {
+        png = await bgremoverRunProvider(provider, { buffer: file.buffer, filename }, realType, deadline);
+        model = provider.name;
+        break;
+      } catch (err) {
+        const reason = err.name === "TimeoutError" || err.name === "AbortError" ? "waktu habis" : err.message;
+        modelErrors.push(`${provider.name}: ${reason}`);
+      }
+    }
 
-    const outputName = `${filename.replace(/\.[^.]+$/, "")}-nobg.png`;
-    const output = { buffer, mimetype: "image/png", filename: outputName };
+    if (!png) {
+      return res.status(502).json({
+        status: false,
+        message: "Gagal menghapus background, server model sedang sibuk atau bermasalah. Coba lagi sebentar lagi.",
+        error: modelErrors.join(" | ") || "waktu habis"
+      });
+    }
 
     // Unggah hasil lewat penyedia hosting ToURL (dicoba berurutan)
-    const errors = [];
+    const outputName = `${filename.replace(/\.[^.]+$/, "")}-nobg.png`;
+    const output = { buffer: png, mimetype: "image/png", filename: outputName };
+    const uploadErrors = [];
     for (const provider of TOURL_PROVIDERS) {
       try {
         const link = await provider.upload(output);
         return res.status(200).json({
           status: true,
-          source: "BgRemove",
+          source: model,
           data: {
             url: link,
             filename: outputName,
             mimetype: "image/png",
-            size: buffer.length,
+            size: png.length,
             expires: provider.expires,
-            host: provider.name,
-            rate_limit: rateLimit
+            host: provider.name
           }
         });
       } catch (err) {
-        errors.push(`${provider.name}: ${err.message}`);
+        uploadErrors.push(`${provider.name}: ${err.message}`);
       }
     }
 
     return res.status(502).json({
       status: false,
       message: "Background berhasil dihapus, tetapi gagal mengunggah hasil ke server penyimpanan.",
-      error: errors.join(" | ")
+      error: uploadErrors.join(" | ")
     });
   } catch (error) {
     if (res.headersSent) return res.destroy();
-    let code = 500;
-    let message = "Terjadi kesalahan saat menghapus background gambar.";
-
     if (error.code === "TOO_LARGE") {
-      code = 413;
-      message = "File terlalu besar. Maksimal 4 MB.";
-    } else if (error.name === "TimeoutError" || error.name === "AbortError") {
-      code = 504;
-      message = "Waktu permintaan ke server BgRemove habis, coba lagi.";
-    } else if (error.statusCode === 429) {
-      code = 429;
-      message = "Batas harian BgRemove (100 gambar/hari per IP) sudah tercapai.";
-    } else if (error.statusCode === 413) {
-      code = 413;
-      message = "Ukuran gambar ditolak oleh BgRemove.";
-    } else if (error.statusCode === 400 || error.statusCode === 422) {
-      code = 400;
-      message = "Gambar tidak dapat diproses oleh BgRemove.";
-    } else if (error.statusCode) {
-      code = 502;
-      message = "Server BgRemove sedang bermasalah, coba lagi nanti.";
+      return res.status(413).json({ status: false, message: "File terlalu besar. Maksimal 4 MB.", error: error.message });
     }
-
-    return res.status(code).json({ status: false, message, error: error.message });
+    return res.status(500).json({
+      status: false,
+      message: "Terjadi kesalahan saat menghapus background gambar.",
+      error: error.message
+    });
   }
 }
 
