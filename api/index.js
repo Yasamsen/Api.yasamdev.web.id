@@ -10180,11 +10180,11 @@ function getRouteKey(req) {
 // ===============================
 // BGREMOVER (UPLOAD FILE) - sumber: bgremovers.org
 // Pola upload sama seperti ToURL: multipart/form-data, field "file", maks 4 MB.
+// Hasil PNG transparan diunggah lewat TOURL_PROVIDERS (milik ToURL) -> respons JSON berisi url.
 // Tempel di api/index.js (bodyParser global sudah false, busboy sudah di-import).
 // ===============================
 const BGREMOVER_API_URL = "https://bgremovers.org/api/v1/remove-background";
 const BGREMOVER_MAX_BYTES = 4_000_000;
-const BGREMOVER_MAX_JSON_BYTES = 3_000_000; // hasil PNG > ini hanya bisa lewat format=image
 const BGREMOVER_TIMEOUT_MS = 25000;
 const BGREMOVER_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp"];
 
@@ -10248,7 +10248,8 @@ function bgremoverDetectImageType(buf) {
 }
 
 async function bgremoverRequestRemoval(buffer, mimetype, filename) {
-  const form = new FormData();
+  // Router meng-import FormData dari paket "form-data"; fetch butuh FormData bawaan Node
+  const form = new globalThis.FormData();
   form.append("image", new Blob([buffer], { type: mimetype }), filename);
 
   const response = await fetch(BGREMOVER_API_URL, {
@@ -10335,45 +10336,41 @@ async function handleBgremover(req, res) {
       });
     }
 
-    const format = String(fields.format || req.query?.format || "json").trim().toLowerCase();
-    if (!["json", "image"].includes(format)) {
-      return res.status(400).json({
-        status: false,
-        message: "Parameter 'format' hanya boleh 'json' atau 'image'.",
-        error: 'example: "/api/bgremover?format=image"'
-      });
-    }
-
     const { buffer, rateLimit } = await bgremoverRequestRemoval(file.buffer, realType, filename);
 
-    if (format === "image") {
-      res.setHeader("Content-Type", "image/png");
-      res.setHeader("Content-Disposition", `inline; filename="${filename.replace(/\.[^.]+$/, "")}-nobg.png"`);
-      res.setHeader("Cache-Control", "no-store");
-      return res.status(200).send(buffer);
-    }
+    const outputName = `${filename.replace(/\.[^.]+$/, "")}-nobg.png`;
+    const output = { buffer, mimetype: "image/png", filename: outputName };
 
-    if (buffer.length > BGREMOVER_MAX_JSON_BYTES) {
-      return res.status(413).json({
-        status: false,
-        message: "Hasil terlalu besar untuk dikirim sebagai JSON. Gunakan format=image.",
-        error: `Ukuran hasil: ${buffer.length} bytes`
-      });
-    }
-
-    return res.status(200).json({
-      status: true,
-      source: "BgRemove",
-      data: {
-        input_filename: filename,
-        output_filename: `${filename.replace(/\.[^.]+$/, "")}-nobg.png`,
-        mimetype: "image/png",
-        size: buffer.length,
-        image: `data:image/png;base64,${buffer.toString("base64")}`,
-        rate_limit: rateLimit
+    // Unggah hasil lewat penyedia hosting ToURL (dicoba berurutan)
+    const errors = [];
+    for (const provider of TOURL_PROVIDERS) {
+      try {
+        const link = await provider.upload(output);
+        return res.status(200).json({
+          status: true,
+          source: "BgRemove",
+          data: {
+            url: link,
+            filename: outputName,
+            mimetype: "image/png",
+            size: buffer.length,
+            expires: provider.expires,
+            host: provider.name,
+            rate_limit: rateLimit
+          }
+        });
+      } catch (err) {
+        errors.push(`${provider.name}: ${err.message}`);
       }
+    }
+
+    return res.status(502).json({
+      status: false,
+      message: "Background berhasil dihapus, tetapi gagal mengunggah hasil ke server penyimpanan.",
+      error: errors.join(" | ")
     });
   } catch (error) {
+    if (res.headersSent) return res.destroy();
     let code = 500;
     let message = "Terjadi kesalahan saat menghapus background gambar.";
 
