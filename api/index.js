@@ -10462,6 +10462,216 @@ async function handleBgremover(req, res) {
   }
 }
 
+// ===============================
+// OCR (UPLOAD FILE) - sumber: OCR.space
+// Pola upload sama seperti ToURL: multipart/form-data, field "file".
+// Batas OCR.space paket gratis: 1 MB per file, PDF maksimal 3 halaman.
+// Opsional: set env OCRSPACE_API_KEY di Vercel (key gratis: https://ocr.space/ocrapi/freekey).
+// Tanpa env, dipakai key demo "helloworld" yang dipakai bersama dan sering kena limit.
+// Tempel di api/index.js (bodyParser global sudah false, busboy sudah di-import).
+// ===============================
+const OCR_API_URL = "https://api.ocr.space/parse/image";
+const OCR_MAX_BYTES = 1_000_000;
+const OCR_TIMEOUT_MS = 45000;
+
+function ocrParseMultipart(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    let bb;
+    try {
+      bb = Busboy({
+        headers: req.headers,
+        limits: { files: 1, fileSize: maxBytes, fields: 10, fieldSize: 1024 }
+      });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    let fileResult = null;
+    let tooLarge = false;
+
+    bb.on("file", (name, stream, info) => {
+      const chunks = [];
+      let size = 0;
+      stream.on("data", (chunk) => {
+        size += chunk.length;
+        chunks.push(chunk);
+      });
+      stream.on("limit", () => { tooLarge = true; });
+      stream.on("end", () => {
+        fileResult = {
+          fieldname: name,
+          buffer: Buffer.concat(chunks),
+          filename: info.filename,
+          mimetype: info.mimeType,
+          size
+        };
+      });
+    });
+    bb.on("filesLimit", () => { tooLarge = true; });
+    bb.on("error", reject);
+    bb.on("close", () => {
+      if (tooLarge) {
+        reject(Object.assign(new Error("File terlalu besar. Maksimal 1 MB."), { code: "TOO_LARGE" }));
+        return;
+      }
+      resolve({ file: fileResult });
+    });
+    req.pipe(bb);
+  });
+}
+
+// Deteksi tipe file asli dari magic bytes (bukan percaya ekstensi/mime dari klien)
+function ocrDetectFileType(buf) {
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return { filetype: "JPG", mimetype: "image/jpeg" };
+  if (buf.length >= 8 && buf.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return { filetype: "PNG", mimetype: "image/png" };
+  if (buf.length >= 4 && buf.slice(0, 4).toString() === "GIF8") return { filetype: "GIF", mimetype: "image/gif" };
+  if (buf.length >= 2 && buf.slice(0, 2).toString() === "BM") return { filetype: "BMP", mimetype: "image/bmp" };
+  if (buf.length >= 4 && (buf.slice(0, 4).equals(Buffer.from([0x49, 0x49, 0x2a, 0x00])) || buf.slice(0, 4).equals(Buffer.from([0x4d, 0x4d, 0x00, 0x2a])))) return { filetype: "TIF", mimetype: "image/tiff" };
+  if (buf.length >= 5 && buf.slice(0, 5).toString() === "%PDF-") return { filetype: "PDF", mimetype: "application/pdf" };
+  return null;
+}
+
+async function ocrRequest(file, filename, kind) {
+  const apiKey = String(process.env.OCRSPACE_API_KEY || "helloworld");
+
+  const form = new globalThis.FormData(); // jangan pakai FormData dari paket "form-data"
+  form.append("file", new Blob([file.buffer], { type: kind.mimetype }), filename);
+  form.append("filetype", kind.filetype);
+  form.append("language", "auto");
+  form.append("OCREngine", "2");
+  form.append("detectOrientation", "true");
+  form.append("scale", "true");
+  form.append("isOverlayRequired", "false");
+
+  const response = await fetch(OCR_API_URL, {
+    method: "POST",
+    headers: { apikey: apiKey },
+    body: form,
+    signal: AbortSignal.timeout(OCR_TIMEOUT_MS)
+  });
+
+  const text = await response.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch {}
+
+  if (!response.ok) {
+    const detail = (json && (json.ErrorMessage || json.message)) || text.slice(0, 150) || `HTTP ${response.status}`;
+    throw Object.assign(new Error(Array.isArray(detail) ? detail.join(" ") : String(detail)), { statusCode: response.status });
+  }
+  if (!json) {
+    throw Object.assign(new Error("Respons OCR.space bukan JSON"), { statusCode: 502 });
+  }
+  if (json.IsErroredOnProcessing) {
+    const msg = Array.isArray(json.ErrorMessage) ? json.ErrorMessage.join(" ") : String(json.ErrorMessage || json.ErrorDetails || "OCR gagal diproses");
+    throw Object.assign(new Error(msg), { ocrError: true });
+  }
+  return json;
+}
+
+async function handleOcr(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST, OPTIONS");
+    return res.status(405).json({
+      status: false,
+      message: "Metode tidak diizinkan. Gunakan POST dengan multipart/form-data.",
+      error: "Method Not Allowed"
+    });
+  }
+
+  try {
+    const declaredLength = Number(req.headers["content-length"] || 0);
+    if (declaredLength > OCR_MAX_BYTES + 100_000) {
+      return res.status(413).json({ status: false, message: "File terlalu besar.", error: "Maksimal 1 MB." });
+    }
+
+    if (!/multipart\/form-data/i.test(req.headers["content-type"] || "")) {
+      return res.status(400).json({
+        status: false,
+        message: "Kirim gambar lewat multipart/form-data pada field \"file\".",
+        error: 'example: curl -X POST "/api/ocr" -F "file=@foto.jpg"'
+      });
+    }
+
+    const { file } = await ocrParseMultipart(req, OCR_MAX_BYTES);
+    if (!file || !file.buffer.length) {
+      return res.status(400).json({
+        status: false,
+        message: "Gambar wajib diunggah.",
+        error: 'Pilih file pada field "file". example: curl -X POST "/api/ocr" -F "file=@foto.jpg"'
+      });
+    }
+
+    const kind = ocrDetectFileType(file.buffer);
+    if (!kind) {
+      return res.status(415).json({
+        status: false,
+        message: "Format file tidak didukung.",
+        error: "Gunakan file asli: JPG, PNG, GIF, BMP, TIFF, atau PDF"
+      });
+    }
+
+    const filename =
+      String(file.filename || "image").split(/[\\/]/).pop().replace(/[^\w.\-]+/g, "_").slice(0, 100) || "image";
+
+    const json = await ocrRequest(file, filename, kind);
+
+    const pages = Array.isArray(json.ParsedResults) ? json.ParsedResults : [];
+    const text = pages.map((p) => String(p.ParsedText || "")).join("\n").replace(/\r\n/g, "\n").trim();
+
+    if (!text) {
+      return res.status(422).json({
+        status: false,
+        message: "Tidak ada teks yang terdeteksi pada file ini.",
+        error: "Coba gambar yang lebih jelas dan tidak terlalu kecil."
+      });
+    }
+
+    return res.status(200).json({
+      status: true,
+      source: "OCR.space",
+      data: {
+        text,
+        characters: text.length,
+        words: text.split(/\s+/).filter(Boolean).length,
+        pages: pages.length,
+        filename,
+        mimetype: kind.mimetype,
+        size: file.buffer.length,
+        processing_ms: Number(json.ProcessingTimeInMilliseconds) || null
+      }
+    });
+  } catch (error) {
+    if (res.headersSent) return res.destroy();
+
+    let code = 500;
+    let message = "Terjadi kesalahan saat membaca teks dari gambar.";
+
+    if (error.code === "TOO_LARGE" || (error.ocrError && /size|limit.*kb|1024/i.test(error.message))) {
+      code = 413;
+      message = "File terlalu besar. Maksimal 1 MB.";
+    } else if (error.name === "TimeoutError" || error.name === "AbortError") {
+      code = 504;
+      message = "Waktu permintaan ke server OCR habis, coba lagi.";
+    } else if (error.statusCode === 403 || error.statusCode === 429) {
+      code = 429;
+      message = "Batas penggunaan OCR sedang tercapai, coba lagi nanti.";
+    } else if (error.ocrError) {
+      code = 422;
+      message = "File tidak dapat dibaca oleh server OCR.";
+    } else if (error.statusCode) {
+      code = 502;
+      message = "Server OCR sedang bermasalah, coba lagi nanti.";
+    }
+
+    return res.status(code).json({ status: false, message, error: error.message });
+  }
+}
+
 export default async function handler(req, res) {
   const routeKey = getRouteKey(req);
 
@@ -10570,6 +10780,8 @@ case "video-to-prompt":
   return handleFreeconvertVideoToMp3(req, res);
   case "bgremover":
   return handleBgremover(req, res);
+  case "ocr":
+  return handleOcr(req, res);
   case "ringtone":
   return handleRingtoneEndpoint(req, res);
     default:

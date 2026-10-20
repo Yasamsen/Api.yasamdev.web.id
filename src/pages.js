@@ -188,14 +188,14 @@ function tryPanel(api) {
       return `<label class="block"><span class="mb-2 block text-xs font-bold">${label}</span><select data-param="${esc(p.name)}" class="input font-mono !text-xs">${options}</select></label>`;
     }
     if (p.type === 'file') {
-      const uploadLabel = api.slug === 'tourl' || api.slug === 'freeconvert-video-to-mp3' || api.slug === 'bgremover';
+      const uploadLabel = api.slug === 'tourl' || api.slug === 'freeconvert-video-to-mp3' || api.slug === 'bgremover' || api.slug === 'ocr';
       if (uploadLabel) return `<div class="sm:col-span-2">
         <span class="mb-2 block text-xs font-bold">Pilih file ${p.required ? '<span class="text-red-400">*</span>' : ''}</span>
         <label class="group relative flex cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border border-dashed border-[rgb(var(--gold)/.42)] bg-[rgb(var(--gold)/.04)] px-5 py-8 text-center transition-all hover:border-[rgb(var(--gold)/.8)] hover:bg-[rgb(var(--gold)/.08)] sm:py-10">
           <input data-param="${esc(p.name)}" data-upload-input type="file" class="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0" aria-label="Pilih file untuk diunggah" required="${p.required ? 'required' : ''}">
           <span class="mb-3 grid h-14 w-14 place-items-center rounded-2xl border border-[rgb(var(--gold)/.25)] bg-[rgb(var(--gold)/.10)] text-gold transition-transform group-hover:-translate-y-0.5">${icon('UploadCloud', 'h-7 w-7')}</span>
           <span class="text-sm font-bold text-fg">Klik untuk memilih file</span>
-          <span class="mt-1 text-xs text-muted">Pilih file dari perangkat kamu · Maksimal 4 MB</span>
+          <span class="mt-1 text-xs text-muted">Pilih file dari perangkat kamu · ${esc(p.maxSizeLabel || 'Maksimal 4 MB')}</span>
           <span data-upload-name class="mt-4 max-w-full truncate rounded-lg bg-fg/[.06] px-3 py-2 text-xs font-semibold text-muted">Belum ada file dipilih</span>
         </label>
         <p class="mt-2 text-[11px] leading-5 text-muted">${esc(p.description || 'File akan diunggah dan menghasilkan URL publik.')}</p>
