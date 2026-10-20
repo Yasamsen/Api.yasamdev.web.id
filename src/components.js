@@ -23,7 +23,7 @@ export function renderNavbar(path) {
     <div class="nav-bar">
       <div class="mx-auto flex h-[var(--nav-h)] max-w-7xl items-center justify-between gap-3 px-4 sm:px-8">
         <button data-nav="/" class="flex items-center gap-2.5" aria-label="SamApi home">
-          <span class="grid h-8 w-8 place-items-center rounded-full border border-gold/40 text-gold">${icon('Zap', 'h-3.5 w-3.5 fill-current')}</span>
+          <span class="logo-mark">${icon('Zap', 'h-3.5 w-3.5 fill-current')}</span>
           <span class="font-display text-[21px] leading-none">Sam<span class="text-gold">Api</span></span>
         </button>
 
@@ -31,7 +31,7 @@ export function renderNavbar(path) {
           <button data-nav="/" class="navlink ${path === '/' ? 'is-active' : ''}">Home</button>
           <div class="relative" id="api-menu-wrap">
             <button id="api-menu-btn" class="navlink flex items-center gap-1 ${isDocs ? 'is-active' : ''}" aria-haspopup="true" aria-expanded="false">APIs ${icon('ChevronDown', 'chev h-3.5 w-3.5')}</button>
-            <div id="api-menu" class="menu-panel absolute left-0 top-11 w-52 rounded-xl border hair bg-surface p-1.5 shadow-xl shadow-black/10">
+            <div id="api-menu" class="menu-panel absolute left-0 top-12 w-56 p-1.5">
               <button data-nav="/docs" class="${dd}">${icon('BookOpen', 'h-4 w-4 text-gold')} All APIs</button>
               <button data-nav="/docs/instagram" class="${dd}">${icon('Activity', 'h-4 w-4 text-gold')} Popular APIs</button>
             </div>
@@ -50,7 +50,7 @@ export function renderNavbar(path) {
 
     <div id="mobile-menu" class="md:hidden" aria-hidden="true">
       <div class="mx-auto flex max-w-md flex-col">
-        ${[['/', 'Home'], ['/docs', 'Documentation'], ['/docs', 'All APIs']].map(([to, label], i) => `<button data-nav="${to}" style="--i:${i}" class="m-item font-display hair border-b py-5 text-left text-2xl">${label}</button>`).join('')}
+        ${[['/', 'Home'], ['/docs', 'Documentation'], ['/docs', 'All APIs']].map(([to, label], i) => `<button data-nav="${to}" style="--i:${i}" class="m-item font-display hair border-b-2 py-5 text-left text-2xl">${label}</button>`).join('')}
         <div style="--i:3" class="m-item mt-8 flex items-center justify-between">
           <div class="flex items-center gap-2"><span class="h-1.5 w-1.5 rounded-full bg-ok"></span><span class="text-xs font-semibold text-muted">API online</span></div>
           <button id="mobile-theme-btn" class="flex items-center gap-2 text-sm text-muted">${icon(themeIcon, 'h-4 w-4')} Theme</button>
@@ -91,11 +91,11 @@ export function bindNavbar() {
 
 export function renderFooter() {
   const col = (title, items) => `<div><h4 class="mb-4 text-sm font-bold">${title}</h4><div class="flex flex-col gap-3 text-sm text-muted">${items.map(([label, to]) => `<button ${to ? `data-nav="${to}"` : ''} class="w-fit text-left transition-colors duration-300 hover:text-gold">${label}</button>`).join('')}</div></div>`;
-  return `<footer class="mt-10 border-t hair">
+  return `<footer>
     <div class="mx-auto max-w-7xl px-4 pb-10 pt-14 sm:px-8">
       <div class="flex flex-col justify-between gap-12 md:flex-row">
         <div class="max-w-xs">
-          <button data-nav="/" class="mb-4 flex items-center gap-2.5"><span class="grid h-8 w-8 place-items-center rounded-full border border-gold/40 text-gold">${icon('Zap', 'h-3.5 w-3.5 fill-current')}</span><span class="font-display text-2xl">Sam<span class="text-gold">Api</span></span></button>
+          <button data-nav="/" class="mb-4 flex items-center gap-2.5"><span class="logo-mark">${icon('Zap', 'h-3.5 w-3.5 fill-current')}</span><span class="font-display text-2xl">Sam<span class="text-gold">Api</span></span></button>
           <p class="text-sm leading-7 text-muted">Simple, powerful APIs for developers who build the future.</p>
           <div class="mt-5 flex items-center gap-1">${['Github', 'Twitter', 'Linkedin', 'Mail'].map((x) => `<button class="iconbtn" aria-label="${x}">${icon(x, 'h-4 w-4')}</button>`).join('')}</div>
         </div>

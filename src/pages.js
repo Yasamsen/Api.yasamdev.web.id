@@ -35,17 +35,17 @@ export function renderHome() {
   const demo = getApiBySlug('instagram') || apiDefinitions[0];
   const demoPath = `${demo?.endpoint || '/api/instagram'}?url=https://instagram.com/p/Cx1a`;
 
-  const stat = (value, label, attrs = '') => `<div class="px-3 py-1 text-center sm:px-6"><div class="font-display text-3xl sm:text-4xl" ${attrs}>${value}</div><div class="mt-1.5 text-xs font-medium text-dim">${label}</div></div>`;
-  const dots = '<div class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-[#374151]"></span><span class="h-2 w-2 rounded-full bg-[#374151]"></span><span class="h-2 w-2 rounded-full bg-[#374151]"></span></div>';
+  const stat = (value, label, attrs = '') => `<div class="stat-box"><div class="font-display text-3xl sm:text-4xl" ${attrs}>${value}</div><div class="mt-1 text-xs font-bold">${label}</div></div>`;
+  const dots = '<div class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-[#f0506e]"></span><span class="h-2 w-2 rounded-full bg-[#ffc83d]"></span><span class="h-2 w-2 rounded-full bg-[#34c78c]"></span></div>';
 
   return `<main>
   <section class="hero-glow pb-16 pt-[calc(var(--nav-h)+56px)] sm:pb-24 sm:pt-[calc(var(--nav-h)+96px)]">
     <div class="mx-auto grid max-w-7xl grid-cols-[minmax(0,1fr)] items-center gap-14 px-4 sm:px-8 lg:grid-cols-[1.05fr_0.95fr] lg:gap-16">
       <div>
-        <p class="seq mb-6 text-sm font-semibold text-muted" style="--d:.1s"><span class="text-gold">${apiDefinitions.length} endpoints</span> live and documented</p>
+        <p class="seq sticker mb-6 text-sm" style="--d:.1s"><i class="live-dot"></i>${apiDefinitions.length} endpoints live &amp; documented</p>
         <h1 class="text-balance text-[clamp(2.4rem,8.6vw,5rem)] leading-[1.02]">
           <span class="hl"><span style="--d:.2s">Powerful APIs.</span></span>
-          <span class="hl"><span class="text-muted" style="--d:.34s">Simple to use.</span></span>
+          <span class="hl"><span class="text-gold" style="--d:.34s">Simple to use.</span></span>
         </h1>
         <p class="seq mt-7 max-w-md text-base leading-8 text-muted" style="--d:.6s">Fast, reliable APIs for modern developers. Download media, generate content, and ship faster.</p>
         <div class="seq mt-9 flex flex-col gap-3 sm:flex-row" style="--d:.75s">
@@ -54,11 +54,25 @@ export function renderHome() {
         </div>
       </div>
 
-      <div class="seq" style="--d:.5s">
+      <div class="seq flex flex-col gap-4" style="--d:.5s">
+        <div class="hero-card">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-[13px] font-bold">Total endpoints</p>
+              <div class="font-display mt-1 text-[clamp(2.5rem,9vw,3.5rem)] leading-none" data-count="${apiDefinitions.length}" data-suffix="">0</div>
+            </div>
+            <span class="ring" aria-hidden="true">${icon('Zap', 'h-5 w-5 fill-current')}</span>
+          </div>
+          <div class="mt-5 flex flex-wrap gap-2"><span class="pill">${icon('TrendingUp', 'h-3.5 w-3.5')} 99.9% uptime</span><span class="pill"><i class="live-dot"></i> online 24/7</span></div>
+          <div class="mt-5 flex items-center gap-3"><div class="bar flex-1"><i style="--p:92%"></i></div><span class="text-xs font-extrabold">&lt;120ms</span></div>
+        </div>
+        <div class="grid grid-cols-4 gap-2.5 sm:gap-3">
+          ${[['BookOpen', 'Docs', '/docs', 'rgb(var(--gold2))', ''], ['Play', 'Try it', '/docs/instagram?try=true', 'rgb(var(--green))', '20 16 43'], ['Flame', 'Popular', '/docs/tiktok', 'rgb(var(--yellow))', '20 16 43'], ['Search', 'Browse', '/docs', 'rgb(var(--red))', '']].map(([ic, l, to, c, fg], i) => `<button data-nav="${to}" class="qtile"><span class="qico bob" style="--tile:${c};${fg ? `--tile-fg:rgb(${fg});` : ''}--d:${i * 0.35}s">${icon(ic, 'h-5 w-5')}</span><span class="text-xs font-extrabold">${l}</span></button>`).join('')}
+        </div>
         <div class="code">
           <div class="code-head">
             ${dots}
-            <span class="font-mono text-[10px] text-[#6b7280]">live request</span>
+            <span class="font-mono text-[10px] text-[#a79fcb]">live request</span>
             <span class="ln flex items-center gap-1.5 font-mono text-[10px] text-emerald-400" style="--d:3.6s"><span class="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>200 · 118ms</span>
           </div>
           <pre class="p-5 text-[12px] leading-[1.9] sm:p-6 sm:text-[13px]"><code><span class="tk-k">GET</span> <span class="caret">${typed(demoPath, 1.2, 2.2, 'tk-s')}</span>
@@ -74,7 +88,7 @@ export function renderHome() {
     </div>
 
     <div class="mx-auto mt-16 max-w-4xl px-4 sm:mt-24 sm:px-8">
-      <div class="seq grid grid-cols-2 gap-y-8 border-y hair py-8 sm:grid-cols-4 sm:divide-x sm:divide-fg/10" style="--d:.9s">
+      <div class="seq grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4" style="--d:.9s">
         ${stat('0', 'Available APIs', `data-count="${apiDefinitions.length}" data-suffix="+"`)}
         ${stat('0', 'API uptime', 'data-count="100" data-suffix="%"')}
         ${stat('0', 'Avg. response', 'data-count="120" data-prefix="<" data-suffix="ms"')}
@@ -93,11 +107,11 @@ export function renderHome() {
     </div>`)}
     ${reveal(`<div id="cat-chips" class="mb-8 flex flex-wrap gap-2"><button class="chip is-active" data-cat="">All</button>${cats.map((c) => `<button class="chip" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}</div>`, 60)}
     <div id="api-grid" class="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3">${apiDefinitions.map((a, i) => renderApiCard(a, i)).join('')}</div>
-    <div id="no-apis" class="hidden rounded-2xl border border-dashed border-fg/20 py-20 text-center">${icon('Search', 'mx-auto h-8 w-8 text-dim')}<p class="mt-4 text-sm font-bold">No APIs found</p><p class="mt-1 text-xs text-dim">Try a different search term or category.</p></div>
+    <div id="no-apis" class="hidden rounded-3xl border-2 border-dashed border-ink py-20 text-center">${icon('Search', 'mx-auto h-8 w-8 text-dim')}<p class="mt-4 text-sm font-bold">No APIs found</p><p class="mt-1 text-xs text-dim">Try a different search term or category.</p></div>
     ${reveal(`<button data-nav="/docs" class="group inline-flex items-center gap-2 text-sm font-bold text-gold">View all documentation ${icon('ArrowRight', 'h-4 w-4 transition-transform duration-500 group-hover:translate-x-1')}</button>`, 0, 'div', 'mt-12 text-center')}
   </section>
 
-  <section class="border-y hair bg-surface">
+  <section class="band">
     <div class="mx-auto grid max-w-7xl grid-cols-[minmax(0,1fr)] gap-14 px-4 py-16 sm:px-8 sm:py-24 lg:grid-cols-2 lg:items-center lg:gap-20">
       ${reveal(`<h2 class="text-balance max-w-lg text-[2rem] leading-[1.1] sm:text-[2.75rem]">The fastest way from idea to API.</h2>
       <p class="mt-5 max-w-md text-sm leading-7 text-muted">Built with developers in mind. Every endpoint is designed to be intuitive, documented, and ready to ship.</p>
@@ -105,7 +119,7 @@ export function renderHome() {
         ${[['Gauge', 'Blazing fast', 'Low latency, every request.'], ['ShieldCheck', 'Reliable by default', '99.9% uptime SLA.'], ['Database', 'Simple responses', 'Predictable JSON outputs.'], ['BookOpen', 'Clear docs', 'Start building in minutes.']].map(([ic, t, d]) => `<div class="flex gap-4"><span class="iconbox h-10 w-10 shrink-0">${icon(ic, 'h-[18px] w-[18px]')}</span><div><div class="text-sm font-bold">${t}</div><div class="mt-1 text-xs leading-5 text-muted">${d}</div></div></div>`).join('')}
       </div>`)}
       ${reveal(`<div class="code">
-        <div class="code-head">${dots}<span class="font-mono text-[10px] text-[#6b7280]">request.js</span></div>
+        <div class="code-head">${dots}<span class="font-mono text-[10px] text-[#a79fcb]">request.js</span></div>
         <pre class="p-6 text-[12px] leading-[1.9]"><code><span class="tk-k">const</span> response = <span class="tk-k">await</span> fetch(<span class="tk-s">"https://samapi.com/api/instagram?url="</span> +
   postUrl);
 
@@ -169,7 +183,7 @@ export function bindHome() {
    ========================================================= */
 
 function codeBlock(code, language = 'json') {
-  return `<div class="code"><div class="code-head"><span class="font-mono text-[10px] text-[#6b7280]">${esc(language)}</span><button data-code-copy="${encodeURIComponent(code)}" class="flex items-center gap-1.5 text-[10px] font-bold text-[#6b7280] transition-colors hover:text-white">${icon('Copy', 'h-3 w-3')} Copy</button></div><pre class="max-h-96 p-5 text-[11.5px] leading-6"><code>${esc(code)}</code></pre></div>`;
+  return `<div class="code"><div class="code-head"><span class="font-mono text-[10px] text-[#a79fcb]">${esc(language)}</span><button data-code-copy="${encodeURIComponent(code)}" class="flex items-center gap-1.5 text-[10px] font-bold text-[#a79fcb] transition-colors hover:text-white">${icon('Copy', 'h-3 w-3')} Copy</button></div><pre class="max-h-96 p-5 text-[11.5px] leading-6"><code>${esc(code)}</code></pre></div>`;
 }
 
 /* =========================================================
@@ -214,7 +228,7 @@ function tryPanel(api) {
       <button id="send-request" class="btn btn-gold btn-sm flex-1">${icon('Play', 'h-3.5 w-3.5')}<span>Send request</span></button>
       <button id="copy-url" class="btn btn-ghost btn-sm">${icon('Copy', 'h-3.5 w-3.5')}<span>Copy URL</span></button>
     </div>
-    <div id="try-url" class="mt-4 break-all rounded-xl bg-[#0d1017] px-4 py-3 font-mono text-[11px] leading-5 text-[#9ca3af]">${esc(api.method)} ${esc(initialUrl)}</div>
+    <div id="try-url" class="code-url mt-4 break-all px-4 py-3">${esc(api.method)} ${esc(initialUrl)}</div>
     <div id="try-response" class="mt-4 hidden"></div>
   </section>`;
 }

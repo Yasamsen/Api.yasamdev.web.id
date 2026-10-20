@@ -1,10 +1,10 @@
-let theme = localStorage.getItem('samapi-theme') || 'dark';
+let theme = localStorage.getItem('samapi-theme-v2') || 'light';
 
 export function getTheme() { return theme; }
 
 export function applyTheme() {
   document.documentElement.classList.toggle('dark', theme === 'dark');
-  localStorage.setItem('samapi-theme', theme);
+  localStorage.setItem('samapi-theme-v2', theme);
 }
 
 export function toggleTheme() {

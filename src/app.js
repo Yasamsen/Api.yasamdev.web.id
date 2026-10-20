@@ -20,7 +20,7 @@ export function renderApp(opts = {}) {
 
   const page = path === '/' ? renderHome() : isDocs ? renderDocs(path) : path === '/500' ? renderError('500') : renderError('404');
   document.getElementById('root').innerHTML =
-    `<div class="min-h-screen bg-bg text-fg">${renderNavbar(path)}<div id="page" class="page-enter">${page}</div>${!isError ? renderFooter() : ''}</div>`;
+    `<div class="min-h-screen text-fg">${renderNavbar(path)}<div id="page" class="page-enter">${page}</div>${!isError ? renderFooter() : ''}</div>`;
 
   bindNavbar();
   if (path === '/') bindHome();
