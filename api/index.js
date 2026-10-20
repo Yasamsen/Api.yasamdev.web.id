@@ -147,6 +147,93 @@ async function handleVideoToPrompt(req, res) {
     });
   }
 }
+//brat
+
+async function handleBrat(req, res) {
+  try {
+    if (req.method !== "GET") {
+      return res.status(405).json({
+        status: false,
+        message: "Gunakan method GET.",
+        error: "Method Not Allowed",
+      });
+    }
+
+    const text = req.query?.text;
+
+    if (!text || !text.trim()) {
+      return res.status(400).json({
+        status: false,
+        message:
+          'Parameter text wajib diisi. Contoh: "/api/brat?text=hello world"',
+        error: "Missing parameter: text",
+      });
+    }
+
+    if (text.length > 500) {
+      return res.status(400).json({
+        status: false,
+        message: "Teks maksimal 500 karakter.",
+        error: "Text too long",
+      });
+    }
+
+    const params = new URLSearchParams({ text });
+
+    const namaEndpointResponse = await fetch(
+      `https://brat.caliphdev.com/api/brat?${params.toString()}`,
+      {
+        method: "GET",
+        headers: {
+          Accept: "image/webp, image/png, image/jpeg, image/*",
+        },
+        signal: AbortSignal.timeout(20000),
+      }
+    );
+
+    if (!namaEndpointResponse.ok) {
+      return res.status(502).json({
+        status: false,
+        message: "Gagal membuat gambar Brat dari layanan sumber.",
+        error: `Upstream status: ${namaEndpointResponse.status}`,
+      });
+    }
+
+    const contentType =
+      namaEndpointResponse.headers.get("content-type") || "";
+
+    if (!contentType.startsWith("image/")) {
+      return res.status(502).json({
+        status: false,
+        message: "Layanan sumber tidak mengembalikan gambar.",
+        error: `Unexpected content-type: ${contentType}`,
+      });
+    }
+
+    const namaEndpointBuffer = Buffer.from(
+      await namaEndpointResponse.arrayBuffer()
+    );
+
+    return res.status(200).json({
+      status: true,
+      source: "Brat Generator",
+      data: {
+        image: namaEndpointBuffer.toString("base64"),
+        mimeType: contentType,
+        text,
+      },
+    });
+  } catch (error) {
+    console.error("[brat]", error);
+
+    return res.status(500).json({
+      status: false,
+      message: "Terjadi kesalahan saat membuat gambar Brat.",
+      error: error.message,
+    });
+  }
+}
+
 //live walpeper 
 // ===================== MOTIONBGS =====================
 const MOTIONBGS_BASE = "https://motionbgs.com";
@@ -10780,6 +10867,8 @@ case "video-to-prompt":
   return handleFreeconvertVideoToMp3(req, res);
   case "bgremover":
   return handleBgremover(req, res);
+  case "brat":
+  return handleBrat(req, res);
   case "ocr":
   return handleOcr(req, res);
   case "ringtone":
