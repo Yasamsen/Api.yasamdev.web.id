@@ -1538,6 +1538,241 @@ async function handleUpscaleImage(req, res) {
 
 //tourl
 // ===============================
+// FREECONVERT VIDEO TO MP3 (UPLOAD FILE)
+// Menggunakan pola upload file seperti endpoint ToURL.
+// ===============================
+async function freeconvertMp3ParseMultipart(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    let bb;
+    try {
+      bb = Busboy({
+        headers: req.headers,
+        limits: { files: 1, fileSize: maxBytes, fields: 10, fieldSize: 1024 }
+      });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    let fileResult = null;
+    const fields = {};
+    let tooLarge = false;
+
+    bb.on("field", (name, value) => {
+      fields[name] = value;
+    });
+    bb.on("file", (name, stream, info) => {
+      const chunks = [];
+      let size = 0;
+      stream.on("data", (chunk) => {
+        size += chunk.length;
+        chunks.push(chunk);
+      });
+      stream.on("limit", () => { tooLarge = true; });
+      stream.on("end", () => {
+        fileResult = {
+          fieldname: name,
+          buffer: Buffer.concat(chunks),
+          filename: info.filename,
+          mimetype: info.mimeType,
+          size
+        };
+      });
+    });
+    bb.on("filesLimit", () => { tooLarge = true; });
+    bb.on("error", reject);
+    bb.on("close", () => {
+      if (tooLarge) {
+        reject(Object.assign(new Error("File terlalu besar. Maksimal 4 MB."), { code: "TOO_LARGE" }));
+        return;
+      }
+      resolve({ file: fileResult, fields });
+    });
+    req.pipe(bb);
+  });
+}
+
+async function freeconvertMp3Request(url, options = {}) {
+  const { timeout = 15000, ...fetchOptions } = options;
+  const response = await fetch(url, {
+    ...fetchOptions,
+    signal: AbortSignal.timeout(timeout)
+  });
+  const text = await response.text();
+  let data = text;
+  try { data = JSON.parse(text); } catch {}
+  return { ok: response.ok, status: response.status, data };
+}
+
+function freeconvertMp3Tasks(tasks) {
+  return Array.isArray(tasks) ? tasks : Object.values(tasks || {});
+}
+
+async function handleFreeconvertVideoToMp3(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST, OPTIONS");
+    return res.status(405).json({
+      status: false,
+      message: "Metode tidak diizinkan. Gunakan POST dengan multipart/form-data.",
+      error: "Method Not Allowed"
+    });
+  }
+
+  try {
+    const declaredLength = Number(req.headers["content-length"] || 0);
+    if (declaredLength > 4_200_000) {
+      return res.status(413).json({ status: false, message: "File terlalu besar.", error: "Maksimal 4 MB." });
+    }
+
+    const { file, fields } = await freeconvertMp3ParseMultipart(req, 4_000_000);
+    if (!file || !file.buffer.length) {
+      return res.status(400).json({
+        status: false,
+        message: "File video wajib diunggah.",
+        error: 'Pilih file pada field "file" seperti endpoint ToURL.'
+      });
+    }
+
+    const filename = String(file.filename || "video.mp4").split(/[\\/]/).pop().replace(/[^\w.\-]+/g, "_").slice(0, 100) || "video.mp4";
+    const extension = filename.toLowerCase().match(/\.[^.]+$/)?.[0] || "";
+    const allowedExtensions = [".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"];
+    const allowedMimes = ["video/mp4", "video/quicktime", "video/webm", "video/x-matroska", "video/x-msvideo", "video/m4v", "application/octet-stream"];
+    if (!allowedExtensions.includes(extension) || !allowedMimes.includes(String(file.mimetype || "").toLowerCase())) {
+      return res.status(415).json({
+        status: false,
+        message: "Format video tidak didukung.",
+        error: `Gunakan file video: ${allowedExtensions.join(", ")}`
+      });
+    }
+
+    const bitrate = String(fields.bitrate || req.query?.bitrate || "192k");
+    const allowedBitrates = ["128k", "192k", "256k", "320k"];
+    if (!allowedBitrates.includes(bitrate)) {
+      return res.status(400).json({ status: false, message: "Bitrate tidak didukung.", error: `Pilihan: ${allowedBitrates.join(", ")}` });
+    }
+
+    // Guest session flow from the supplied scraper. This endpoint may change upstream.
+    const session = await freeconvertMp3Request("https://api.freeconvert.com/v1/account/guest", {
+      method: "GET",
+      headers: {
+        Accept: "application/json, text/plain, */*",
+        Origin: "https://www.freeconvert.com",
+        Referer: "https://www.freeconvert.com/convert/video-to-mp3"
+      }
+    });
+    if (!session.ok) throw new Error(`Gagal membuat guest session FreeConvert (HTTP ${session.status}).`);
+
+    const tokenPayload = session.data;
+    const token = typeof tokenPayload === "string"
+      ? tokenPayload.trim()
+      : tokenPayload?.access_token || tokenPayload?.token || tokenPayload?.accessToken || "";
+    if (typeof token !== "string" || !token || token.length > 4096 || /[\r\n]/.test(token)) {
+      throw new Error("Token guest FreeConvert tidak dikenali; format respons mungkin berubah.");
+    }
+
+    const authHeaders = { Authorization: `Bearer ${token}`, Accept: "application/json" };
+    const jobPayload = {
+      tasks: {
+        "import-video": { operation: "import/upload", filename },
+        "convert-mp3": {
+          operation: "convert",
+          input: "import-video",
+          output_format: "mp3",
+          options: { audio_bitrate: bitrate }
+        },
+        "export-audio": { operation: "export/url", input: "convert-mp3" }
+      }
+    };
+
+    const created = await freeconvertMp3Request("https://api.freeconvert.com/v1/process/jobs", {
+      method: "POST",
+      headers: { ...authHeaders, "Content-Type": "application/json", Origin: "https://www.freeconvert.com", Referer: "https://www.freeconvert.com/convert/video-to-mp3" },
+      body: JSON.stringify(jobPayload)
+    });
+    const job = created.data;
+    if (!created.ok || !job || !job.id) {
+      const detail = typeof job === "object" ? JSON.stringify(job) : String(job || "Respons kosong");
+      throw new Error(`Gagal membuat job konversi (HTTP ${created.status}): ${detail.slice(0, 500)}`);
+    }
+
+    const importTask = freeconvertMp3Tasks(job.tasks).find((task) => task.name === "import-video" || task.operation === "import/upload");
+    const uploadForm = importTask?.result?.form || importTask?.result?.upload_form || job.result?.form;
+    if (!uploadForm?.url || !uploadForm?.parameters || typeof uploadForm.parameters !== "object") {
+      throw new Error("FreeConvert tidak mengembalikan form upload untuk job ini. Endpoint guest/internal mungkin sudah berubah.");
+    }
+
+    const uploadData = new globalThis.FormData();
+    for (const [key, value] of Object.entries(uploadForm.parameters)) {
+      uploadData.append(key, String(value));
+    }
+    uploadData.append("file", new globalThis.Blob([file.buffer], { type: file.mimetype || "application/octet-stream" }), filename);
+    const upload = await freeconvertMp3Request(uploadForm.url, {
+      method: "POST",
+      body: uploadData,
+      timeout: 30000
+    });
+    if (!upload.ok) throw new Error(`Upload ke penyimpanan FreeConvert gagal (HTTP ${upload.status}): ${String(upload.data).slice(0, 300)}`);
+
+    const startedAt = Date.now();
+    const maxWait = 85000;
+    let completed = null;
+    let lastStatus = job.status || "processing";
+    while (Date.now() - startedAt < maxWait) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const poll = await freeconvertMp3Request(`https://api.freeconvert.com/v1/process/jobs/${encodeURIComponent(job.id)}`, {
+        method: "GET", headers: authHeaders, timeout: 10000
+      });
+      if (!poll.ok || !poll.data) continue;
+      const current = poll.data;
+      lastStatus = current.status || "unknown";
+      if (lastStatus === "completed") { completed = current; break; }
+      if (lastStatus === "failed") {
+        const failed = freeconvertMp3Tasks(current.tasks).find((task) => task.status === "failed");
+        throw new Error(current.result?.msg || failed?.result?.msg || "Konversi gagal diproses FreeConvert.");
+      }
+    }
+    if (!completed) throw new Error(`Konversi belum selesai dalam batas waktu. Status terakhir: ${lastStatus}; job: ${job.id}`);
+
+    const tasks = freeconvertMp3Tasks(completed.tasks);
+    const exportTask = tasks.find((task) => task.name === "export-audio" || task.operation === "export/url");
+    const convertTask = tasks.find((task) => task.name === "convert-mp3" || task.operation === "convert");
+    const downloadUrl = exportTask?.result?.url || convertTask?.result?.url || "";
+    if (!downloadUrl) throw new Error("Konversi selesai tetapi URL MP3 tidak ditemukan.");
+    const parsedDownload = new URL(downloadUrl);
+    if (!["https:", "http:"].includes(parsedDownload.protocol) || parsedDownload.username || parsedDownload.password) {
+      throw new Error("URL hasil unduhan tidak valid.");
+    }
+    const size = Number(exportTask?.result?.size || convertTask?.result?.size || 0) || 0;
+    return res.status(200).json({
+      status: true,
+      source: "FreeConvert",
+      data: {
+        job_id: completed.id || job.id,
+        input_filename: filename,
+        output_filename: filename.replace(/\.[^.]+$/, "") + ".mp3",
+        format: "mp3",
+        bitrate,
+        file_size_bytes: size,
+        file_size_formatted: (size / (1024 * 1024)).toFixed(2) + " MB",
+        download_url: downloadUrl
+      }
+    });
+  } catch (error) {
+    const tooLarge = error.code === "TOO_LARGE" || /file terlalu besar/i.test(error.message || "");
+    const timedOut = error.name === "TimeoutError" || /timeout|timed out|melewati batas waktu/i.test(error.message || "");
+    return res.status(tooLarge ? 413 : timedOut ? 504 : 502).json({
+      status: false,
+      message: tooLarge ? "File terlalu besar." : timedOut ? "Proses konversi melewati batas waktu." : "Gagal mengunggah atau mengonversi video.",
+      error: error.message || "Kesalahan tidak diketahui"
+    });
+  }
+}
+
+// ===============================
 // TOURL (UPLOAD FILE -> URL)
 // ===============================
 // Batas body Vercel sekitar 4.5MB, jadi batas file di sini 4MB.
@@ -5719,239 +5954,6 @@ const signature = createHmac(
     });
   }
 }
-//webapk
-
-async function handleWeb2apk(req, res) {
-  const base = "https://apk-82rl.vercel.app";
-
-  try {
-    // 1. Meminta website base memulai build.
-    if (req.method === "POST") {
-      let body = req.body;
-
-      if (typeof body === "string") {
-        try {
-          body = JSON.parse(body);
-        } catch {
-          body = null;
-        }
-      }
-
-      if (!body || typeof body !== "object") {
-        return res.status(400).json({
-          status: false,
-          message: "Body JSON wajib diisi.",
-          error: "Body JSON tidak valid."
-        });
-      }
-
-      const url = String(body.url || "").trim();
-      const appName = String(body.appName || "").trim();
-      const iconUrl = String(body.iconUrl || "").trim();
-
-      let parsedUrl;
-
-      try {
-        parsedUrl = new URL(url);
-      } catch {
-        parsedUrl = null;
-      }
-
-      if (!parsedUrl || parsedUrl.protocol !== "https:") {
-        return res.status(400).json({
-          status: false,
-          message: "URL website harus menggunakan HTTPS.",
-          error: "Parameter url tidak valid."
-        });
-      }
-
-      if (
-        !appName ||
-        appName.length > 40 ||
-        /[<>\u0000-\u001f]/.test(appName)
-      ) {
-        return res.status(400).json({
-          status: false,
-          message: "Nama aplikasi wajib diisi, maksimal 40 karakter.",
-          error: "Parameter appName tidak valid."
-        });
-      }
-
-      if (iconUrl) {
-        let parsedIcon;
-
-        try {
-          parsedIcon = new URL(iconUrl);
-        } catch {
-          parsedIcon = null;
-        }
-
-        if (!parsedIcon || parsedIcon.protocol !== "https:") {
-          return res.status(400).json({
-            status: false,
-            message: "URL ikon harus menggunakan HTTPS.",
-            error: "Parameter iconUrl tidak valid."
-          });
-        }
-      }
-
-      // Package ID acak dengan prefix yang diminta.
-      const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-      const suffix = Array.from(
-        { length: 8 },
-        () => chars[Math.floor(Math.random() * chars.length)]
-      ).join("");
-
-      const packageName = `com.yasam.acak.${suffix}`;
-
-      const response = await fetch(`${base}/api/build`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json"
-        },
-        body: JSON.stringify({
-          url,
-          appName,
-          packageName,
-          iconUrl
-        })
-      });
-
-      const result = await response.json().catch(() => ({}));
-
-      if (!response.ok || result.error) {
-        return res.status(502).json({
-          status: false,
-          message: "Website Web2APK gagal menerima permintaan build.",
-          error: result.error || `HTTP ${response.status}`
-        });
-      }
-
-      const after = result.dispatchedAt;
-
-      if (!after) {
-        return res.status(502).json({
-          status: false,
-          message: "Website base tidak mengembalikan waktu build.",
-          error: "dispatchedAt tidak ditemukan."
-        });
-      }
-
-      return res.status(202).json({
-        status: true,
-        source: "Web2APK",
-        data: {
-          state: "queued",
-          packageName,
-          appName,
-          statusUrl: `/api/web2apk?after=${encodeURIComponent(after)}`,
-          message: "Website Web2APK telah menerima permintaan build."
-        }
-      });
-    }
-
-    // 2. Memeriksa status melalui website base.
-    if (req.method === "GET") {
-      const requestUrl = new URL(
-        req.url,
-        "https://yasamdev.invalid"
-      );
-
-      const after = requestUrl.searchParams.get("after");
-      const download = requestUrl.searchParams.get("download");
-
-      if (!after || !Number.isFinite(Date.parse(after))) {
-        return res.status(400).json({
-          status: false,
-          message: "Parameter after wajib diisi dari respons POST.",
-          error: "Parameter after tidak valid."
-        });
-      }
-
-      // 3. ZIP diambil melalui endpoint download website base.
-      if (download === "1") {
-        const fileResponse = await fetch(`${base}/api/download`, {
-          headers: { Accept: "application/zip" }
-        });
-
-        if (!fileResponse.ok) {
-          return res.status(502).json({
-            status: false,
-            message: "ZIP belum tersedia atau gagal diambil.",
-            error: `HTTP ${fileResponse.status}`
-          });
-        }
-
-        const buffer = Buffer.from(
-          await fileResponse.arrayBuffer()
-        );
-
-        res.setHeader("Content-Type", "application/zip");
-        res.setHeader(
-          "Content-Disposition",
-          'attachment; filename="Web2APK-Android.zip"'
-        );
-        res.setHeader("Cache-Control", "no-store");
-
-        return res.status(200).send(buffer);
-      }
-
-      const statusResponse = await fetch(
-        `${base}/api/status?after=${encodeURIComponent(after)}`,
-        { headers: { Accept: "application/json" } }
-      );
-
-      const result = await statusResponse.json().catch(() => ({}));
-
-      if (!statusResponse.ok || result.error) {
-        return res.status(502).json({
-          status: false,
-          message: "Gagal memeriksa status melalui website Web2APK.",
-          error: result.error || `HTTP ${statusResponse.status}`
-        });
-      }
-
-      if (result.state === "success") {
-        return res.status(200).json({
-          status: true,
-          source: "Web2APK",
-          data: {
-            ...result,
-            downloadUrl:
-              `/api/web2apk?after=${encodeURIComponent(after)}&download=1`,
-            message: "Build selesai. ZIP tersedia untuk diunduh."
-          }
-        });
-      }
-
-      return res.status(200).json({
-        status: true,
-        source: "Web2APK",
-        data: result
-      });
-    }
-
-    res.setHeader("Allow", "GET, POST");
-
-    return res.status(405).json({
-      status: false,
-      message: "Gunakan metode GET atau POST.",
-      error: "Method tidak diizinkan."
-    });
-  } catch (caught) {
-    const error = caught instanceof Error
-      ? caught
-      : new Error(String(caught));
-
-    return res.status(502).json({
-      status: false,
-      message: "Gagal menghubungi website Web2APK.",
-      error: error.message
-    });
-  }
-}
-
 //Pinterest 
 async function handlePinterestSearch(req, res) {
   try {
@@ -10279,7 +10281,8 @@ case "video-to-prompt":
     case "motionbgs": return handleMotionbgs(req, res);
   case "tourl":
   return handleTourl(req, res);
-  case "web2apk": return handleWeb2apk(req, res);
+  case "freeconvert-video-to-mp3":
+  return handleFreeconvertVideoToMp3(req, res);
   case "ringtone":
   return handleRingtoneEndpoint(req, res);
     default:
