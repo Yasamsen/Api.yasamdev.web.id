@@ -150,8 +150,10 @@ async function handleVideoToPrompt(req, res) {
 //brat
 async function handleBrat(req, res) {
   try {
+    // Hanya menerima GET
     if (req.method !== "GET") {
       res.setHeader("Allow", "GET");
+
       return res.status(405).json({
         status: false,
         message: "Method tidak diizinkan. Gunakan GET.",
@@ -159,14 +161,14 @@ async function handleBrat(req, res) {
       });
     }
 
+    // Validasi parameter text
     const text = req.query?.text;
 
     if (typeof text !== "string" || !text.trim()) {
       return res.status(400).json({
         status: false,
-        message:
-          'Parameter text wajib diisi. Contoh: "/api/brat?text=hello%20world"',
-        error: "Missing required parameter: text",
+        message: "Parameter text wajib diisi.",
+        error: "Missing parameter: text",
       });
     }
 
@@ -178,12 +180,14 @@ async function handleBrat(req, res) {
       });
     }
 
+    // Buat URL upstream
     const namaEndpointUrl = new URL(
       "https://api.lumi-base.my.id/canvas/brat"
     );
 
     namaEndpointUrl.searchParams.set("text", text.trim());
 
+    // Request ke API Lumi
     const namaEndpointResponse = await fetch(namaEndpointUrl, {
       method: "GET",
       headers: {
@@ -195,65 +199,114 @@ async function handleBrat(req, res) {
     const namaEndpointContentType =
       namaEndpointResponse.headers.get("content-type") || "";
 
+    // Tangani error dari upstream
     if (!namaEndpointResponse.ok) {
       const errorBody = await namaEndpointResponse.text();
 
       return res.status(502).json({
         status: false,
         message: "Layanan Brat gagal memproses permintaan.",
-        error: errorBody.slice(0, 1000) ||
+        error:
+          errorBody.slice(0, 1000) ||
           `Upstream HTTP ${namaEndpointResponse.status}`,
       });
     }
 
-    // Jika layanan mengembalikan JSON, teruskan data JSON.
+    // Jika upstream langsung mengembalikan gambar
+    if (namaEndpointContentType.startsWith("image/")) {
+      const namaEndpointBuffer = Buffer.from(
+        await namaEndpointResponse.arrayBuffer()
+      );
+
+      res.setHeader("Content-Type", namaEndpointContentType);
+      res.setHeader(
+        "Content-Disposition",
+        'inline; filename="brat.png"'
+      );
+      res.setHeader("Cache-Control", "public, max-age=3600");
+
+      return res.status(200).send(namaEndpointBuffer);
+    }
+
+    // Jika upstream mengembalikan JSON berisi gambar Base64
     if (namaEndpointContentType.includes("application/json")) {
       const namaEndpointJson = await namaEndpointResponse.json();
 
-      return res.status(200).json({
-        status: true,
-        source: "Lumi Base Brat",
-        data: namaEndpointJson,
-      });
-    }
+      const namaEndpointBase64 =
+        namaEndpointJson?.data?.image ??
+        namaEndpointJson?.image ??
+        namaEndpointJson?.data?.base64 ??
+        namaEndpointJson?.base64;
 
-    // Jika layanan mengembalikan gambar langsung, ubah ke Base64.
-    if (!namaEndpointContentType.startsWith("image/")) {
-      const namaEndpointBody =
-        await namaEndpointResponse.text();
+      if (
+        typeof namaEndpointBase64 === "string" &&
+        namaEndpointBase64.length > 0
+      ) {
+        const namaEndpointCleanBase64 = namaEndpointBase64.replace(
+          /^data:image\/[a-zA-Z0-9.+-]+;base64,/,
+          ""
+        );
 
+        const namaEndpointBuffer = Buffer.from(
+          namaEndpointCleanBase64,
+          "base64"
+        );
+
+        if (namaEndpointBuffer.length === 0) {
+          return res.status(502).json({
+            status: false,
+            message: "Gambar Base64 dari layanan Brat kosong.",
+            error: "Empty image buffer",
+          });
+        }
+
+        const namaEndpointMimeType =
+          namaEndpointJson?.data?.mimeType ??
+          namaEndpointJson?.mimeType ??
+          "image/png";
+
+        const namaEndpointSafeMimeType = [
+          "image/png",
+          "image/jpeg",
+          "image/webp",
+          "image/gif",
+        ].includes(namaEndpointMimeType)
+          ? namaEndpointMimeType
+          : "image/png";
+
+        res.setHeader("Content-Type", namaEndpointSafeMimeType);
+        res.setHeader(
+          "Content-Disposition",
+          'inline; filename="brat.png"'
+        );
+        res.setHeader("Cache-Control", "public, max-age=3600");
+
+        return res.status(200).send(namaEndpointBuffer);
+      }
+
+      // JSON upstream tidak berisi gambar yang dikenali
       return res.status(502).json({
         status: false,
-        message: "Format respons layanan Brat tidak dikenali.",
-        error: namaEndpointBody.slice(0, 500),
+        message: "Respons layanan Brat tidak berisi gambar Base64.",
+        error: "Image data not found in upstream JSON",
       });
     }
 
-    const namaEndpointBuffer = Buffer.from(
-      await namaEndpointResponse.arrayBuffer()
-    );
-
-    return res.status(200).json({
-      status: true,
-      source: "Lumi Base Brat",
-      data: {
-        image: namaEndpointBuffer.toString("base64"),
-        mimeType: namaEndpointContentType,
-        text: text.trim(),
-      },
-    });
-  } catch (error) {
-    console.error("[brat]", {
-      message: error.message,
-      cause: error.cause?.message,
-      code: error.cause?.code,
-    });
+    // Format respons upstream tidak dikenal
+    const namaEndpointBody = await namaEndpointResponse.text();
 
     return res.status(502).json({
       status: false,
-      message: "Gagal menghubungi layanan Brat.",
-      error: error.cause?.message || error.message,
-      code: error.cause?.code || null,
+      message: "Format respons layanan Brat tidak dikenali.",
+      error: namaEndpointBody.slice(0, 500),
+    });
+  } catch (error) {
+    console.error("Error handleBrat:", error);
+
+    return res.status(502).json({
+      status: false,
+      message: "Terjadi kesalahan saat membuat gambar Brat.",
+      error: error.message,
     });
   }
 }
