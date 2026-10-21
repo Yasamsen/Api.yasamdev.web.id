@@ -362,3 +362,12 @@ pre, code { overflow-wrap: normal; }
 .web-info-card strong.web-info-value-change{color:rgb(var(--gold));animation:webInfoValueTick .42s ease-out}
 @keyframes webInfoValueTick{0%{transform:translateY(3px);opacity:.55}100%{transform:translateY(0);opacity:1}}
 @media(prefers-reduced-motion:reduce){.web-info-card strong.web-info-value-change{animation:none}}
+
+/* Core visualizer: bars represent detected logical cores, not CPU load. */
+.web-info-cpu-card .web-core-bars{display:grid;grid-template-columns:repeat(auto-fit,minmax(7px,1fr));align-items:end;gap:4px;min-height:31px;margin:3px 0 1px;padding:7px 8px;border:1px solid rgb(var(--ink)/.09);border-radius:10px;background:rgb(var(--ink)/.025);overflow:hidden}
+.web-core-bar{display:flex;align-items:flex-end;height:17px;min-width:0}
+.web-core-bar i{display:block;width:100%;height:calc(45% + (var(--core-index) % 5)*11%);min-height:6px;border-radius:3px 3px 2px 2px;background:linear-gradient(180deg,rgb(var(--gold)),rgb(var(--gold2)));box-shadow:0 0 8px rgb(var(--gold)/.15);transform-origin:bottom;animation:coreBarRise .48s cubic-bezier(.2,.8,.2,1) both;animation-delay:var(--core-delay)}
+@keyframes coreBarRise{from{transform:scaleY(.15);opacity:.35}to{transform:scaleY(1);opacity:1}}
+.web-info-page-grid .web-core-bars{min-height:42px;gap:5px;padding:9px 10px}
+.web-info-page-grid .web-core-bar{height:24px}
+@media(prefers-reduced-motion:reduce){.web-core-bar i{animation:none}}

@@ -485,7 +485,7 @@ export function renderWebInfo() {
     <div class="mb-8"><span class="eyebrow">SYSTEM OVERVIEW</span><h1 class="mt-3 font-display text-4xl font-bold sm:text-5xl">Informasi <span class="text-gold">Web</span></h1><p class="mt-4 max-w-2xl text-sm leading-7 text-muted">Ringkasan kondisi runtime yang melayani website SamApi. Nilai CPU dan memori berlaku untuk instance server yang merespons permintaan ini.</p></div>
     <div class="mb-5 flex items-center gap-3 rounded-2xl border hair p-4"><span class="web-info-pulse"></span><div><strong class="block text-sm">Kondisi sistem</strong><span id="web-info-status" class="text-xs text-muted">Menghubungkan ke server…</span></div></div>
     <div class="web-info-grid web-info-page-grid">
-      <article class="web-info-card"><span class="web-info-icon">${icon('Cpu','h-5 w-5')}</span><span class="web-info-label">CPU / Core</span><strong id="web-cpu">Memuat…</strong><small id="web-cpu-sub">Core runtime server</small></article>
+      <article class="web-info-card web-info-cpu-card"><span class="web-info-icon">${icon('Cpu','h-5 w-5')}</span><span class="web-info-label">CPU / Core</span><strong id="web-cpu">Memuat…</strong><div id="web-core-bars" class="web-core-bars" aria-label="Visual jumlah core CPU"></div><small id="web-cpu-sub">Core runtime server</small></article>
       <article class="web-info-card"><span class="web-info-icon">${icon('MemoryStick','h-5 w-5')}</span><span class="web-info-label">RAM Server</span><strong id="web-ram">Memuat…</strong><small id="web-ram-sub">Pemakaian proses</small></article>
       <article class="web-info-card"><span class="web-info-icon">${icon('Activity','h-5 w-5')}</span><span class="web-info-label">Uptime Proses</span><strong id="web-uptime">Memuat…</strong><small>Lama proses aktif pada instance ini</small></article>
       <article class="web-info-card"><span class="web-info-icon">${icon('BarChart3','h-5 w-5')}</span><span class="web-info-label">Request Harian</span><strong id="web-requests">—</strong><small id="web-requests-sub">Total global perlu database statistik</small></article>
@@ -509,6 +509,15 @@ export function bindWebInfo() {
       }
     }
   };
+  const renderCoreBars = (count) => {
+    const host = document.getElementById('web-core-bars');
+    if (!host) return;
+    const total = Math.max(1, Math.min(32, Number(count) || 1));
+    if (Number(host.dataset.cores) === total) return;
+    host.dataset.cores = String(total);
+    host.innerHTML = Array.from({ length: total }, (_, i) => `<span class="web-core-bar" style="--core-index:${i};--core-delay:${(i % 8) * 55}ms" title="Core ${i + 1}"><i></i></span>`).join('');
+    host.setAttribute('aria-label', `${total} core terdeteksi`);
+  };
   let fetchTimer = null;
   let tickTimer = null;
   let inFlight = false;
@@ -530,6 +539,7 @@ export function bindWebInfo() {
       if (!response.ok) throw new Error('Info server tidak tersedia');
       const info = await response.json();
       put('web-cpu', `${info.cpuCores} core`, true);
+      renderCoreBars(info.cpuCores);
       put('web-cpu-sub', info.platform || 'Runtime server');
       put('web-ram', `${info.memoryUsedMb} MB`, true);
       put('web-ram-sub', `Heap ${info.heapUsedMb} / ${info.heapTotalMb} MB`);
