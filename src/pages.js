@@ -50,7 +50,7 @@ export function renderHome() {
         </h1>
         <p class="seq mt-7 max-w-md text-base leading-8 text-muted" style="--d:.6s">Fast, reliable APIs for modern developers. Download media, generate content, and ship faster.</p>
         <div class="seq mt-9 flex flex-col gap-3 sm:flex-row" style="--d:.75s">
-          <button data-nav="/docs" class="btn btn-gold">Explore the APIs ${icon('ArrowRight', 'arr h-4 w-4')}</button>
+          <button id="explore-apis" type="button" class="btn btn-gold">Explore the APIs ${icon('ArrowRight', 'arr h-4 w-4')}</button>
           <button data-nav="/docs" class="btn btn-ghost">Read documentation</button>
         </div>
       </div>
@@ -149,6 +149,18 @@ export function bindHome() {
   const state = { q: '', cat: '' };
   const grid = document.getElementById('api-grid');
   const empty = document.getElementById('no-apis');
+
+  // Smoothly scroll from the hero to the API introduction and first endpoint cards.
+  document.getElementById('explore-apis')?.addEventListener('click', () => {
+    const section = document.getElementById('apis');
+    if (!section) return;
+    section.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    section.classList.remove('apis-arrival');
+    requestAnimationFrame(() => {
+      section.classList.add('apis-arrival');
+      window.setTimeout(() => section.classList.remove('apis-arrival'), 1100);
+    });
+  });
 
   const paint = () => {
     const q = state.q.toLowerCase();
