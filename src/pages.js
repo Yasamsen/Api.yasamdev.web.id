@@ -217,11 +217,11 @@ function tryPanel(api) {
       return `<label class="block"><span class="mb-2 block text-xs font-bold">${label}</span><select data-param="${esc(p.name)}" class="input font-mono !text-xs">${options}</select></label>`;
     }
     if (p.type === 'file') {
-      const uploadLabel = api.slug === 'tourl' || api.slug === 'upscale-image' || api.slug === 'freeconvert-video-to-mp3' || api.slug === 'bgremover' || api.slug === 'ocr';
+      const uploadLabel = api.slug === 'tourl' || api.slug === 'upscale-image' || api.slug === 'compress-image' || api.slug === 'freeconvert-video-to-mp3' || api.slug === 'bgremover' || api.slug === 'ocr';
       if (uploadLabel) return `<div class="sm:col-span-2">
         <span class="mb-2 block text-xs font-bold">Pilih file ${p.required ? '<span class="text-red-400">*</span>' : ''}</span>
         <label class="group relative flex cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border border-dashed border-[rgb(var(--gold)/.42)] bg-[rgb(var(--gold)/.04)] px-5 py-8 text-center transition-all hover:border-[rgb(var(--gold)/.8)] hover:bg-[rgb(var(--gold)/.08)] sm:py-10">
-          <input data-param="${esc(p.name)}" data-upload-input type="file" accept="${api.slug === 'upscale-image' ? 'image/png,image/jpeg,image/webp' : '*/*'}" class="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0" aria-label="Pilih file untuk diunggah" required="${p.required ? 'required' : ''}">
+          <input data-param="${esc(p.name)}" data-upload-input type="file" accept="${api.slug === 'upscale-image' ? 'image/png,image/jpeg,image/webp' : (api.slug === 'compress-image' ? 'image/png,image/jpeg,image/webp,image/gif,image/avif' : '*/*')}" class="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0" aria-label="Pilih file untuk diunggah" required="${p.required ? 'required' : ''}">
           <span class="mb-3 grid h-14 w-14 place-items-center rounded-2xl border border-[rgb(var(--gold)/.25)] bg-[rgb(var(--gold)/.10)] text-gold transition-transform group-hover:-translate-y-0.5">${icon('UploadCloud', 'h-7 w-7')}</span>
           <span class="text-sm font-bold text-fg">Klik untuk memilih file</span>
           <span class="mt-1 text-xs text-muted">Pilih file dari perangkat kamu · ${esc(p.maxSizeLabel || 'Maksimal 4 MB')}</span>

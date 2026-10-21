@@ -1791,6 +1791,94 @@ async function handleNsfwRandomEndpoint(req, res) {
   }
 }
 //Upscale omg
+async function handleCompressImage(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "POST") return res.status(405).json({ status: false, message: "Gunakan POST dengan multipart/form-data." });
+
+  try {
+    const declared = Number(req.headers["content-length"]) || 0;
+    if (declared > 4_200_000) return res.status(413).json({ status: false, message: "Ukuran gambar maksimal 4 MB." });
+    if (!/multipart\/form-data/i.test(String(req.headers["content-type"] || ""))) {
+      return res.status(400).json({ status: false, message: "Kirim file pada field image dengan multipart/form-data." });
+    }
+    const parsed = await new Promise((resolve, reject) => {
+      let bb;
+      try { bb = Busboy({ headers: req.headers, limits: { files: 1, fileSize: 4_000_000, fields: 8 } }); }
+      catch (error) { reject(error); return; }
+      let image = null, tooLarge = false;
+      const fields = {};
+      bb.on("field", (name, value) => { fields[name] = value; });
+      bb.on("file", (name, stream, info) => {
+        if (name !== "image") { stream.resume(); return; }
+        const chunks = [];
+        stream.on("data", chunk => chunks.push(chunk));
+        stream.on("limit", () => { tooLarge = true; });
+        stream.on("end", () => { image = { buffer: Buffer.concat(chunks), filename: info.filename, mimetype: info.mimeType }; });
+      });
+      bb.on("error", reject);
+      bb.on("close", () => tooLarge ? reject(Object.assign(new Error("Ukuran gambar maksimal 4 MB."), { code: "TOO_LARGE" })) : resolve({ image, fields }));
+      req.pipe(bb);
+    });
+    if (!parsed.image?.buffer?.length) return res.status(400).json({ status: false, message: "File gambar wajib diunggah pada field image." });
+    if (!/^image\/(png|jpeg|webp|gif|avif)$/i.test(parsed.image.mimetype || "")) {
+      return res.status(415).json({ status: false, message: "Format gambar harus PNG, JPG, WEBP, GIF, atau AVIF." });
+    }
+
+    const format = String(parsed.fields.format || "original").toLowerCase();
+    const mode = String(parsed.fields.mode || "balanced").toLowerCase();
+    const quality = Number(parsed.fields.quality || 80);
+    if (!["original", "png", "jpg", "jpeg", "webp", "avif"].includes(format)) return res.status(400).json({ status: false, message: "Format hasil tidak didukung." });
+    if (!["balanced", "smallest", "lossless"].includes(mode)) return res.status(400).json({ status: false, message: "Mode kompresi tidak valid." });
+    if (!Number.isFinite(quality) || quality < 1 || quality > 100) return res.status(400).json({ status: false, message: "quality harus berupa angka 1–100." });
+
+    const headers = {
+      origin: "https://tools.cleanpng.com",
+      referer: "https://tools.cleanpng.com/image-compressor/",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    };
+    const uploadForm = new FormData();
+    uploadForm.append("image", parsed.image.buffer, { filename: parsed.image.filename || "image.png", contentType: parsed.image.mimetype || "image/png" });
+    const uploadResponse = await axios.post(
+      "https://tools.cleanpng.com/image-compressor/upload.php",
+      uploadForm,
+      { headers: { ...headers, ...uploadForm.getHeaders() }, timeout: 60000, maxBodyLength: 5_000_000 }
+    );
+    const uploaded = uploadResponse.data || {};
+    const imagePath = uploaded.path || uploaded.file_path || uploaded.filename || uploaded.data?.path;
+    if (!uploaded.success || !imagePath) {
+      return res.status(502).json({ status: false, message: "Layanan CleanPNG belum mengembalikan path upload yang dikenali.", error: uploaded });
+    }
+
+    const compressForm = new FormData();
+    compressForm.append("path", imagePath);
+    compressForm.append("format", format === "original" ? "original" : (format === "jpg" ? "jpeg" : format));
+    compressForm.append("mode", mode);
+    compressForm.append("quality", String(quality));
+    const resultResponse = await axios.post(
+      "https://tools.cleanpng.com/image-compressor/compress.php",
+      compressForm,
+      { headers: { ...headers, ...compressForm.getHeaders() }, timeout: 120000, maxBodyLength: 1_000_000 }
+    );
+    const result = resultResponse.data || {};
+    const rawUrl = result.url || result.resultUrl || result.result_url || result.data?.url || result.data?.resultUrl;
+    if (!result.success || !rawUrl) {
+      return res.status(502).json({ status: false, message: "CleanPNG tidak mengembalikan URL hasil yang dikenali. Kemungkinan endpoint upstream perlu disesuaikan.", error: result });
+    }
+    const resultUrl = /^https?:\/\//i.test(String(rawUrl)) ? String(rawUrl) : new URL(String(rawUrl).replace(/^\/+/, ""), "https://tools.cleanpng.com/image-compressor/").href;
+    const originalSize = result.original_size ?? result.originalSize ?? result.original?.size ?? null;
+    const compressedSize = result.compressed_size ?? result.compressedSize ?? result.compressed?.size ?? null;
+    const savingsPercent = result.savings_percent ?? result.savingsPercent ?? (originalSize && compressedSize ? Math.round((1 - Number(compressedSize) / Number(originalSize)) * 10000) / 100 : null);
+    return res.status(200).json({ status: true, source: "CleanPNG Image Compressor", data: { resultUrl, format, mode, quality, originalSize, compressedSize, savingsPercent } });
+  } catch (error) {
+    console.error("handleCompressImage:", error.response?.data || error.message);
+    const statusCode = error.code === "TOO_LARGE" ? 413 : (error.response?.status >= 400 && error.response?.status < 600 ? 502 : 500);
+    return res.status(statusCode).json({ status: false, message: error.code === "TOO_LARGE" ? "Ukuran gambar maksimal 4 MB." : "Gagal melakukan kompresi gambar. Endpoint upstream CleanPNG mungkin berbeda.", error: error.response?.data || error.message });
+  }
+}
+
 async function handleUpscaleImage(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -12133,6 +12221,8 @@ case "quotes-anime":
   case "zerochan":
   return handleZerochan(req, res);
   case "nsfw-random": return handleNsfwRandomEndpoint(req, res);
+case "compress-image":
+  return handleCompressImage(req, res);
 case "upscale-image":
   return handleUpscaleImage(req, res);
   case "photoeditor-ai":

@@ -1,6 +1,6 @@
 export default {
   slug: "upscale-image",
-  name: "Upscale Imagee",
+  name: "Upscale Image",
   description: "Unggah gambar lalu tingkatkan resolusinya 2x atau 4x menggunakan CleanPNG Image Upscaler.",
   category: "Tools",
   method: "POST",
