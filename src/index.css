@@ -356,3 +356,9 @@ pre, code { overflow-wrap: normal; }
 .web-info-page-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.web-info-page-grid .web-info-card{padding:22px;gap:10px}.web-info-page-grid .web-info-card strong{font-size:1.6rem}.web-info-page-grid .web-info-label{font-size:.78rem}.web-info-page-grid .web-info-card small{font-size:.72rem}@media(max-width:560px){.web-info-page-grid{grid-template-columns:1fr 1fr;gap:10px}.web-info-page-grid .web-info-card{padding:14px}.web-info-page-grid .web-info-card strong{font-size:1.15rem}}
 
 .web-info-live{display:inline-flex;align-items:center;gap:7px;flex-shrink:0;padding:7px 10px;border:1px solid rgb(var(--green)/.25);border-radius:999px;background:rgb(var(--green)/.08);font:800 .65rem/1 ui-monospace,SFMono-Regular,monospace;color:rgb(var(--green))}.web-info-live .live-dot{width:6px;height:6px}.web-info-live #web-info-updated{font-weight:600;color:rgb(var(--muted))}
+
+/* Subtle motion when real system metrics change; no fabricated counter values. */
+.web-info-card strong{transition:color .22s ease,transform .22s ease;transform-origin:left center}
+.web-info-card strong.web-info-value-change{color:rgb(var(--gold));animation:webInfoValueTick .42s ease-out}
+@keyframes webInfoValueTick{0%{transform:translateY(3px);opacity:.55}100%{transform:translateY(0);opacity:1}}
+@media(prefers-reduced-motion:reduce){.web-info-card strong.web-info-value-change{animation:none}}

@@ -12006,6 +12006,7 @@ async function handleSystemInfo(req, res) {
     heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
     heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024),
     uptimeText: formatUptime(process.uptime()),
+    uptimeSeconds: Math.floor(process.uptime()),
     note: "Metrik hanya untuk instance yang menangani request ini."
   });
 }
