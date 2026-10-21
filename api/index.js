@@ -1792,93 +1792,119 @@ async function handleNsfwRandomEndpoint(req, res) {
 }
 //Upscale omg
 async function handleUpscaleImage(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "POST") {
+    return res.status(405).json({ status: false, message: "Gunakan metode POST dengan multipart/form-data." });
+  }
+
   try {
-    const { url } = req.query;
-
-    if (!url) {
-      return res.status(400).json({
-        status: false,
-        message: "Parameter URL gambar wajib diisi.",
-        error: 'example: "/api/upscale-image?url=https://example.com/image.jpg"'
-      });
+    const declared = Number(req.headers["content-length"]) || 0;
+    if (declared > 4_200_000) {
+      return res.status(413).json({ status: false, message: "Ukuran gambar maksimal 4 MB." });
     }
 
-    // Validasi URL
-    let imageUrl;
-
-    try {
-      imageUrl = new URL(url).href;
-    } catch {
-      return res.status(400).json({
-        status: false,
-        message: "URL gambar tidak valid.",
-        error: 'example: "/api/upscale-image?url=https://example.com/image.jpg"'
-      });
+    const contentType = String(req.headers["content-type"] || "");
+    if (!/multipart\/form-data/i.test(contentType)) {
+      return res.status(400).json({ status: false, message: "Kirim gambar sebagai multipart/form-data dengan field image." });
     }
 
-    // Download gambar
-    const imageResponse = await axios.get(imageUrl, {
-      responseType: "arraybuffer",
-      timeout: 30000,
-      maxContentLength: 20 * 1024 * 1024,
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/91.0.4472.124 Safari/537.36"
-      }
+    const parsed = await new Promise((resolve, reject) => {
+      let bb;
+      try { bb = Busboy({ headers: req.headers, limits: { files: 1, fileSize: 4_000_000, fields: 5 } }); }
+      catch (error) { reject(error); return; }
+      let image = null;
+      let tooLarge = false;
+      const fields = {};
+      bb.on("field", (name, value) => { fields[name] = value; });
+      bb.on("file", (name, stream, info) => {
+        if (name !== "image") { stream.resume(); return; }
+        const chunks = [];
+        stream.on("data", chunk => chunks.push(chunk));
+        stream.on("limit", () => { tooLarge = true; });
+        stream.on("end", () => { image = { buffer: Buffer.concat(chunks), filename: info.filename, mimetype: info.mimeType }; });
+      });
+      bb.on("error", reject);
+      bb.on("close", () => {
+        if (tooLarge) return reject(Object.assign(new Error("Ukuran gambar maksimal 4 MB."), { code: "TOO_LARGE" }));
+        resolve({ image, fields });
+      });
+      req.pipe(bb);
     });
 
-    const buffer = Buffer.from(imageResponse.data);
+    if (!parsed.image?.buffer?.length) {
+      return res.status(400).json({ status: false, message: "File gambar wajib diunggah pada field image." });
+    }
+    if (!/^image\/(png|jpeg|webp)$/i.test(parsed.image.mimetype || "")) {
+      return res.status(415).json({ status: false, message: "Format gambar harus PNG, JPG, atau WEBP." });
+    }
 
-    // Buat multipart form
-    const upscaleForm = new FormData();
+    const ratio = String(parsed.fields.ratio || "2");
+    const format = String(parsed.fields.format || "png").toLowerCase();
+    if (!["2", "4"].includes(ratio)) return res.status(400).json({ status: false, message: "ratio hanya boleh 2 atau 4." });
+    if (!["png", "jpg", "jpeg", "webp"].includes(format)) return res.status(400).json({ status: false, message: "Format hasil tidak didukung." });
 
-    upscaleForm.append("image", buffer, {
-      filename: "image.jpg",
-      contentType:
-        imageResponse.headers["content-type"] || "image/jpeg"
+    const headers = {
+      "origin": "https://tools.cleanpng.com",
+      "referer": "https://tools.cleanpng.com/image-upscaler/",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    };
+    const uploadForm = new FormData();
+    uploadForm.append("image", parsed.image.buffer, {
+      filename: parsed.image.filename || "image.png",
+      contentType: parsed.image.mimetype || "image/png"
     });
+    uploadForm.append("ratio", "2");
 
-    upscaleForm.append("user_id", "");
-    upscaleForm.append("is_public", "true");
-    upscaleForm.append("scale", "2");
-
-    // Request ke PicUpscaler
-    const upscaleResponse = await axios.post(
-      "https://picupscaler.com/api/generate/handle",
-      upscaleForm,
-      {
-        headers: {
-          ...upscaleForm.getHeaders(),
-          accept: "application/json",
-          referer:
-            "https://picupscaler.com/blog/free-image-upscaler-no-watermark",
-          origin: "https://picupscaler.com",
-          "user-agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/91.0.4472.124 Safari/537.36"
-        },
-        timeout: 120000,
-        maxContentLength: 50 * 1024 * 1024,
-        maxBodyLength: 50 * 1024 * 1024
-      }
+    const uploadResponse = await axios.post(
+      "https://tools.cleanpng.com/image-upscaler/upload.php",
+      uploadForm,
+      { headers: { ...headers, ...uploadForm.getHeaders() }, timeout: 60000, maxBodyLength: 5_000_000 }
     );
+    if (!uploadResponse.data?.success || !uploadResponse.data?.path) {
+      return res.status(502).json({ status: false, message: "Layanan CleanPNG gagal menerima gambar.", error: uploadResponse.data || null });
+    }
+
+    const upscaleForm = new FormData();
+    upscaleForm.append("path", uploadResponse.data.path);
+    upscaleForm.append("ratio", ratio);
+    upscaleForm.append("format", format === "jpg" ? "jpeg" : format);
+    upscaleForm.append("enhance_quality", "1");
+
+    const resultResponse = await axios.post(
+      "https://tools.cleanpng.com/image-upscaler/upscale.php",
+      upscaleForm,
+      { headers: { ...headers, ...upscaleForm.getHeaders() }, timeout: 120000, maxBodyLength: 1_000_000 }
+    );
+    if (!resultResponse.data?.success || !resultResponse.data?.url) {
+      return res.status(502).json({ status: false, message: "CleanPNG gagal memproses gambar.", error: resultResponse.data || null });
+    }
+
+    const resultPath = String(resultResponse.data.url);
+    const resultUrl = /^https?:\/\//i.test(resultPath)
+      ? resultPath
+      : new URL(resultPath.replace(/^\/+/, ""), "https://tools.cleanpng.com/image-upscaler/").href;
 
     return res.status(200).json({
       status: true,
-      source: "PicUpscaler",
-      data: upscaleResponse.data
+      source: "CleanPNG Image Upscaler",
+      data: {
+        resultUrl,
+        ratio: `${resultResponse.data.width || "?"} x ${resultResponse.data.height || "?"}`,
+        width: resultResponse.data.width || null,
+        height: resultResponse.data.height || null,
+        format
+      }
     });
   } catch (error) {
-    console.error("handleUpscaleImage:", error);
-
-    const statusCode =
-      error.response?.status >= 400 && error.response?.status < 600
-        ? error.response.status
-        : 500;
-
+    console.error("handleUpscaleImage:", error.response?.data || error.message);
+    const statusCode = error.code === "TOO_LARGE" ? 413 : (error.response?.status >= 400 && error.response?.status < 600 ? 502 : 500);
     return res.status(statusCode).json({
       status: false,
-      message: "Gagal melakukan upscale gambar.",
-      error: error.message
+      message: error.code === "TOO_LARGE" ? "Ukuran gambar maksimal 4 MB." : "Gagal melakukan upscale gambar.",
+      error: error.response?.data || error.message
     });
   }
 }
