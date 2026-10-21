@@ -1,6 +1,6 @@
 export default {
   slug: "compress-image",
-  name: "Compress Image",
+  name: "Compress Imagee",
   description: "Unggah gambar lalu kompres ukuran file melalui CleanPNG Image Compressor.",
   category: "Tools",
   method: "POST",
