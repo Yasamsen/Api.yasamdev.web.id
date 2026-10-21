@@ -483,35 +483,45 @@ export function bindDocs(api) {
 export function renderWebInfo() {
   return `<section class="mx-auto max-w-5xl px-4 pb-20 pt-32 sm:px-8">
     <div class="mb-8"><span class="eyebrow">SYSTEM OVERVIEW</span><h1 class="mt-3 font-display text-4xl font-bold sm:text-5xl">Informasi <span class="text-gold">Web</span></h1><p class="mt-4 max-w-2xl text-sm leading-7 text-muted">Ringkasan kondisi runtime yang melayani website SamApi. Nilai CPU dan memori berlaku untuk instance server yang merespons permintaan ini.</p></div>
-    <div class="mb-5 flex items-center justify-between gap-3 rounded-2xl border hair p-4"><div class="flex items-center gap-3"><span class="web-info-pulse"></span><div><strong class="block text-sm">Informasi runtime</strong><span id="web-info-status" class="text-xs text-muted">Mengambil data server…</span></div></div><button id="web-info-refresh" class="btn btn-ghost btn-sm">${icon('RefreshCw','h-4 w-4')} Muat ulang</button></div>
+    <div class="mb-5 flex items-center justify-between gap-3 rounded-2xl border hair p-4"><div class="flex items-center gap-3"><span class="web-info-pulse"></span><div><strong class="block text-sm">Informasi runtime</strong><span id="web-info-status" class="text-xs text-muted">Menghubungkan ke server…</span></div></div><span class="web-info-live"><span class="live-dot"></span> LIVE <span id="web-info-updated">—</span></span></div>
     <div class="web-info-grid web-info-page-grid">
       <article class="web-info-card"><span class="web-info-icon">${icon('Cpu','h-5 w-5')}</span><span class="web-info-label">CPU / Core</span><strong id="web-cpu">Memuat…</strong><small id="web-cpu-sub">Core runtime server</small></article>
       <article class="web-info-card"><span class="web-info-icon">${icon('MemoryStick','h-5 w-5')}</span><span class="web-info-label">RAM Server</span><strong id="web-ram">Memuat…</strong><small id="web-ram-sub">Pemakaian proses</small></article>
       <article class="web-info-card"><span class="web-info-icon">${icon('Activity','h-5 w-5')}</span><span class="web-info-label">Uptime Proses</span><strong id="web-uptime">Memuat…</strong><small>Lama proses aktif pada instance ini</small></article>
-      <article class="web-info-card"><span class="web-info-icon">${icon('BarChart3','h-5 w-5')}</span><span class="web-info-label">Request Harian</span><strong id="web-requests">Belum tersedia</strong><small id="web-requests-sub">Perlu penyimpanan statistik harian</small></article>
+      <article class="web-info-card"><span class="web-info-icon">${icon('BarChart3','h-5 w-5')}</span><span class="web-info-label">Request Harian</span><strong id="web-requests">—</strong><small id="web-requests-sub">Total global perlu database statistik</small></article>
     </div>
-    <p class="web-info-note mt-5">Catatan: Vercel dapat menjalankan beberapa instance serverless. Data ini bukan gabungan seluruh instance. Statistik request harian akan akurat setelah penyimpanan statistik terhubung.</p>
+    <p class="web-info-note mt-5">Data CPU dan RAM diperbarui otomatis setiap 5 detik. Pada Vercel, metrik runtime hanya mewakili instance yang merespons. Total request harian seluruh pengunjung memerlukan penyimpanan statistik bersama agar akurat.</p>
   </section>`;
 }
 
 export function bindWebInfo() {
   const put = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+  let timer = null;
+  let inFlight = false;
   const load = async () => {
-    put('web-info-status', 'Mengambil data server…');
-    put('web-cpu', 'Memuat…'); put('web-ram', 'Memuat…'); put('web-uptime', 'Memuat…');
+    if (inFlight || !document.getElementById('web-info-status')) return;
+    inFlight = true;
     try {
       const response = await fetch('/api/system-info', { headers: { accept: 'application/json' }, cache: 'no-store' });
       if (!response.ok) throw new Error('Info server tidak tersedia');
       const info = await response.json();
-      put('web-cpu', `${info.cpuCores} core`); put('web-cpu-sub', info.platform || 'Runtime server');
-      put('web-ram', `${info.memoryUsedMb} MB`); put('web-ram-sub', `Heap ${info.heapUsedMb} / ${info.heapTotalMb} MB`);
-      put('web-uptime', info.uptimeText || '—'); put('web-info-status', 'Data berhasil diperbarui');
+      put('web-cpu', `${info.cpuCores} core`);
+      put('web-cpu-sub', info.platform || 'Runtime server');
+      put('web-ram', `${info.memoryUsedMb} MB`);
+      put('web-ram-sub', `Heap ${info.heapUsedMb} / ${info.heapTotalMb} MB`);
+      put('web-uptime', info.uptimeText || '—');
+      put('web-info-status', 'Terhubung · diperbarui otomatis');
+      put('web-info-updated', new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
     } catch {
-      put('web-cpu', 'Tidak tersedia'); put('web-ram', 'Tidak tersedia'); put('web-uptime', 'Tidak tersedia'); put('web-info-status', 'Endpoint informasi server belum tersedia');
+      put('web-info-status', 'Koneksi terputus · mencoba kembali otomatis');
+    } finally {
+      inFlight = false;
     }
   };
-  document.getElementById('web-info-refresh')?.addEventListener('click', load);
   load();
+  timer = window.setInterval(load, 5000);
+  const cleanup = () => { if (timer) window.clearInterval(timer); window.removeEventListener('pagehide', cleanup); };
+  window.addEventListener('pagehide', cleanup, { once: true });
 }
 
 export function renderError(type) {
