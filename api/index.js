@@ -19,6 +19,7 @@ import net from "node:net";
 import http from "node:http";
 import tls from "node:tls";
 import zlib from "node:zlib";
+import os from "node:os";
 // Semua endpoint digabung ke 1 file supaya hanya dihitung 1 Serverless
 // Function oleh Vercel (Hobby plan cuma boleh maksimal 12 function).
 // Body parser dimatikan secara global karena nano-banana butuh raw stream
@@ -11989,10 +11990,32 @@ async function handleCheckHost(req, res) {
 }
 
 
+async function handleSystemInfo(req, res) {
+  if (req.method !== "GET") return res.status(405).json({ status: false, message: "Method tidak diizinkan" });
+  const mem = process.memoryUsage();
+  const formatUptime = (seconds) => {
+    const d = Math.floor(seconds / 86400), h = Math.floor(seconds % 86400 / 3600), m = Math.floor(seconds % 3600 / 60);
+    return d ? `${d}h ${h}j ${m}m` : h ? `${h}j ${m}m` : `${m}m ${Math.floor(seconds % 60)}d`;
+  };
+  res.setHeader("Cache-Control", "no-store, max-age=0");
+  return res.status(200).json({
+    status: true,
+    cpuCores: os.cpus().length,
+    platform: `${process.platform} / ${process.arch}`,
+    memoryUsedMb: Math.round(mem.rss / 1024 / 1024),
+    heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+    heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024),
+    uptimeText: formatUptime(process.uptime()),
+    note: "Metrik hanya untuk instance yang menangani request ini."
+  });
+}
+
 export default async function handler(req, res) {
   const routeKey = getRouteKey(req);
 
   switch (routeKey) {
+    case "system-info":
+      return handleSystemInfo(req, res);
     case "album-search":
       return handleAlbumSearch(req, res);
     case "add-subdomain":

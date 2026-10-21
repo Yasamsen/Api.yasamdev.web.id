@@ -63,14 +63,14 @@ export function renderNavbar(path) {
           </div>
           <button id="mobile-menu-close" class="iconbtn mobile-menu-close" aria-label="Tutup menu">${icon('X', 'h-4 w-4')}</button>
         </div>
-        <div class="mobile-menu-links">
-          ${[
-            ['/', 'House', 'Home', 'Kembali ke halaman utama'],
-            ['/docs', 'BookOpen', 'Dokumentasi', 'Panduan dan daftar endpoint API'],
-            ['/docs', 'Layers3', 'Semua API', 'Jelajahi koleksi endpoint'],
-            ['/contact', 'MessageCircle', 'Kontak', 'Hubungi pengembang']
-          ].map(([to, glyph, label, desc], i) => `<button data-nav="${to}" style="--i:${i}" class="m-item mobile-menu-link"><span class="mobile-menu-link-icon">${icon(glyph, 'h-5 w-5')}</span><span class="mobile-menu-link-copy"><span class="mobile-menu-link-title">${label}</span><span class="mobile-menu-link-desc">${desc}</span></span>${icon('ArrowUpRight', 'mobile-menu-arrow h-4 w-4')}</button>`).join('')}
+        <div class="web-info-intro"><span class="web-info-pulse"></span><div><strong>Ringkasan Web</strong><small>Informasi runtime API saat ini</small></div><button id="web-info-refresh" class="web-info-refresh" aria-label="Muat ulang informasi">${icon('RefreshCw', 'h-4 w-4')}</button></div>
+        <div class="web-info-grid" id="web-info-grid">
+          <article class="web-info-card"><span class="web-info-icon">${icon('Cpu', 'h-4 w-4')}</span><span class="web-info-label">CPU / Core</span><strong id="web-cpu">Memuat…</strong><small id="web-cpu-sub">Core runtime server</small></article>
+          <article class="web-info-card"><span class="web-info-icon">${icon('MemoryStick', 'h-4 w-4')}</span><span class="web-info-label">RAM Server</span><strong id="web-ram">Memuat…</strong><small id="web-ram-sub">Pemakaian proses</small></article>
+          <article class="web-info-card"><span class="web-info-icon">${icon('Activity', 'h-4 w-4')}</span><span class="web-info-label">Uptime Proses</span><strong id="web-uptime">Memuat…</strong><small>Sejak proses aktif</small></article>
+          <article class="web-info-card"><span class="web-info-icon">${icon('BarChart3', 'h-4 w-4')}</span><span class="web-info-label">Request Harian</span><strong id="web-requests">—</strong><small id="web-requests-sub">Statistik harian belum terhubung</small></article>
         </div>
+        <p class="web-info-note">Info CPU/RAM mengikuti instance server yang melayani request. Vercel dapat memakai instance berbeda untuk tiap request.</p>
         <div class="mobile-menu-bottom">
           <div class="mobile-menu-status"><span class="live-dot"></span><span><strong>API online</strong><small>Semua sistem siap digunakan</small></span></div>
           <button id="mobile-theme-btn" class="mobile-theme-action">${icon(themeIcon, 'h-4 w-4')}<span>Ganti tema</span></button>
@@ -98,6 +98,26 @@ export function bindNavbar() {
 
   const mm = document.getElementById('mobile-menu');
   const mmBtn = document.getElementById('mobile-menu-btn');
+  const loadWebInfo = async () => {
+    const put = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+    put('web-cpu', 'Memuat…'); put('web-ram', 'Memuat…'); put('web-uptime', 'Memuat…');
+    try {
+      const response = await fetch('/api/system-info', { headers: { accept: 'application/json' }, cache: 'no-store' });
+      if (!response.ok) throw new Error('info tidak tersedia');
+      const info = await response.json();
+      put('web-cpu', `${info.cpuCores} core`); put('web-cpu-sub', info.platform || 'Runtime server');
+      put('web-ram', `${info.memoryUsedMb} MB`); put('web-ram-sub', `Heap ${info.heapUsedMb} / ${info.heapTotalMb} MB`);
+      put('web-uptime', info.uptimeText);
+      put('web-requests', 'Belum tersedia');
+      put('web-requests-sub', 'Perlu penyimpanan statistik harian');
+    } catch {
+      put('web-cpu', 'Tidak tersedia'); put('web-ram', 'Tidak tersedia'); put('web-uptime', 'Tidak tersedia');
+      put('web-cpu-sub', 'Endpoint info belum aktif');
+    }
+  };
+  document.getElementById('web-info-refresh')?.addEventListener('click', loadWebInfo);
+  loadWebInfo();
+
   const closeMobileMenu = () => {
     if (!mm?.hasAttribute('data-open')) return;
     mm.removeAttribute('data-open');
