@@ -1,12 +1,12 @@
 import { getPath, onRouteChange, navigate } from './router.js';
 import { renderNavbar, bindNavbar, renderFooter, bindFooter } from './components.js';
 import { renderContact } from './creator.js';
-import { renderHome, bindHome, renderDocs, bindDocs, renderError } from './pages.js';
+import { renderHome, bindHome, renderDocs, bindDocs, renderWebInfo, bindWebInfo, renderError } from './pages.js';
 import { getApiBySlug } from './apis/registry.js';
 import { refreshIcons, copyText, icon } from './utils.js';
 import { initMotion, observeReveals, runBoot } from './motion.js';
 
-const TITLES = { docs: 'Documentation — SamApi', '/500': 'Server Error — SamApi', '/404': 'Not Found — SamApi', '/contact': 'Contact YasamDev — SamApi', home: 'SamApi — Simple, powerful APIs' };
+const TITLES = { docs: 'Documentation — SamApi', '/500': 'Server Error — SamApi', '/404': 'Not Found — SamApi', '/contact': 'Contact YasamDev — SamApi', '/info': 'Informasi Web — SamApi', home: 'SamApi — Simple, powerful APIs' };
 
 export function renderApp(opts = {}) {
   const html = document.documentElement;
@@ -19,12 +19,13 @@ export function renderApp(opts = {}) {
   const isError = path === '/404' || path === '/500';
   document.title = isDocs ? TITLES.docs : TITLES[path] || TITLES.home;
 
-  const page = path === '/' ? renderHome() : path === '/contact' ? renderContact() : isDocs ? renderDocs(path) : path === '/500' ? renderError('500') : renderError('404');
+  const page = path === '/' ? renderHome() : path === '/contact' ? renderContact() : path === '/info' ? renderWebInfo() : isDocs ? renderDocs(path) : path === '/500' ? renderError('500') : renderError('404');
   document.getElementById('root').innerHTML =
     `<div class="min-h-screen text-fg">${renderNavbar(path)}<div id="page" class="page-enter">${page}</div>${!isError ? renderFooter() : ''}</div>`;
 
   bindNavbar();
   if (path === '/') bindHome();
+  else if (path === '/info') bindWebInfo();
   else if (isDocs) bindDocs(path.startsWith('/docs/') ? getApiBySlug(path.split('/')[2]?.split('?')[0]) : null);
   else document.getElementById('retry')?.addEventListener('click', () => location.reload());
   bindFooter();
