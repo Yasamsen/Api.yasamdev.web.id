@@ -45,7 +45,7 @@ export function renderNavbar(path) {
           <div class="mr-3 hidden items-center gap-2 lg:flex"><span class="h-1.5 w-1.5 rounded-full bg-ok"></span><span class="text-xs font-semibold text-muted">API online</span></div>
           <button id="theme-btn" class="iconbtn" aria-label="Toggle color theme">${icon(themeIcon, 'h-[17px] w-[17px]')}</button>
           <button data-nav="/docs" class="btn btn-gold btn-sm ml-1 hidden md:inline-flex">Get started</button>
-          <button id="mobile-menu-btn" class="iconbtn md:hidden" aria-label="Toggle menu" aria-expanded="false">${icon('Menu', 'h-5 w-5')}</button>
+          <button id="mobile-menu-btn" class="iconbtn mobile-menu-trigger md:hidden" aria-label="Buka menu navigasi" title="Menu" aria-expanded="false">${icon('Ellipsis', 'h-5 w-5')}</button>
         </div>
       </div>
     </div>
@@ -86,7 +86,7 @@ export function bindNavbar() {
     mm.setAttribute('aria-hidden', String(!open));
     mmBtn.setAttribute('aria-expanded', String(open));
     document.documentElement.classList.toggle('menu-open', open);
-    mmBtn.innerHTML = icon(open ? 'X' : 'Menu', 'h-5 w-5');
+    mmBtn.innerHTML = icon(open ? 'X' : 'Ellipsis', 'h-5 w-5');
     window.lucide?.createIcons({ attrs: { 'stroke-width': 2 } });
   });
 }
@@ -121,7 +121,7 @@ export function apiIcon(api, size = 'md') {
 export function renderApiCard(api, i = 0) {
   const get = api.method === 'GET';
   return `<div class="reveal" style="--d:${(i % 3) * 70}ms"><article class="card flex h-full flex-col p-5 sm:p-6">
-    <div class="mb-5 flex items-center justify-between"><div class="iconbox h-10 w-10">${apiIcon(api)}</div><span class="badge badge-cat">${esc(api.category)}</span></div>
+    <div class="mb-5 flex items-center justify-between gap-3"><div class="iconbox h-10 w-10">${apiIcon(api)}</div><span class="category-pill"><span class="category-dot"></span>${esc(api.category)}</span></div>
     <h3 class="mb-1.5 text-base font-bold tracking-[-0.01em]">${esc(api.name)}</h3>
     <p class="mb-6 min-h-[48px] text-sm leading-6 text-muted">${esc(api.description)}</p>
     <div class="mt-auto flex items-center justify-between gap-2 border-t hair pt-4">

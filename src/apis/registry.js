@@ -12,8 +12,8 @@ function normalizeApi(api) {
   return {
     slug: fallbackSlug,
     name: api.name || titleFromSlug(fallbackSlug),
-    description: api.description || `API endpoint for ${titleFromSlug(fallbackSlug)}.`,
-    category: api.category || categoryFromEndpoint(api.endpoint || ''),
+    description: api.description || describeEndpoint(fallbackSlug),
+    category: normalizeCategory(api.category, fallbackSlug, api.endpoint || ''),
     method: api.method || 'GET',
     endpoint: api.endpoint || `/api/${fallbackSlug}`,
     icon: api.icon || 'Activity',
@@ -22,6 +22,30 @@ function normalizeApi(api) {
     responseFields: Array.isArray(api.responseFields) ? api.responseFields : [],
     exampleRequest: api.exampleRequest || `${api.method || 'GET'} https://samapi.example.com${api.endpoint || `/api/${fallbackSlug}`}`,
   };
+}
+
+const CATEGORY_RULES = [
+  [/download|youtube-mp3|ytplay|tiktok|instagram|facebook|terabox|capcut|twitter-video|omdown/, 'Downloader'],
+  [/ai|brat|upscale|unblur|bgremover|editimg|photoeditor|video-to-prompt|ocr/, 'AI & Image'],
+  [/spotify|album|lyrics|ringtone|text-to-speech/, 'Music & Audio'],
+  [/stalk|mlstalk|githubstalk|npmstalk|ff-stalk|prime-ff/, 'Profile & Games'],
+  [/weather|earthquake|ip-lookup|check-host|wikipedia/, 'Information'],
+  [/search|pinterest|zerochan/, 'Search'],
+  [/anime|waifu|deviantart|alphacoders|motionbgs|imgviral|tai/, 'Images & Anime'],
+  [/qrcode|tourl|web2apk|subdomain|tempmail|alight|ssweb|convert/, 'Developer Tools'],
+  [/mealdb|food/, 'Food'],
+];
+
+function normalizeCategory(category, slug, endpoint) {
+  const value = String(category || '').trim();
+  if (value && !['Utility', 'Utilities', 'Other', 'General'].includes(value)) return value;
+  const key = `${slug} ${endpoint}`.toLowerCase();
+  return CATEGORY_RULES.find(([pattern]) => pattern.test(key))?.[1] || 'Utilities';
+}
+
+function describeEndpoint(slug) {
+  const name = titleFromSlug(slug);
+  return `Gunakan ${name} untuk memproses permintaan melalui API ini. Buka dokumentasi untuk melihat parameter, contoh, dan format respons.`;
 }
 
 function titleFromSlug(slug) {

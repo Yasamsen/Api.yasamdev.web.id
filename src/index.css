@@ -279,3 +279,10 @@ pre, code { overflow-wrap: normal; }
   .reveal { opacity: 1; transform: none; }
   .tw { width: calc(var(--n) * 1ch); }
 }
+
+
+/* Endpoint category labels and refined compact navigation control */
+.category-pill { display:inline-flex; align-items:center; gap:.45rem; max-width:70%; padding:.42rem .72rem; border:1px solid rgb(var(--gold2) / .38); border-radius:999px; background:rgb(var(--gold2) / .10); color:rgb(var(--fg)); font-size:.68rem; line-height:1; font-weight:800; letter-spacing:.015em; }
+.category-pill .category-dot { width:6px; height:6px; flex:0 0 auto; border-radius:50%; background:rgb(var(--gold)); box-shadow:0 0 0 3px rgb(var(--gold) / .13); }
+.mobile-menu-trigger { border:1px solid rgb(var(--ink) / .14); border-radius:14px; background:rgb(var(--surface) / .92); box-shadow:0 3px 10px rgb(0 0 0 / .08); }
+.mobile-menu-trigger:hover { background:rgb(var(--gold2) / .18); transform:translateY(-1px); }
