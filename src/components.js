@@ -51,14 +51,32 @@ export function renderNavbar(path) {
     </div>
 
     <div id="mobile-menu" class="md:hidden" aria-hidden="true">
-      <div class="mx-auto flex max-w-md flex-col">
-        ${[['/', 'Home'], ['/docs', 'Documentation'], ['/docs', 'All APIs'], ['/contact', 'Contact']].map(([to, label], i) => `<button data-nav="${to}" style="--i:${i}" class="m-item font-display hair border-b-2 py-5 text-left text-2xl">${label}</button>`).join('')}
-        <div style="--i:4" class="m-item mt-8 flex items-center justify-between">
-          <div class="flex items-center gap-2"><span class="h-1.5 w-1.5 rounded-full bg-ok"></span><span class="text-xs font-semibold text-muted">API online</span></div>
-          <button id="mobile-theme-btn" class="flex items-center gap-2 text-sm text-muted">${icon(themeIcon, 'h-4 w-4')} Theme</button>
+      <button id="mobile-menu-backdrop" class="mobile-menu-backdrop" aria-label="Tutup menu"></button>
+      <section class="mobile-menu-sheet" role="dialog" aria-modal="true" aria-label="Menu navigasi">
+        <div class="mobile-menu-heading">
+          <div class="flex items-center gap-3">
+            <span class="logo-mark">${icon('Zap', 'h-3.5 w-3.5 fill-current')}</span>
+            <div>
+              <p class="font-display text-xl leading-tight">Menu <span class="text-gold">SamApi</span></p>
+              <p class="mt-1 text-xs text-muted">Jelajahi layanan API</p>
+            </div>
+          </div>
+          <button id="mobile-menu-close" class="iconbtn mobile-menu-close" aria-label="Tutup menu">${icon('X', 'h-4 w-4')}</button>
         </div>
-        <button data-nav="/docs" style="--i:5" class="m-item btn btn-gold mt-8 w-full">Get started</button>
-      </div>
+        <div class="mobile-menu-links">
+          ${[
+            ['/', 'House', 'Home', 'Kembali ke halaman utama'],
+            ['/docs', 'BookOpen', 'Dokumentasi', 'Panduan dan daftar endpoint API'],
+            ['/docs', 'Layers3', 'Semua API', 'Jelajahi koleksi endpoint'],
+            ['/contact', 'MessageCircle', 'Kontak', 'Hubungi pengembang']
+          ].map(([to, glyph, label, desc], i) => `<button data-nav="${to}" style="--i:${i}" class="m-item mobile-menu-link"><span class="mobile-menu-link-icon">${icon(glyph, 'h-5 w-5')}</span><span class="mobile-menu-link-copy"><span class="mobile-menu-link-title">${label}</span><span class="mobile-menu-link-desc">${desc}</span></span>${icon('ArrowUpRight', 'mobile-menu-arrow h-4 w-4')}</button>`).join('')}
+        </div>
+        <div class="mobile-menu-bottom">
+          <div class="mobile-menu-status"><span class="live-dot"></span><span><strong>API online</strong><small>Semua sistem siap digunakan</small></span></div>
+          <button id="mobile-theme-btn" class="mobile-theme-action">${icon(themeIcon, 'h-4 w-4')}<span>Ganti tema</span></button>
+        </div>
+        <button data-nav="/docs" style="--i:5" class="m-item btn btn-gold mobile-menu-cta w-full">${icon('Rocket', 'h-4 w-4')} Mulai sekarang</button>
+      </section>
     </div>
   </header>`;
 }
@@ -80,6 +98,19 @@ export function bindNavbar() {
 
   const mm = document.getElementById('mobile-menu');
   const mmBtn = document.getElementById('mobile-menu-btn');
+  const closeMobileMenu = () => {
+    if (!mm?.hasAttribute('data-open')) return;
+    mm.removeAttribute('data-open');
+    mm.setAttribute('aria-hidden', 'true');
+    mmBtn?.setAttribute('aria-expanded', 'false');
+    document.documentElement.classList.remove('menu-open');
+    mmBtn.innerHTML = icon('Ellipsis', 'h-5 w-5');
+    window.lucide?.createIcons({ attrs: { 'stroke-width': 2 } });
+  };
+  document.getElementById('mobile-menu-close')?.addEventListener('click', closeMobileMenu);
+  document.getElementById('mobile-menu-backdrop')?.addEventListener('click', closeMobileMenu);
+  mm?.querySelectorAll('[data-nav]').forEach((item) => item.addEventListener('click', closeMobileMenu));
+
   mmBtn?.addEventListener('click', () => {
     const open = !mm.hasAttribute('data-open');
     mm.toggleAttribute('data-open', open);
