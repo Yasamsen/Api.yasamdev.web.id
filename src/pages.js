@@ -484,7 +484,7 @@ export function renderWebInfo() {
   return `<section class="mx-auto max-w-5xl px-4 pb-20 pt-32 sm:px-8">
     <div class="mb-8"><span class="eyebrow">SYSTEM OVERVIEW</span><h1 class="mt-3 font-display text-4xl font-bold sm:text-5xl">Informasi <span class="text-gold">Web</span></h1><p class="mt-4 max-w-2xl text-sm leading-7 text-muted">Ringkasan kondisi runtime yang melayani website SamApi. Nilai CPU dan memori berlaku untuk instance server yang merespons permintaan ini.</p></div>
     <div class="mb-5 flex items-center gap-3 rounded-2xl border hair p-4"><span class="web-info-pulse"></span><div><strong class="block text-sm">Kondisi sistem</strong><span id="web-info-status" class="text-xs text-muted">Menghubungkan ke server…</span></div></div>
-    <div class="web-info-grid web-info-page-grid">
+    <div id="web-info-statistics" class="web-info-grid web-info-page-grid" aria-label="Statistik informasi web">
       <article class="web-info-card web-info-cpu-card"><span class="web-info-icon">${icon('Cpu','h-5 w-5')}</span><span class="web-info-label">CPU / Core</span><strong id="web-cpu">Memuat…</strong><div id="web-core-bars" class="web-core-bars" aria-label="Visual jumlah core CPU"></div><small id="web-cpu-sub">Core runtime server</small></article>
       <article class="web-info-card"><span class="web-info-icon">${icon('MemoryStick','h-5 w-5')}</span><span class="web-info-label">RAM Server</span><strong id="web-ram">Memuat…</strong><small id="web-ram-sub">Pemakaian proses</small></article>
       <article class="web-info-card"><span class="web-info-icon">${icon('Activity','h-5 w-5')}</span><span class="web-info-label">Uptime Proses</span><strong id="web-uptime">Memuat…</strong><small>Lama proses aktif pada instance ini</small></article>
@@ -495,6 +495,21 @@ export function renderWebInfo() {
 }
 
 export function bindWebInfo() {
+  // Guide attention to the statistics with a gentle, responsive scroll on entry.
+  // Respect reduced-motion preferences and avoid a sudden jump on small screens.
+  const stats = document.getElementById('web-info-statistics');
+  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  if (stats && !reduceMotion) {
+    window.setTimeout(() => {
+      if (!document.body.contains(stats)) return;
+      stats.scrollIntoView({ behavior: 'smooth', block: window.innerWidth < 640 ? 'center' : 'start' });
+      stats.querySelectorAll('.web-info-card').forEach((card, index) => {
+        card.classList.add('web-stat-enter');
+        card.style.setProperty('--stat-enter-delay', `${index * 100}ms`);
+      });
+    }, 450);
+  }
+
   const put = (id, value, animate = false) => {
     const el = document.getElementById(id);
     if (!el) return;

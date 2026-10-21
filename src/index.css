@@ -371,3 +371,9 @@ pre, code { overflow-wrap: normal; }
 .web-info-page-grid .web-core-bars{min-height:42px;gap:5px;padding:9px 10px}
 .web-info-page-grid .web-core-bar{height:24px}
 @media(prefers-reduced-motion:reduce){.web-core-bar i{animation:none}}
+
+/* Statistics page entry: subtle slide-up reveal, paired with smooth auto-scroll. */
+.web-info-page-grid .web-info-card.web-stat-enter{animation:webStatSlideIn .72s cubic-bezier(.2,.75,.25,1) both;animation-delay:var(--stat-enter-delay,0ms)}
+@keyframes webStatSlideIn{from{opacity:0;transform:translate3d(0,22px,0) scale(.985)}to{opacity:1;transform:translate3d(0,0,0) scale(1)}}
+@media(max-width:560px){.web-info-page-grid .web-info-card.web-stat-enter{animation-duration:.62s}}
+@media(prefers-reduced-motion:reduce){.web-info-page-grid .web-info-card.web-stat-enter{animation:none}}
