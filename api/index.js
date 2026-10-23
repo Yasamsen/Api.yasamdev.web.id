@@ -397,6 +397,71 @@ async function web2apkReadJson(response) {
   }
 }
 
+// Halaman untuk pengguna biasa: progres build, tombol Download APK, dan cara memasang
+function web2apkPageHtml(statusPath) {
+  const cfg = JSON.stringify({ status: statusPath }).replace(/</g, "\\u003c");
+  return `<!doctype html>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>Download APK</title>
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;background:#0b1120;color:#eef4ff;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+.card{width:min(100%,460px);background:#111b2e;border:1px solid #26354c;border-radius:22px;padding:26px;text-align:center}
+.logo{width:56px;height:56px;margin:0 auto 14px;border-radius:16px;background:#57d3a5;color:#05281d;display:grid;place-items:center;font-weight:900}
+h1{font-size:22px;margin:0 0 8px}p{color:#a8b6ca;line-height:1.6;margin:0 0 16px}
+.steps{list-style:none;margin:18px 0;padding:0;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;font-size:11px;color:#a8b6ca}
+.steps li{display:flex;flex-direction:column;align-items:center;gap:6px}
+.steps b{width:26px;height:26px;border-radius:50%;border:2px solid #26354c;display:grid;place-items:center;font-size:12px}
+.steps li.done b{background:#57d3a5;border-color:#57d3a5;color:#05281d}.steps li.cur b{border-color:#57d3a5;color:#57d3a5}
+.steps li.done,.steps li.cur{color:#eef4ff}
+.bar{height:4px;border-radius:4px;background:#26354c;overflow:hidden;position:relative}
+.bar i{position:absolute;inset:0 auto 0 0;width:35%;background:#57d3a5;border-radius:4px;animation:s 1.3s ease-in-out infinite}
+@keyframes s{0%{left:-35%}100%{left:100%}}
+.btn{display:block;margin:18px 0 6px;padding:16px;border-radius:12px;background:#57d3a5;color:#05281d;text-decoration:none;font-weight:900;font-size:17px}
+.guide{margin-top:18px;padding-top:16px;border-top:1px solid #26354c;text-align:left}
+.guide h2{font-size:15px;margin:0 0 8px}.guide ol{margin:0;padding-left:20px;color:#a8b6ca;font-size:13px;line-height:1.75}
+.err h1{color:#ff8f8f}[hidden]{display:none!important}
+</style></head><body><main class="card" id="card">
+<div class="logo">APK</div>
+<h1 id="title">Sedang membuat APK…</h1>
+<p id="msg">Mohon tunggu beberapa menit. Halaman ini diperbarui otomatis, jangan ditutup.</p>
+<ol class="steps" id="steps"><li><b>1</b>Terkirim</li><li><b>2</b>Antre</li><li><b>3</b>Membangun</li><li><b>4</b>Siap</li></ol>
+<div class="bar" id="bar"><i></i></div>
+<a class="btn" id="dl" hidden>⬇ Download APK</a>
+<section class="guide" id="guide" hidden><h2>Cara memasang di Android</h2><ol>
+<li>Ketuk <b>Download APK</b>. Jika browser menanyakan keamanan file, pilih <b>Tetap download</b>.</li>
+<li>Buka file dari notifikasi unduhan, atau lewat aplikasi <b>File/Download</b>.</li>
+<li>Jika muncul pesan ponsel tidak boleh memasang dari sumber ini, ketuk <b>Setelan</b> lalu aktifkan <b>Izinkan dari sumber ini</b>, kemudian kembali.</li>
+<li>Ketuk <b>Instal</b>. Jika muncul peringatan Play Protect, pilih <b>Tetap instal</b>.</li>
+<li>Selesai. Ketuk <b>Buka</b> untuk menjalankan aplikasi.</li></ol></section>
+</main>
+<script>
+var cfg=${cfg};
+var steps=document.querySelectorAll('#steps li');
+var map={waiting:1,queued:1,in_progress:2,success:4};
+var timer=null;
+function setStep(n){for(var i=0;i<steps.length;i++){steps[i].className=i<n?'done':(i===n?'cur':'');}}
+function stop(){if(timer)clearInterval(timer);document.getElementById('bar').hidden=true;}
+function tick(){
+  fetch(cfg.status,{cache:'no-store'}).then(function(r){return r.json();}).then(function(j){
+    if(!j||!j.status){document.getElementById('msg').textContent=(j&&j.message)||'Memeriksa status…';return;}
+    var d=j.data||{};
+    setStep(map[d.state]!==undefined?map[d.state]:1);
+    document.getElementById('msg').textContent=d.message||'';
+    if(d.state==='success'){
+      stop();setStep(4);
+      document.getElementById('title').textContent='APK siap diunduh!';
+      var a=document.getElementById('dl');a.href=d.downloadUrl;a.hidden=false;
+      document.getElementById('guide').hidden=false;
+    }else if(d.state==='failed'||d.state==='ready-expired'){
+      stop();document.getElementById('card').className='card err';
+      document.getElementById('title').textContent=d.state==='failed'?'Build gagal':'File kedaluwarsa';
+    }
+  }).catch(function(){document.getElementById('msg').textContent='Belum bisa memeriksa status, mencoba lagi…';});
+}
+timer=setInterval(tick,6000);tick();
+</script></body></html>`;
+}
+
 async function handleWeb2apk(req, res) {
   try {
     if (!["GET", "POST"].includes(req.method)) {
@@ -414,7 +479,7 @@ async function handleWeb2apk(req, res) {
     }
     const input = { ...(req.query || {}), ...(body || {}) };
 
-    // action otomatis: POST = build, GET = status (download dipakai lewat link otomatis)
+    // action otomatis: POST = build, GET = status
     const action = String(input.action || (req.method === "POST" ? "build" : "status")).trim().toLowerCase();
     const origin = web2apkOrigin(req);
 
@@ -463,19 +528,29 @@ async function handleWeb2apk(req, res) {
         });
       }
       const dispatchedAt = data.dispatchedAt || new Date().toISOString();
-      const name = web2apkSafeName(appName);
+      const qs = `after=${encodeURIComponent(dispatchedAt)}&name=${encodeURIComponent(web2apkSafeName(appName))}`;
       return res.status(200).json({
         status: true,
         source: "Web2APK",
         data: {
-          message: "Build diterima. Buka statusUrl lalu refresh sampai state = success, setelah itu buka downloadUrl untuk mengunduh APK.",
+          message: "Build diterima. Buka pageUrl di browser untuk melihat progres dan mengunduh APK.",
           appName,
           packageName,
-          statusUrl: `${origin}/api/web2apk?action=status&after=${encodeURIComponent(dispatchedAt)}&name=${encodeURIComponent(name)}`,
+          pageUrl: `${origin}/api/web2apk?action=page&${qs}`,
+          statusUrl: `${origin}/api/web2apk?action=status&${qs}`,
           dispatchedAt,
-          actionsUrl: data.actionsUrl || null,
         },
       });
+    }
+
+    // ---------- page (halaman download untuk pengguna) ----------
+    if (action === "page") {
+      const after = String(input.after || "").trim();
+      const name = web2apkSafeName(input.name);
+      const qs = (after && !isNaN(Date.parse(after)) ? `after=${encodeURIComponent(after)}&` : "") + `name=${encodeURIComponent(name)}`;
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(200).send(web2apkPageHtml(`/api/web2apk?action=status&${qs}`));
     }
 
     // ---------- status ----------
@@ -489,20 +564,22 @@ async function handleWeb2apk(req, res) {
       if (!upstream.ok || data.error) {
         return res.status(502).json({
           status: false,
-          message: "Gagal memeriksa status build di website Web2APK.",
+          message: "Gagal memeriksa status build.",
           error: data.error || `HTTP ${upstream.status}`,
         });
       }
+      let message = data.message;
+      if (data.state === "failed") message = "Build gagal. Silakan coba buat ulang beberapa saat lagi.";
+      if (data.state === "ready-expired") message = "File APK sudah kedaluwarsa. Silakan buat ulang.";
       return res.status(200).json({
         status: true,
         source: "Web2APK",
         data: {
           state: data.state,
-          message: data.message,
+          message,
           downloadUrl: data.state === "success"
             ? `${origin}/api/web2apk?action=download${name ? `&name=${encodeURIComponent(name)}` : ""}`
             : undefined,
-          actionsUrl: data.actionsUrl,
           expiresAt: data.expiresAt,
         },
       });
@@ -515,7 +592,7 @@ async function handleWeb2apk(req, res) {
         const text = (await upstream.text()).replace(/\s+/g, " ").slice(0, 200);
         return res.status(upstream.status === 404 ? 404 : 502).json({
           status: false,
-          message: "APK belum siap atau gagal diunduh dari website Web2APK.",
+          message: "APK belum siap atau gagal diunduh.",
           error: text || `HTTP ${upstream.status}`,
         });
       }
@@ -537,7 +614,7 @@ async function handleWeb2apk(req, res) {
   } catch (error) {
     return res.status(500).json({
       status: false,
-      message: "Terjadi kesalahan saat menghubungi website Web2APK.",
+      message: "Terjadi kesalahan saat memproses permintaan Web2APK.",
       error: error.message,
     });
   }
