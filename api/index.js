@@ -5,6 +5,7 @@ import formidable from "formidable";
 import fs from "fs";
 import QRCode from "qrcode";
 import { createHmac } from "node:crypto";
+import { inflateRawSync } from "node:zlib";
 
 import https from "https";
 import qs from "qs";
@@ -316,197 +317,220 @@ async function handleBrat(req, res) {
 }
 //apk
 // ===================== WEB2APK =====================
-const WEB2APK_BASE = "https://apk-82rl.vercel.app";
-const WEB2APK_MAX_ZIP_BYTES = 4400000; // batas response Vercel ~4,5 MB
+const WEB2APK_BASE = process.env.WEB2APK_BASE_URL || "https://apk-82rl.vercel.app";
+
+function web2apkIsHttps(value) {
+  try {
+    const u = new URL(value);
+    return u.protocol === "https:" && !!u.hostname && !u.username && !u.password;
+  } catch {
+    return false;
+  }
+}
+
+function web2apkRandomPackage() {
+  const abc = "abcdefghijklmnopqrstuvwxyz";
+  const all = abc + "0123456789";
+  let id = abc[Math.floor(Math.random() * abc.length)];
+  for (let i = 0; i < 7; i++) id += all[Math.floor(Math.random() * all.length)];
+  return `com.yasam.${id}`;
+}
+
+// Jika website mengirim ZIP artifact, ambil .apk di dalamnya. Jika sudah APK, kembalikan apa adanya.
+function web2apkUnwrapApk(buf) {
+  try {
+    let eocd = -1;
+    for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) {
+      if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+    }
+    if (eocd < 0) return buf;
+    const total = buf.readUInt16LE(eocd + 10);
+    let p = buf.readUInt32LE(eocd + 16);
+    for (let n = 0; n < total; n++) {
+      if (buf.readUInt32LE(p) !== 0x02014b50) break;
+      const method = buf.readUInt16LE(p + 10);
+      const compSize = buf.readUInt32LE(p + 20);
+      const nameLen = buf.readUInt16LE(p + 28);
+      const extraLen = buf.readUInt16LE(p + 30);
+      const commentLen = buf.readUInt16LE(p + 32);
+      const localOffset = buf.readUInt32LE(p + 42);
+      const name = buf.toString("utf8", p + 46, p + 46 + nameLen);
+      if (name.toLowerCase().endsWith(".apk")) {
+        const start = localOffset + 30 + buf.readUInt16LE(localOffset + 26) + buf.readUInt16LE(localOffset + 28);
+        const data = buf.subarray(start, start + compSize);
+        if (method === 0) return data;
+        if (method === 8) return inflateRawSync(data);
+        return buf;
+      }
+      p += 46 + nameLen + extraLen + commentLen;
+    }
+    return buf;
+  } catch {
+    return buf;
+  }
+}
+
+async function web2apkCall(path, options = {}) {
+  const response = await fetch(`${WEB2APK_BASE}${path}`, {
+    ...options,
+    headers: { Accept: "application/json", "User-Agent": "web2apk-client", ...(options.headers || {}) },
+    signal: AbortSignal.timeout(25000),
+  });
+  return response;
+}
 
 async function web2apkReadJson(response) {
-  const text = await response.text();
+  const raw = await response.text();
   try {
-    return JSON.parse(text);
+    return JSON.parse(raw);
   } catch {
-    return { error: text.replace(/\s+/g, " ").slice(0, 200) || `HTTP ${response.status}` };
+    return { error: raw.replace(/\s+/g, " ").slice(0, 200) || `HTTP ${response.status}` };
   }
-}
-
-async function web2apkStart(req, res) {
-  const body = req.body || {};
-  const url = String(body.url || "").trim();
-  const appName = String(body.appName || "").trim();
-  const packageName = String(body.packageName || body.packageId || "").trim();
-  const iconUrl = String(body.iconUrl || "").trim();
-
-  if (!url || !appName || !packageName) {
-    return res.status(400).json({
-      status: false,
-      message: "Parameter url, appName, dan packageName wajib diisi",
-      error: 'example: POST /api/web2apk dengan body {"url":"https://example.com","appName":"Contoh","packageName":"com.contoh.app"}',
-    });
-  }
-
-  let parsed;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return res.status(400).json({
-      status: false,
-      message: "URL website tidak valid",
-      error: 'example: "https://example.com"',
-    });
-  }
-  if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
-    return res.status(400).json({
-      status: false,
-      message: "URL harus HTTPS dan tanpa username/password",
-      error: 'example: "https://example.com"',
-    });
-  }
-  if (appName.length > 40 || /[<>\u0000-\u001f]/.test(appName)) {
-    return res.status(400).json({
-      status: false,
-      message: "Nama aplikasi maksimal 40 karakter dan tidak boleh mengandung < >",
-      error: 'example: "Contoh App"',
-    });
-  }
-  if (packageName.length > 120 || !/^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*){1,6}$/.test(packageName)) {
-    return res.status(400).json({
-      status: false,
-      message: "Package ID tidak valid (huruf kecil dan angka, dipisah titik, tanpa underscore)",
-      error: 'example: "com.namakamu.aplikasi"',
-    });
-  }
-  if (iconUrl) {
-    let iconParsed;
-    try {
-      iconParsed = new URL(iconUrl);
-    } catch {
-      return res.status(400).json({
-        status: false,
-        message: "URL ikon tidak valid",
-        error: 'example: "https://example.com/icon.png"',
-      });
-    }
-    if (iconParsed.protocol !== "https:" || iconParsed.username || iconParsed.password) {
-      return res.status(400).json({
-        status: false,
-        message: "URL ikon harus HTTPS tanpa username/password",
-        error: 'example: "https://example.com/icon.png"',
-      });
-    }
-  }
-
-  const upstream = await fetch(`${WEB2APK_BASE}/api/build`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ url, appName, packageName, iconUrl }),
-  });
-  const data = await web2apkReadJson(upstream);
-
-  if (!upstream.ok || !data.ok) {
-    return res.status(502).json({
-      status: false,
-      message: "Server build menolak permintaan",
-      error: data.error || `HTTP ${upstream.status}`,
-    });
-  }
-
-  return res.status(200).json({
-    status: true,
-    source: "Web2APK",
-    data: {
-      buildId: data.dispatchedAt,
-      state: "waiting",
-      actionsUrl: data.actionsUrl,
-      checkStatus: `/api/web2apk?id=${encodeURIComponent(data.dispatchedAt)}`,
-    },
-  });
-}
-
-async function web2apkStatus(req, res) {
-  const id = String(req.query?.id || "").trim();
-  if (!id || Number.isNaN(Date.parse(id))) {
-    return res.status(400).json({
-      status: false,
-      message: "Parameter id wajib diisi (nilai buildId dari hasil POST)",
-      error: 'example: "/api/web2apk?id=2026-10-20T10:00:00.000Z"',
-    });
-  }
-
-  const upstream = await fetch(`${WEB2APK_BASE}/api/status?after=${encodeURIComponent(id)}`, {
-    headers: { Accept: "application/json" },
-  });
-  const data = await web2apkReadJson(upstream);
-
-  if (!upstream.ok) {
-    return res.status(502).json({
-      status: false,
-      message: "Gagal mengambil status build",
-      error: data.error || `HTTP ${upstream.status}`,
-    });
-  }
-
-  const ready = data.state === "success";
-  return res.status(200).json({
-    status: true,
-    source: "Web2APK",
-    data: {
-      buildId: id,
-      state: data.state,
-      message: data.message,
-      actionsUrl: data.actionsUrl || null,
-      expiresAt: data.expiresAt || null,
-      downloadUrl: ready ? `${WEB2APK_BASE}/api/download` : null,
-      zipEndpoint: ready ? `/api/web2apk?id=${encodeURIComponent(id)}&download=1` : null,
-    },
-  });
-}
-
-async function web2apkDownload(req, res) {
-  const upstream = await fetch(`${WEB2APK_BASE}/api/download`);
-  if (!upstream.ok) {
-    return res.status(upstream.status === 404 ? 404 : 502).json({
-      status: false,
-      message: "ZIP belum siap atau sudah kedaluwarsa. Jalankan build lagi.",
-      error: (await upstream.text()).slice(0, 200) || `HTTP ${upstream.status}`,
-    });
-  }
-
-  const buffer = Buffer.from(await upstream.arrayBuffer());
-  if (buffer.length > WEB2APK_MAX_ZIP_BYTES) {
-    return res.status(413).json({
-      status: false,
-      message: "Ukuran ZIP terlalu besar untuk dikirim lewat serverless function, unduh langsung dari downloadUrl",
-      error: `${buffer.length} bytes, batas ${WEB2APK_MAX_ZIP_BYTES} bytes`,
-    });
-  }
-
-  res.setHeader("Content-Type", "application/zip");
-  res.setHeader("Content-Disposition", 'attachment; filename="Web2APK-Android.zip"');
-  res.setHeader("Cache-Control", "no-store");
-  return res.status(200).send(buffer);
 }
 
 async function handleWeb2apk(req, res) {
   try {
-    if (req.method === "POST") return await web2apkStart(req, res);
-    if (req.method === "GET") {
-      if (String(req.query?.download || "") === "1") return await web2apkDownload(req, res);
-      return await web2apkStatus(req, res);
+    if (!["GET", "POST"].includes(req.method)) {
+      res.setHeader("Allow", "GET, POST");
+      return res.status(405).json({
+        status: false,
+        message: "Metode tidak didukung. Gunakan GET atau POST.",
+        error: `Method ${req.method} not allowed`,
+      });
     }
-    return res.status(405).json({
+
+    let body = req.body;
+    if (typeof body === "string") {
+      try { body = JSON.parse(body); } catch { body = {}; }
+    }
+    const input = { ...(req.query || {}), ...(body || {}) };
+    const action = String(input.action || "build").trim().toLowerCase();
+
+    // ---------- action=build : POST ke website ----------
+    if (action === "build") {
+      if (req.method !== "POST") {
+        return res.status(405).json({
+          status: false,
+          message: "Action build harus memakai metode POST.",
+          error: 'example: POST /api/web2apk {"action":"build","url":"https://contoh.com","appName":"Aplikasi Saya"}',
+        });
+      }
+      const url = String(input.url || "").trim();
+      const appName = String(input.appName || "").trim();
+      const iconUrl = String(input.iconUrl || "").trim();
+      const iconData = String(input.iconData || "").trim();
+      const packageName = web2apkRandomPackage();
+
+      if (!url || !appName) {
+        return res.status(400).json({
+          status: false,
+          message: 'Parameter "url" dan "appName" wajib diisi.',
+          error: 'example: POST /api/web2apk {"action":"build","url":"https://contoh.com","appName":"Aplikasi Saya"}',
+        });
+      }
+      if (!web2apkIsHttps(url)) {
+        return res.status(400).json({ status: false, message: "Gunakan URL HTTPS yang valid tanpa username/password.", error: "Invalid url" });
+      }
+      if (appName.length > 40 || /[<>\u0000-\u001f]/.test(appName)) {
+        return res.status(400).json({ status: false, message: "Nama aplikasi maksimal 40 karakter dan tidak boleh berisi karakter khusus.", error: "Invalid appName" });
+      }
+      if (iconData && (iconData.length > 45000 || !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(iconData))) {
+        return res.status(400).json({ status: false, message: "Data ikon tidak valid atau terlalu besar. Gunakan JPEG base64 maksimal ±96x96 px.", error: "Invalid iconData" });
+      }
+      if (iconUrl && !web2apkIsHttps(iconUrl)) {
+        return res.status(400).json({ status: false, message: "URL ikon harus HTTPS tanpa username/password.", error: "Invalid iconUrl" });
+      }
+
+      const upstream = await web2apkCall("/api/build", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, appName, packageName, iconUrl: iconData ? "" : iconUrl, iconData }),
+      });
+      const data = await web2apkReadJson(upstream);
+      if (!upstream.ok || data.error) {
+        return res.status(upstream.status >= 400 && upstream.status < 600 ? upstream.status : 502).json({
+          status: false,
+          message: "Website Web2APK menolak permintaan build.",
+          error: data.error || `HTTP ${upstream.status}`,
+        });
+      }
+      const dispatchedAt = data.dispatchedAt || new Date().toISOString();
+      return res.status(200).json({
+        status: true,
+        source: "Web2APK",
+        data: {
+          action: "build",
+          message: "Permintaan build diterima. Cek progres dengan action=status.",
+          packageName,
+          dispatchedAt,
+          statusUrl: `/api/web2apk?action=status&after=${encodeURIComponent(dispatchedAt)}`,
+          actionsUrl: data.actionsUrl || null,
+        },
+      });
+    }
+
+    // ---------- action=status : GET ke website ----------
+    if (action === "status") {
+      const after = String(input.after || "").trim();
+      const upstream = await web2apkCall("/api/status" + (after ? `?after=${encodeURIComponent(after)}` : ""), {
+        headers: { "Cache-Control": "no-store" },
+      });
+      const data = await web2apkReadJson(upstream);
+      if (!upstream.ok || data.error) {
+        return res.status(502).json({
+          status: false,
+          message: "Gagal memeriksa status build di website Web2APK.",
+          error: data.error || `HTTP ${upstream.status}`,
+        });
+      }
+      return res.status(200).json({
+        status: true,
+        source: "Web2APK",
+        data: {
+          action: "status",
+          state: data.state,
+          message: data.message,
+          downloadUrl: data.state === "success" ? "/api/web2apk?action=download" : undefined,
+          actionsUrl: data.actionsUrl,
+          expiresAt: data.expiresAt,
+        },
+      });
+    }
+
+    // ---------- action=download : ambil dari website, kirim sebagai .apk ----------
+    if (action === "download") {
+      const upstream = await web2apkCall("/api/download", { headers: { Accept: "*/*" } });
+      if (!upstream.ok) {
+        const text = (await upstream.text()).replace(/\s+/g, " ").slice(0, 200);
+        return res.status(upstream.status === 404 ? 404 : 502).json({
+          status: false,
+          message: "APK belum siap atau gagal diunduh dari website Web2APK.",
+          error: text || `HTTP ${upstream.status}`,
+        });
+      }
+      const apk = web2apkUnwrapApk(Buffer.from(await upstream.arrayBuffer()));
+      const safe = String(input.name || "").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+      res.setHeader("Content-Type", "application/vnd.android.package-archive");
+      res.setHeader("Content-Disposition", `attachment; filename="${safe || "Web2APK-Android"}.apk"`);
+      res.setHeader("Content-Length", String(apk.length));
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(200).send(apk);
+    }
+
+    return res.status(400).json({
       status: false,
-      message: "Method tidak didukung, gunakan POST untuk mulai build atau GET untuk cek status/download",
-      error: 'example: GET "/api/web2apk?id=2026-10-20T10:00:00.000Z"',
+      message: 'Parameter "action" tidak valid. Gunakan build, status, atau download.',
+      error: 'example: "/api/web2apk?action=status"',
     });
   } catch (error) {
     return res.status(500).json({
       status: false,
-      message: "Gagal memproses build APK",
+      message: "Terjadi kesalahan saat menghubungi website Web2APK.",
       error: error.message,
     });
   }
 }
-// =================== END WEB2APK ===================
-// =================== END WEB2APK ===================
 //live walpeper 
 // ===================== MOTIONBGS =====================
 const MOTIONBGS_BASE = "https://motionbgs.com";
