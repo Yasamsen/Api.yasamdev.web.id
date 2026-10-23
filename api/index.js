@@ -336,6 +336,16 @@ function web2apkRandomPackage() {
   return `com.yasam.${id}`;
 }
 
+function web2apkSafeName(value) {
+  return String(value || "").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+}
+
+function web2apkOrigin(req) {
+  const proto = String(req.headers["x-forwarded-proto"] || "https").split(",")[0];
+  const host = String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0];
+  return `${proto}://${host}`;
+}
+
 // Jika website mengirim ZIP artifact, ambil .apk di dalamnya. Jika sudah APK, kembalikan apa adanya.
 function web2apkUnwrapApk(buf) {
   try {
@@ -371,12 +381,11 @@ function web2apkUnwrapApk(buf) {
 }
 
 async function web2apkCall(path, options = {}) {
-  const response = await fetch(`${WEB2APK_BASE}${path}`, {
+  return fetch(`${WEB2APK_BASE}${path}`, {
     ...options,
     headers: { Accept: "application/json", "User-Agent": "web2apk-client", ...(options.headers || {}) },
     signal: AbortSignal.timeout(25000),
   });
-  return response;
 }
 
 async function web2apkReadJson(response) {
@@ -404,47 +413,46 @@ async function handleWeb2apk(req, res) {
       try { body = JSON.parse(body); } catch { body = {}; }
     }
     const input = { ...(req.query || {}), ...(body || {}) };
-    const action = String(input.action || "build").trim().toLowerCase();
 
-    // ---------- action=build : POST ke website ----------
+    // action otomatis: POST = build, GET = status (download dipakai lewat link otomatis)
+    const action = String(input.action || (req.method === "POST" ? "build" : "status")).trim().toLowerCase();
+    const origin = web2apkOrigin(req);
+
+    // ---------- build ----------
     if (action === "build") {
       if (req.method !== "POST") {
         return res.status(405).json({
           status: false,
-          message: "Action build harus memakai metode POST.",
-          error: 'example: POST /api/web2apk {"action":"build","url":"https://contoh.com","appName":"Aplikasi Saya"}',
+          message: "Untuk membuat APK gunakan metode POST.",
+          error: 'example: POST /api/web2apk {"url":"https://contoh.com","appName":"Aplikasi Saya","iconUrl":"https://contoh.com/ikon.png"}',
         });
       }
       const url = String(input.url || "").trim();
       const appName = String(input.appName || "").trim();
       const iconUrl = String(input.iconUrl || "").trim();
-      const iconData = String(input.iconData || "").trim();
-      const packageName = web2apkRandomPackage();
 
-      if (!url || !appName) {
+      if (!url || !appName || !iconUrl) {
         return res.status(400).json({
           status: false,
-          message: 'Parameter "url" dan "appName" wajib diisi.',
-          error: 'example: POST /api/web2apk {"action":"build","url":"https://contoh.com","appName":"Aplikasi Saya"}',
+          message: 'Parameter "url", "appName", dan "iconUrl" wajib diisi.',
+          error: 'example: POST /api/web2apk {"url":"https://contoh.com","appName":"Aplikasi Saya","iconUrl":"https://contoh.com/ikon.png"}',
         });
       }
       if (!web2apkIsHttps(url)) {
-        return res.status(400).json({ status: false, message: "Gunakan URL HTTPS yang valid tanpa username/password.", error: "Invalid url" });
+        return res.status(400).json({ status: false, message: "Gunakan URL website HTTPS yang valid tanpa username/password.", error: "Invalid url" });
       }
       if (appName.length > 40 || /[<>\u0000-\u001f]/.test(appName)) {
         return res.status(400).json({ status: false, message: "Nama aplikasi maksimal 40 karakter dan tidak boleh berisi karakter khusus.", error: "Invalid appName" });
       }
-      if (iconData && (iconData.length > 45000 || !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(iconData))) {
-        return res.status(400).json({ status: false, message: "Data ikon tidak valid atau terlalu besar. Gunakan JPEG base64 maksimal ±96x96 px.", error: "Invalid iconData" });
-      }
-      if (iconUrl && !web2apkIsHttps(iconUrl)) {
-        return res.status(400).json({ status: false, message: "URL ikon harus HTTPS tanpa username/password.", error: "Invalid iconUrl" });
+      if (!web2apkIsHttps(iconUrl)) {
+        return res.status(400).json({ status: false, message: "URL ikon harus HTTPS (PNG/JPG) tanpa username/password.", error: "Invalid iconUrl" });
       }
 
+      const packageName = web2apkRandomPackage();
       const upstream = await web2apkCall("/api/build", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, appName, packageName, iconUrl: iconData ? "" : iconUrl, iconData }),
+        body: JSON.stringify({ url, appName, packageName, iconUrl, iconData: "" }),
       });
       const data = await web2apkReadJson(upstream);
       if (!upstream.ok || data.error) {
@@ -455,23 +463,25 @@ async function handleWeb2apk(req, res) {
         });
       }
       const dispatchedAt = data.dispatchedAt || new Date().toISOString();
+      const name = web2apkSafeName(appName);
       return res.status(200).json({
         status: true,
         source: "Web2APK",
         data: {
-          action: "build",
-          message: "Permintaan build diterima. Cek progres dengan action=status.",
+          message: "Build diterima. Buka statusUrl lalu refresh sampai state = success, setelah itu buka downloadUrl untuk mengunduh APK.",
+          appName,
           packageName,
+          statusUrl: `${origin}/api/web2apk?action=status&after=${encodeURIComponent(dispatchedAt)}&name=${encodeURIComponent(name)}`,
           dispatchedAt,
-          statusUrl: `/api/web2apk?action=status&after=${encodeURIComponent(dispatchedAt)}`,
           actionsUrl: data.actionsUrl || null,
         },
       });
     }
 
-    // ---------- action=status : GET ke website ----------
+    // ---------- status ----------
     if (action === "status") {
       const after = String(input.after || "").trim();
+      const name = web2apkSafeName(input.name);
       const upstream = await web2apkCall("/api/status" + (after ? `?after=${encodeURIComponent(after)}` : ""), {
         headers: { "Cache-Control": "no-store" },
       });
@@ -487,17 +497,18 @@ async function handleWeb2apk(req, res) {
         status: true,
         source: "Web2APK",
         data: {
-          action: "status",
           state: data.state,
           message: data.message,
-          downloadUrl: data.state === "success" ? "/api/web2apk?action=download" : undefined,
+          downloadUrl: data.state === "success"
+            ? `${origin}/api/web2apk?action=download${name ? `&name=${encodeURIComponent(name)}` : ""}`
+            : undefined,
           actionsUrl: data.actionsUrl,
           expiresAt: data.expiresAt,
         },
       });
     }
 
-    // ---------- action=download : ambil dari website, kirim sebagai .apk ----------
+    // ---------- download ----------
     if (action === "download") {
       const upstream = await web2apkCall("/api/download", { headers: { Accept: "*/*" } });
       if (!upstream.ok) {
@@ -509,7 +520,7 @@ async function handleWeb2apk(req, res) {
         });
       }
       const apk = web2apkUnwrapApk(Buffer.from(await upstream.arrayBuffer()));
-      const safe = String(input.name || "").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+      const safe = web2apkSafeName(input.name);
       res.setHeader("Content-Type", "application/vnd.android.package-archive");
       res.setHeader("Content-Disposition", `attachment; filename="${safe || "Web2APK-Android"}.apk"`);
       res.setHeader("Content-Length", String(apk.length));
@@ -520,8 +531,8 @@ async function handleWeb2apk(req, res) {
 
     return res.status(400).json({
       status: false,
-      message: 'Parameter "action" tidak valid. Gunakan build, status, atau download.',
-      error: 'example: "/api/web2apk?action=status"',
+      message: "Permintaan tidak dikenali. Kirim POST dengan url, appName, dan iconUrl untuk membuat APK.",
+      error: 'example: POST /api/web2apk {"url":"https://contoh.com","appName":"Aplikasi Saya","iconUrl":"https://contoh.com/ikon.png"}',
     });
   } catch (error) {
     return res.status(500).json({
