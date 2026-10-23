@@ -2,7 +2,7 @@ export default {
   slug: "web2apk",
   name: "Web2APK",
   description:
-    "Ubah website HTTPS menjadi APK Android (WebView). Kirim POST berisi url, appName, dan iconUrl. Package ID dibuat otomatis, lalu buka statusUrl dari hasilnya sampai selesai dan unduh APK lewat downloadUrl.",
+    "Ubah website HTTPS menjadi APK Android (WebView). Kirim POST berisi url, appName, dan iconUrl. Hasilnya berisi pageUrl, yaitu halaman yang menampilkan progres, tombol Download APK, dan panduan memasang untuk pengguna biasa.",
   category: "Tools",
   method: "POST",
   endpoint: "/api/web2apk",
@@ -34,12 +34,12 @@ export default {
     status: true,
     source: "Web2APK",
     data: {
-      message: "Build diterima. Buka statusUrl lalu refresh sampai state = success, setelah itu buka downloadUrl untuk mengunduh APK.",
+      message: "Build diterima. Buka pageUrl di browser untuk melihat progres dan mengunduh APK.",
       appName: "Aplikasi Saya",
       packageName: "com.yasam.k3x9qm2a",
-      statusUrl: "https://api.yasamdev.web.id/api/web2apk?action=status&after=2026-10-23T08%3A15%3A00.000Z&name=Aplikasi-Saya",
-      dispatchedAt: "2026-10-23T08:15:00.000Z",
-      actionsUrl: "https://github.com/pemilik/repo/actions",
+      pageUrl: "https://api.yasamdev.web.id/api/web2apk?action=page&after=2026-10-23T01%3A10%3A14.386Z&name=Aplikasi-Saya",
+      statusUrl: "https://api.yasamdev.web.id/api/web2apk?action=status&after=2026-10-23T01%3A10%3A14.386Z&name=Aplikasi-Saya",
+      dispatchedAt: "2026-10-23T01:10:14.386Z",
     },
   },
   responseFields: [
@@ -48,9 +48,9 @@ export default {
     { name: "data.message", type: "string", description: "Petunjuk langkah berikutnya." },
     { name: "data.appName", type: "string", description: "Nama aplikasi yang dibuild." },
     { name: "data.packageName", type: "string", description: "Package ID otomatis (com.yasam.xxxxxxxx)." },
-    { name: "data.statusUrl", type: "string", description: "Link cek progres build. Buka dan refresh sampai state = success, lalu muncul downloadUrl." },
+    { name: "data.pageUrl", type: "string", description: "Halaman untuk pengguna: progres build, tombol Download APK, dan cara memasang. Buka di browser." },
+    { name: "data.statusUrl", type: "string", description: "Versi JSON dari status build untuk developer. Saat state = success berisi downloadUrl." },
     { name: "data.dispatchedAt", type: "string", description: "Waktu build dikirim (ISO)." },
-    { name: "data.actionsUrl", type: "string", description: "Link detail build di GitHub Actions." },
   ],
   exampleRequest: "https://api.yasamdev.web.id/api/web2apk",
 };
