@@ -1855,53 +1855,67 @@ async function handleUnblurImg(req, res) {
     }
 }
 //nsfwv1
-async function handleNsfw1RandomEndpoint(req, res) {
+async function handleHentaiRandom(req, res) {
+  const API_JSON = "https://raw.githubusercontent.com/Yasamsen/media-repo/refs/heads/main/hentaiimg/api.json";
+  const MIME_TYPES = {
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    webp: "image/webp",
+    avif: "image/avif",
+    mp4: "video/mp4",
+    webm: "video/webm",
+    mov: "video/quicktime",
+    m4v: "video/x-m4v"
+  };
+
+  if (req.method !== "GET") {
+    return res.status(405).json({ status: false, message: "Method not allowed" });
+  }
+
   try {
-    if (req.method !== "GET") {
-      return res.status(405).json({
-        status: false,
-        message: "Method tidak diizinkan. Gunakan GET.",
-        error: "Method Not Allowed"
-      });
+    const listResponse = await fetch(API_JSON, { cache: "no-store" });
+
+    if (!listResponse.ok) {
+      return res.status(502).json({ status: false, message: "Gagal mengambil api.json" });
     }
 
-    const sourceUrl =
-      "https://raw.githubusercontent.com/Yasamsen/media-repo/main/hentaiimg/api.json";
+    const json = await listResponse.json();
 
-    const response = await fetch(sourceUrl);
-
-    if (!response.ok) {
-      throw new Error(
-        `Gagal mengambil Nsfw.json. HTTP ${response.status}`
-      );
+    if (!Array.isArray(json.data) || json.data.length === 0) {
+      return res.status(404).json({ status: false, message: "Media tidak ditemukan" });
     }
 
-    const json = await response.json();
+    const media = json.data[Math.floor(Math.random() * json.data.length)];
 
-    if (!json || !Array.isArray(json.data) || json.data.length === 0) {
-      throw new Error("Data Nsfw.json kosong atau format tidak valid.");
+    if (typeof media !== "string") {
+      return res.status(500).json({ status: false, message: "URL media tidak valid" });
     }
 
-    const randomIndex = Math.floor(Math.random() * json.data.length);
-    const randomUrl = json.data[randomIndex];
+    const cleanUrl = media.split("?")[0].toLowerCase();
+    const extension = cleanUrl.split(".").pop();
+    const contentType = MIME_TYPES[extension];
 
-    if (typeof randomUrl !== "string" || !randomUrl.trim()) {
-      throw new Error("URL random yang dipilih tidak valid.");
+    if (!contentType) {
+      return res.status(415).json({ status: false, message: "Format media tidak didukung", url: media });
     }
 
-    return res.status(200).json({
-      status: true,
-      source: "NSFW Random",
-      data: {
-        url: randomUrl
-      }
-    });
+    const mediaResponse = await fetch(media);
+
+    if (!mediaResponse.ok) {
+      return res.status(502).json({ status: false, message: "Gagal mengambil media", http_status: mediaResponse.status });
+    }
+
+    const buffer = Buffer.from(await mediaResponse.arrayBuffer());
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+
+    return res.status(200).send(buffer);
   } catch (error) {
-    return res.status(500).json({
-      status: false,
-      message: "Gagal mengambil data NSFW secara random.",
-      error: error.message
-    });
+    console.error("ALYA MEDIA ERROR:", error);
+    return res.status(502).json({ status: false, message: "Gagal mengambil media", error: error.message });
   }
 }
 //nsfw
@@ -12662,7 +12676,7 @@ case "quotes-anime":
   case "zerochan":
   return handleZerochan(req, res);
   case "nsfw-random": return handleNsfwRandomEndpoint(req, res);
-  case "nsfw-random1": return handleNsfw1RandomEndpoint(req, res);
+  case "nsfw-random1": return handleHentaiRandomEndpoint(req, res);
 case "upscale-image":
   return handleUpscaleImage(req, res);
   case "photoeditor-ai":

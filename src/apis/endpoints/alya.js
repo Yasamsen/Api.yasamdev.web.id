@@ -15,11 +15,11 @@ export default {
     status: true,
     creator: "yasamDev",
     source:
-      "https://raw.githubusercontent.com/Yasamsen/media-repo/main/alya/api.json",
+      "https:///Xxxxxxx",
     total: 33,
     type: "image",
     url:
-      "https://raw.githubusercontent.com/Yasamsen/media-repo/main/alya/033.jpg"
+      "https:///Xxxxxxx"
   },
 
   responseFields: [

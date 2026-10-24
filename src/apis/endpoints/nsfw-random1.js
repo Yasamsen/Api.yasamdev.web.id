@@ -1,40 +1,57 @@
 export default {
   slug: "nsfw-random1",
-  name: "NSFW Random V-1",
-  description: "Mengambil satu URL media secara acak dari koleksi Nsfw.json.",
+  name: "NSFW-RANDOM V1",
+  description:
+    "Mengambil gambar atau video secara acak dari media repository Hentai.",
+
   category: "Media",
   method: "GET",
   endpoint: "/api/nsfw-random1",
-  icon: "Shuffle",
+  icon: "Images",
+
   parameters: [],
+
   responseExample: {
     status: true,
-    source: "NSFW Random",
-    data: {
-      url: "https://example.com/random-media.jpg"
-    }
+    creator: "yasamDev",
+    source:
+      "https:///Xxxxxxx",
+    total: 33,
+    type: "image",
+    url:
+      "https:///Xxxxxxx"
   },
+
   responseFields: [
     {
       name: "status",
       type: "boolean",
-      description: "Menunjukkan apakah request berhasil."
+      description: "Status request."
+    },
+    {
+      name: "creator",
+      type: "string",
+      description: "Creator media."
     },
     {
       name: "source",
       type: "string",
-      description: "Nama sumber endpoint."
+      description: "Sumber api.json."
     },
     {
-      name: "data",
-      type: "object",
-      description: "Data media random."
+      name: "total",
+      type: "number",
+      description: "Jumlah media."
     },
     {
-      name: "data.url",
+      name: "type",
+      type: "string",
+      description: "Tipe media: image atau video."
+    },
+    {
+      name: "url",
       type: "string",
       description: "URL media yang dipilih secara acak."
     }
-  ],
-  exampleRequest: "https://api.yasamdev.web.id/api/nsfw-random1"
+  ]
 };
