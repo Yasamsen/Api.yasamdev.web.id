@@ -1856,7 +1856,7 @@ async function handleUnblurImg(req, res) {
 }
 //nsfwv1
 async function handleHentaiRandom(req, res) {
-  const API_JSON = "https://raw.githubusercontent.com/Yasamsen/media-repo/refs/heads/main/hentaiimg/api.json";
+  const API_JSON = "https://raw.githubusercontent.com/Yasamsen/media-repo/main/hentaiimg/api.json";
   const MIME_TYPES = {
     jpg: "image/jpeg",
     jpeg: "image/jpeg",
@@ -12676,7 +12676,7 @@ case "quotes-anime":
   case "zerochan":
   return handleZerochan(req, res);
   case "nsfw-random": return handleNsfwRandomEndpoint(req, res);
-  case "nsfw-random1": return handleHentaiRandomEndpoint(req, res);
+  case "nsfw-random1": return handleHentaiRandom(req, res);
 case "upscale-image":
   return handleUpscaleImage(req, res);
   case "photoeditor-ai":

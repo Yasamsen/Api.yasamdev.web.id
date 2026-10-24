@@ -69,7 +69,7 @@ const SLUGS = {
   tools: ['ssweb', 'qrcode', 'tempmail', 'tourl', 'web2apk', 'check-host', 'ip-lookup', 'add-subdomain'],
   social: ['reaction-wa', 'alight-send', 'alight-verify'],
   fun: ['alya', 'quotes-anime', 'waifuimg', 'zerochan', 'alphacoders-random', 'deviantart-random'],
-  adult: ['nsfw-random', 'tai', 'imgviral'],
+  adult: ['nsfw-random', 'nsfw-random1', 'tai', 'imgviral'],
 };
 const SLUG_TO_ID = Object.fromEntries(Object.entries(SLUGS).flatMap(([id, list]) => list.map((slug) => [slug, id])));
 
