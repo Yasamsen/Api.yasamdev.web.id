@@ -1,5 +1,6 @@
 import { toggleTheme, getTheme } from './theme.js';
-import { apiDefinitions } from './apis/registry.js';
+import { apiDefinitions, getCategories } from './apis/registry.js';
+import { categoryById, catTile } from './categories.js';
 import { BASE_URL, esc, icon } from './utils.js';
 import { creatorLinks, creatorName, brandIcon } from './creator.js';
 
@@ -32,9 +33,11 @@ export function renderNavbar(path) {
           <button data-nav="/" class="navlink ${path === '/' ? 'is-active' : ''}">Home</button>
           <div class="relative" id="api-menu-wrap">
             <button id="api-menu-btn" class="navlink flex items-center gap-1 ${isDocs ? 'is-active' : ''}" aria-haspopup="true" aria-expanded="false">APIs ${icon('ChevronDown', 'chev h-3.5 w-3.5')}</button>
-            <div id="api-menu" class="menu-panel absolute left-0 top-12 w-56 p-1.5">
-              <button data-nav="/docs" class="${dd}">${icon('BookOpen', 'h-4 w-4 text-gold')} All APIs</button>
-              <button data-nav="/docs/instagram" class="${dd}">${icon('Activity', 'h-4 w-4 text-gold')} Popular APIs</button>
+            <div id="api-menu" class="menu-panel absolute left-0 top-12 w-72 p-1.5">
+              <button data-nav="/docs" data-docs-cat="" class="${dd}">${icon('LayoutGrid', 'h-4 w-4 text-gold')} <span class="flex-1">Semua API</span><span class="catcount">${apiDefinitions.length}</span></button>
+              <div class="my-1.5 h-[2px] bg-fg/10"></div>
+              <p class="px-3 pb-1 pt-1 text-[10px] font-extrabold uppercase tracking-wider text-dim">Pilih kategori</p>
+              <div class="max-h-[56vh] overflow-y-auto">${getCategories().map((c) => `<button data-nav="/docs" data-docs-cat="${c.id}" class="${dd}">${catTile(c, 'h-7 w-7 !rounded-lg', 'h-3.5 w-3.5')}<span class="flex-1 truncate">${esc(c.label)}</span><span class="text-[11px] font-bold text-dim">${c.count}</span></button>`).join('')}</div>
             </div>
           </div>
           <button data-nav="/docs" class="navlink ${isDocs ? 'is-active' : ''}">Documentation</button>
@@ -45,38 +48,20 @@ export function renderNavbar(path) {
           <div class="mr-3 hidden items-center gap-2 lg:flex"><span class="h-1.5 w-1.5 rounded-full bg-ok"></span><span class="text-xs font-semibold text-muted">API online</span></div>
           <button id="theme-btn" class="iconbtn" aria-label="Toggle color theme">${icon(themeIcon, 'h-[17px] w-[17px]')}</button>
           <button data-nav="/docs" class="btn btn-gold btn-sm ml-1 hidden md:inline-flex">Get started</button>
-          <button id="mobile-menu-btn" class="iconbtn mobile-menu-trigger md:hidden" aria-label="Buka menu navigasi" title="Menu" aria-expanded="false">${icon('Ellipsis', 'h-5 w-5')}</button>
+          <button id="mobile-menu-btn" class="iconbtn md:hidden" aria-label="Toggle menu" aria-expanded="false">${icon('Menu', 'h-5 w-5')}</button>
         </div>
       </div>
     </div>
 
     <div id="mobile-menu" class="md:hidden" aria-hidden="true">
-      <button id="mobile-menu-backdrop" class="mobile-menu-backdrop" aria-label="Tutup menu"></button>
-      <section class="mobile-menu-sheet" role="dialog" aria-modal="true" aria-label="Menu navigasi">
-        <div class="mobile-menu-heading">
-          <div class="flex items-center gap-3">
-            <span class="logo-mark">${icon('Zap', 'h-3.5 w-3.5 fill-current')}</span>
-            <div>
-              <p class="font-display text-xl leading-tight">Menu <span class="text-gold">SamApi</span></p>
-              <p class="mt-1 text-xs text-muted">Jelajahi layanan API</p>
-            </div>
-          </div>
-          <button id="mobile-menu-close" class="iconbtn mobile-menu-close" aria-label="Tutup menu">${icon('X', 'h-4 w-4')}</button>
+      <div class="mx-auto flex max-w-md flex-col">
+        ${[['/', 'Home'], ['/docs', 'Documentation'], ['/docs', 'All APIs'], ['/contact', 'Contact']].map(([to, label], i) => `<button data-nav="${to}" style="--i:${i}" class="m-item font-display hair border-b-2 py-5 text-left text-2xl">${label}</button>`).join('')}
+        <div style="--i:4" class="m-item mt-8 flex items-center justify-between">
+          <div class="flex items-center gap-2"><span class="h-1.5 w-1.5 rounded-full bg-ok"></span><span class="text-xs font-semibold text-muted">API online</span></div>
+          <button id="mobile-theme-btn" class="flex items-center gap-2 text-sm text-muted">${icon(themeIcon, 'h-4 w-4')} Theme</button>
         </div>
-        <div class="mobile-menu-links">
-          ${[
-            ['/', 'House', 'Beranda', 'Kembali ke halaman utama'],
-            ['/docs', 'BookOpen', 'Dokumentasi', 'Lihat semua endpoint API'],
-            ['/info', 'ChartNoAxesCombined', 'Informasi Web', 'CPU, RAM, uptime dan statistik web'],
-            ['/contact', 'MessageCircle', 'Kontak', 'Hubungi pengembang']
-          ].map(([to, glyph, label, desc], i) => `<button data-nav="${to}" style="--i:${i}" class="m-item mobile-menu-link"><span class="mobile-menu-link-icon">${icon(glyph, 'h-5 w-5')}</span><span class="mobile-menu-link-copy"><span class="mobile-menu-link-title">${label}</span><span class="mobile-menu-link-desc">${desc}</span></span>${icon('ArrowUpRight', 'mobile-menu-arrow h-4 w-4')}</button>`).join('')}
-        </div>
-        <div class="mobile-menu-bottom">
-          <div class="mobile-menu-status"><span class="live-dot"></span><span><strong>API online</strong><small>Semua sistem siap digunakan</small></span></div>
-          <button id="mobile-theme-btn" class="mobile-theme-action">${icon(themeIcon, 'h-4 w-4')}<span>Ganti tema</span></button>
-        </div>
-        <button data-nav="/docs" style="--i:5" class="m-item btn btn-gold mobile-menu-cta w-full">${icon('Rocket', 'h-4 w-4')} Mulai sekarang</button>
-      </section>
+        <button data-nav="/docs" style="--i:5" class="m-item btn btn-gold mt-8 w-full">Get started</button>
+      </div>
     </div>
   </header>`;
 }
@@ -98,26 +83,13 @@ export function bindNavbar() {
 
   const mm = document.getElementById('mobile-menu');
   const mmBtn = document.getElementById('mobile-menu-btn');
-  const closeMobileMenu = () => {
-    if (!mm?.hasAttribute('data-open')) return;
-    mm.removeAttribute('data-open');
-    mm.setAttribute('aria-hidden', 'true');
-    mmBtn?.setAttribute('aria-expanded', 'false');
-    document.documentElement.classList.remove('menu-open');
-    mmBtn.innerHTML = icon('Ellipsis', 'h-5 w-5');
-    window.lucide?.createIcons({ attrs: { 'stroke-width': 2 } });
-  };
-  document.getElementById('mobile-menu-close')?.addEventListener('click', closeMobileMenu);
-  document.getElementById('mobile-menu-backdrop')?.addEventListener('click', closeMobileMenu);
-  mm?.querySelectorAll('[data-nav]').forEach((item) => item.addEventListener('click', closeMobileMenu));
-
   mmBtn?.addEventListener('click', () => {
     const open = !mm.hasAttribute('data-open');
     mm.toggleAttribute('data-open', open);
     mm.setAttribute('aria-hidden', String(!open));
     mmBtn.setAttribute('aria-expanded', String(open));
     document.documentElement.classList.toggle('menu-open', open);
-    mmBtn.innerHTML = icon(open ? 'X' : 'Ellipsis', 'h-5 w-5');
+    mmBtn.innerHTML = icon(open ? 'X' : 'Menu', 'h-5 w-5');
     window.lucide?.createIcons({ attrs: { 'stroke-width': 2 } });
   });
 }
@@ -151,8 +123,9 @@ export function apiIcon(api, size = 'md') {
 
 export function renderApiCard(api, i = 0) {
   const get = api.method === 'GET';
+  const cat = categoryById(api.categoryId);
   return `<div class="reveal" style="--d:${(i % 3) * 70}ms"><article class="card flex h-full flex-col p-5 sm:p-6">
-    <div class="mb-5 flex items-center justify-between gap-3"><div class="iconbox h-10 w-10">${apiIcon(api)}</div><span class="category-pill"><span class="category-dot"></span>${esc(api.category)}</span></div>
+    <div class="mb-5 flex items-center justify-between"><div class="iconbox h-10 w-10" style="--tile:${cat.tile};--tile-fg:${cat.fg}">${apiIcon(api)}</div><span class="flex items-center gap-2">${cat.adult ? '<span class="badge !bg-red !text-white">18+</span>' : ''}<span class="catbadge"><i class="dot" style="--tile:${cat.tile}"></i>${esc(cat.label)}</span></span></div>
     <h3 class="mb-1.5 text-base font-bold tracking-[-0.01em]">${esc(api.name)}</h3>
     <p class="mb-6 min-h-[48px] text-sm leading-6 text-muted">${esc(api.description)}</p>
     <div class="mt-auto flex items-center justify-between gap-2 border-t hair pt-4">
