@@ -50,3 +50,29 @@ Kirim API key lewat header `x-api-key`. Body JSON berisi `subdomain` (label saja
 
 `POST /api/check-host` — tanpa API key. Body JSON: `{"url":"example.com"}`, opsional `checks` (`dns,ip,http,https,ports,whois,security`) dan `ports` (port umum saja).
 Tidak butuh environment variable. IP privat/internal diblokir (anti-SSRF), ada rate limit 15 request/menit per IP, dan total waktu dibatasi ±9 detik.
+
+
+## Kategori (otomatis & rapi)
+
+Kategori ditampilkan dari `src/categories.js`, bukan dari teks `category` mentah di tiap file. Jadi 24 label lama
+(Tools, Utility, Information, Media, Image, ...) dirapikan menjadi 11 kategori yang jelas.
+
+- **Endpoint baru** — cukup isi `category` seperti biasa. Nilai yang dikenal (mis. `Downloader`, `AI`, `Music`, `Tools`) dipetakan otomatis.
+  Kamu juga bisa langsung menulis id/label kategori baru (`downloader`, `Gambar & Foto`, ...).
+- **Mau memastikan posisinya** — tambahkan slug endpoint ke daftar `SLUGS` di `src/categories.js`.
+- **Label yang benar-benar baru** — kategori dibuat otomatis (ikon folder) dan muncul di beranda, dokumentasi, dan sidebar.
+- **Mengubah teks/ikon/warna kategori** — edit array `CATEGORIES` di `src/categories.js`.
+
+
+## Endpoint `rudder-chat` (AI Chat)
+
+`GET /api/rudder-chat?message=Halo` (atau `POST` dengan body JSON `{"message":"Halo"}`). Opsional `sessionId` untuk melanjutkan percakapan.
+Atur environment variables berikut di Vercel (Project → Settings → Environment Variables), lalu **redeploy**:
+
+- `RUDDER_USER_ID`: user id akun rudder.chat.
+- `RUDDER_COOKIE_C0`: isi cookie `sb-auth-auth-token.0` (export dari browser yang sedang login).
+- `RUDDER_COOKIE_C1`: isi cookie `sb-auth-auth-token.1`.
+- `RUDDER_TH_WHO`: isi cookie `th_who` (opsional).
+
+Rate limit 10 request/menit per IP. Jika muncul error "cookie/token kedaluwarsa", ambil cookie baru dari browser lalu perbarui env var.
+Respons AI bisa memakan waktu >10 detik; jika di Vercel sering timeout, naikkan `maxDuration` fungsi `api/index.js` di `vercel.json`.

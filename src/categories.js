@@ -53,7 +53,7 @@ export const CATEGORIES = [
     keywords: 'anime wallpaper acak random' },
   { id: 'adult', label: 'Dewasa 18+', short: 'Khusus usia 18 tahun ke atas', icon: 'shield-alert', tile: '#2a2250', fg: '#ffffff', adult: true,
     desc: 'Konten dewasa. Hanya untuk pengguna berusia 18 tahun ke atas.',
-    hint: 'kamu ingin sensasi kenikmatan',
+    hint: 'kamu ingin nonton bareng pacar',
     keywords: 'nsfw 18+ dewasa' },
 ];
 
@@ -68,7 +68,7 @@ const SLUGS = {
   info: ['weather', 'earthquake', 'wikipedia', 'mealdb', 'pinterest-search', 'tiktok-search'],
   tools: ['ssweb', 'qrcode', 'tempmail', 'tourl', 'web2apk', 'check-host', 'ip-lookup', 'add-subdomain'],
   social: ['reaction-wa', 'alight-send', 'alight-verify'],
-  fun: ['alya', 'quotes-anime', 'waifuimg', 'zerochan', 'alphacoders-random', 'deviantart-random',],
+  fun: ['alya', 'quotes-anime', 'waifuimg', 'zerochan', 'alphacoders-random', 'deviantart-random'],
   adult: ['nsfw-random', 'tai', 'imgviral'],
 };
 const SLUG_TO_ID = Object.fromEntries(Object.entries(SLUGS).flatMap(([id, list]) => list.map((slug) => [slug, id])));

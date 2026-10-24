@@ -16,10 +16,10 @@ import { createHash } from "node:crypto";
 import dns from "node:dns/promises";
 import Busboy from "busboy";
 import net from "node:net";
+import nodeOs from "node:os";
 import http from "node:http";
 import tls from "node:tls";
 import zlib from "node:zlib";
-import os from "node:os";
 // Semua endpoint digabung ke 1 file supaya hanya dihitung 1 Serverless
 // Function oleh Vercel (Hobby plan cuma boleh maksimal 12 function).
 // Body parser dimatikan secara global karena nano-banana butuh raw stream
@@ -618,6 +618,7 @@ async function handleWeb2apk(req, res) {
     });
   }
 }
+// =================== END WEB2APK ===================
 // =================== END WEB2APK ===================
 // =================== END WEB2APK ===================
 //live walpeper 
@@ -1904,208 +1905,94 @@ async function handleNsfwRandomEndpoint(req, res) {
   }
 }
 //Upscale omg
-async function handleCompressImage(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.status(204).end();
-  if (req.method !== "POST") return res.status(405).json({ status: false, message: "Gunakan POST dengan multipart/form-data." });
-
-  try {
-    const declared = Number(req.headers["content-length"]) || 0;
-    if (declared > 4_200_000) return res.status(413).json({ status: false, message: "Ukuran gambar maksimal 4 MB." });
-    if (!/multipart\/form-data/i.test(String(req.headers["content-type"] || ""))) {
-      return res.status(400).json({ status: false, message: "Kirim file pada field image dengan multipart/form-data." });
-    }
-    const parsed = await new Promise((resolve, reject) => {
-      let bb;
-      try { bb = Busboy({ headers: req.headers, limits: { files: 1, fileSize: 4_000_000, fields: 8 } }); }
-      catch (error) { reject(error); return; }
-      let image = null, tooLarge = false;
-      const fields = {};
-      bb.on("field", (name, value) => { fields[name] = value; });
-      bb.on("file", (name, stream, info) => {
-        if (name !== "image") { stream.resume(); return; }
-        const chunks = [];
-        stream.on("data", chunk => chunks.push(chunk));
-        stream.on("limit", () => { tooLarge = true; });
-        stream.on("end", () => { image = { buffer: Buffer.concat(chunks), filename: info.filename, mimetype: info.mimeType }; });
-      });
-      bb.on("error", reject);
-      bb.on("close", () => tooLarge ? reject(Object.assign(new Error("Ukuran gambar maksimal 4 MB."), { code: "TOO_LARGE" })) : resolve({ image, fields }));
-      req.pipe(bb);
-    });
-    if (!parsed.image?.buffer?.length) return res.status(400).json({ status: false, message: "File gambar wajib diunggah pada field image." });
-    if (!/^image\/(png|jpeg|webp|gif|avif)$/i.test(parsed.image.mimetype || "")) {
-      return res.status(415).json({ status: false, message: "Format gambar harus PNG, JPG, WEBP, GIF, atau AVIF." });
-    }
-
-    const format = String(parsed.fields.format || "original").toLowerCase();
-    const mode = String(parsed.fields.mode || "balanced").toLowerCase();
-    const quality = Number(parsed.fields.quality || 80);
-    if (!["original", "png", "jpg", "jpeg", "webp", "avif"].includes(format)) return res.status(400).json({ status: false, message: "Format hasil tidak didukung." });
-    if (!["balanced", "smallest", "lossless"].includes(mode)) return res.status(400).json({ status: false, message: "Mode kompresi tidak valid." });
-    if (!Number.isFinite(quality) || quality < 1 || quality > 100) return res.status(400).json({ status: false, message: "quality harus berupa angka 1–100." });
-
-    const headers = {
-      origin: "https://tools.cleanpng.com",
-      referer: "https://tools.cleanpng.com/image-compressor/",
-      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    };
-    const uploadForm = new FormData();
-    uploadForm.append("image", parsed.image.buffer, { filename: parsed.image.filename || "image.png", contentType: parsed.image.mimetype || "image/png" });
-    const uploadResponse = await axios.post(
-      "https://tools.cleanpng.com/image-compressor/upload.php",
-      uploadForm,
-      { headers: { ...headers, ...uploadForm.getHeaders() }, timeout: 60000, maxBodyLength: 5_000_000 }
-    );
-    const uploaded = uploadResponse.data || {};
-    const imagePath = uploaded.path || uploaded.file_path || uploaded.filename || uploaded.data?.path;
-    if (!uploaded.success || !imagePath) {
-      return res.status(502).json({ status: false, message: "Layanan CleanPNG belum mengembalikan path upload yang dikenali.", error: uploaded });
-    }
-
-    const compressForm = new FormData();
-    compressForm.append("path", imagePath);
-    compressForm.append("format", format === "original" ? "original" : (format === "jpg" ? "jpeg" : format));
-    compressForm.append("mode", mode);
-    compressForm.append("quality", String(quality));
-    const resultResponse = await axios.post(
-      "https://tools.cleanpng.com/image-compressor/compress.php",
-      compressForm,
-      { headers: { ...headers, ...compressForm.getHeaders() }, timeout: 120000, maxBodyLength: 1_000_000 }
-    );
-    const result = resultResponse.data || {};
-    const rawUrl = result.url || result.resultUrl || result.result_url || result.data?.url || result.data?.resultUrl;
-    if (!result.success || !rawUrl) {
-      return res.status(502).json({ status: false, message: "CleanPNG tidak mengembalikan URL hasil yang dikenali. Kemungkinan endpoint upstream perlu disesuaikan.", error: result });
-    }
-    const resultUrl = /^https?:\/\//i.test(String(rawUrl)) ? String(rawUrl) : new URL(String(rawUrl).replace(/^\/+/, ""), "https://tools.cleanpng.com/image-compressor/").href;
-    const originalSize = result.original_size ?? result.originalSize ?? result.original?.size ?? null;
-    const compressedSize = result.compressed_size ?? result.compressedSize ?? result.compressed?.size ?? null;
-    const savingsPercent = result.savings_percent ?? result.savingsPercent ?? (originalSize && compressedSize ? Math.round((1 - Number(compressedSize) / Number(originalSize)) * 10000) / 100 : null);
-    return res.status(200).json({ status: true, source: "CleanPNG Image Compressor", data: { resultUrl, format, mode, quality, originalSize, compressedSize, savingsPercent } });
-  } catch (error) {
-    console.error("handleCompressImage:", error.response?.data || error.message);
-    const statusCode = error.code === "TOO_LARGE" ? 413 : (error.response?.status >= 400 && error.response?.status < 600 ? 502 : 500);
-    return res.status(statusCode).json({ status: false, message: error.code === "TOO_LARGE" ? "Ukuran gambar maksimal 4 MB." : "Gagal melakukan kompresi gambar. Endpoint upstream CleanPNG mungkin berbeda.", error: error.response?.data || error.message });
-  }
-}
-
 async function handleUpscaleImage(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.status(204).end();
-  if (req.method !== "POST") {
-    return res.status(405).json({ status: false, message: "Gunakan metode POST dengan multipart/form-data." });
-  }
-
   try {
-    const declared = Number(req.headers["content-length"]) || 0;
-    if (declared > 4_200_000) {
-      return res.status(413).json({ status: false, message: "Ukuran gambar maksimal 4 MB." });
+    const { url } = req.query;
+
+    if (!url) {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter URL gambar wajib diisi.",
+        error: 'example: "/api/upscale-image?url=https://example.com/image.jpg"'
+      });
     }
 
-    const contentType = String(req.headers["content-type"] || "");
-    if (!/multipart\/form-data/i.test(contentType)) {
-      return res.status(400).json({ status: false, message: "Kirim gambar sebagai multipart/form-data dengan field image." });
+    // Validasi URL
+    let imageUrl;
+
+    try {
+      imageUrl = new URL(url).href;
+    } catch {
+      return res.status(400).json({
+        status: false,
+        message: "URL gambar tidak valid.",
+        error: 'example: "/api/upscale-image?url=https://example.com/image.jpg"'
+      });
     }
 
-    const parsed = await new Promise((resolve, reject) => {
-      let bb;
-      try { bb = Busboy({ headers: req.headers, limits: { files: 1, fileSize: 4_000_000, fields: 5 } }); }
-      catch (error) { reject(error); return; }
-      let image = null;
-      let tooLarge = false;
-      const fields = {};
-      bb.on("field", (name, value) => { fields[name] = value; });
-      bb.on("file", (name, stream, info) => {
-        if (name !== "image") { stream.resume(); return; }
-        const chunks = [];
-        stream.on("data", chunk => chunks.push(chunk));
-        stream.on("limit", () => { tooLarge = true; });
-        stream.on("end", () => { image = { buffer: Buffer.concat(chunks), filename: info.filename, mimetype: info.mimeType }; });
-      });
-      bb.on("error", reject);
-      bb.on("close", () => {
-        if (tooLarge) return reject(Object.assign(new Error("Ukuran gambar maksimal 4 MB."), { code: "TOO_LARGE" }));
-        resolve({ image, fields });
-      });
-      req.pipe(bb);
+    // Download gambar
+    const imageResponse = await axios.get(imageUrl, {
+      responseType: "arraybuffer",
+      timeout: 30000,
+      maxContentLength: 20 * 1024 * 1024,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/91.0.4472.124 Safari/537.36"
+      }
     });
 
-    if (!parsed.image?.buffer?.length) {
-      return res.status(400).json({ status: false, message: "File gambar wajib diunggah pada field image." });
-    }
-    if (!/^image\/(png|jpeg|webp)$/i.test(parsed.image.mimetype || "")) {
-      return res.status(415).json({ status: false, message: "Format gambar harus PNG, JPG, atau WEBP." });
-    }
+    const buffer = Buffer.from(imageResponse.data);
 
-    const ratio = String(parsed.fields.ratio || "2");
-    const format = String(parsed.fields.format || "png").toLowerCase();
-    if (!["2", "4"].includes(ratio)) return res.status(400).json({ status: false, message: "ratio hanya boleh 2 atau 4." });
-    if (!["png", "jpg", "jpeg", "webp"].includes(format)) return res.status(400).json({ status: false, message: "Format hasil tidak didukung." });
-
-    const headers = {
-      "origin": "https://tools.cleanpng.com",
-      "referer": "https://tools.cleanpng.com/image-upscaler/",
-      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    };
-    const uploadForm = new FormData();
-    uploadForm.append("image", parsed.image.buffer, {
-      filename: parsed.image.filename || "image.png",
-      contentType: parsed.image.mimetype || "image/png"
-    });
-    uploadForm.append("ratio", "2");
-
-    const uploadResponse = await axios.post(
-      "https://tools.cleanpng.com/image-upscaler/upload.php",
-      uploadForm,
-      { headers: { ...headers, ...uploadForm.getHeaders() }, timeout: 60000, maxBodyLength: 5_000_000 }
-    );
-    if (!uploadResponse.data?.success || !uploadResponse.data?.path) {
-      return res.status(502).json({ status: false, message: "Layanan CleanPNG gagal menerima gambar.", error: uploadResponse.data || null });
-    }
-
+    // Buat multipart form
     const upscaleForm = new FormData();
-    upscaleForm.append("path", uploadResponse.data.path);
-    upscaleForm.append("ratio", ratio);
-    upscaleForm.append("format", format === "jpg" ? "jpeg" : format);
-    upscaleForm.append("enhance_quality", "1");
 
-    const resultResponse = await axios.post(
-      "https://tools.cleanpng.com/image-upscaler/upscale.php",
+    upscaleForm.append("image", buffer, {
+      filename: "image.jpg",
+      contentType:
+        imageResponse.headers["content-type"] || "image/jpeg"
+    });
+
+    upscaleForm.append("user_id", "");
+    upscaleForm.append("is_public", "true");
+    upscaleForm.append("scale", "2");
+
+    // Request ke PicUpscaler
+    const upscaleResponse = await axios.post(
+      "https://picupscaler.com/api/generate/handle",
       upscaleForm,
-      { headers: { ...headers, ...upscaleForm.getHeaders() }, timeout: 120000, maxBodyLength: 1_000_000 }
+      {
+        headers: {
+          ...upscaleForm.getHeaders(),
+          accept: "application/json",
+          referer:
+            "https://picupscaler.com/blog/free-image-upscaler-no-watermark",
+          origin: "https://picupscaler.com",
+          "user-agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/91.0.4472.124 Safari/537.36"
+        },
+        timeout: 120000,
+        maxContentLength: 50 * 1024 * 1024,
+        maxBodyLength: 50 * 1024 * 1024
+      }
     );
-    if (!resultResponse.data?.success || !resultResponse.data?.url) {
-      return res.status(502).json({ status: false, message: "CleanPNG gagal memproses gambar.", error: resultResponse.data || null });
-    }
-
-    const resultPath = String(resultResponse.data.url);
-    const resultUrl = /^https?:\/\//i.test(resultPath)
-      ? resultPath
-      : new URL(resultPath.replace(/^\/+/, ""), "https://tools.cleanpng.com/image-upscaler/").href;
 
     return res.status(200).json({
       status: true,
-      source: "CleanPNG Image Upscaler",
-      data: {
-        resultUrl,
-        ratio: `${resultResponse.data.width || "?"} x ${resultResponse.data.height || "?"}`,
-        width: resultResponse.data.width || null,
-        height: resultResponse.data.height || null,
-        format
-      }
+      source: "PicUpscaler",
+      data: upscaleResponse.data
     });
   } catch (error) {
-    console.error("handleUpscaleImage:", error.response?.data || error.message);
-    const statusCode = error.code === "TOO_LARGE" ? 413 : (error.response?.status >= 400 && error.response?.status < 600 ? 502 : 500);
+    console.error("handleUpscaleImage:", error);
+
+    const statusCode =
+      error.response?.status >= 400 && error.response?.status < 600
+        ? error.response.status
+        : 500;
+
     return res.status(statusCode).json({
       status: false,
-      message: error.code === "TOO_LARGE" ? "Ukuran gambar maksimal 4 MB." : "Gagal melakukan upscale gambar.",
-      error: error.response?.data || error.message
+      message: "Gagal melakukan upscale gambar.",
+      error: error.message
     });
   }
 }
@@ -12217,35 +12104,426 @@ async function handleCheckHost(req, res) {
 }
 
 
-async function handleSystemInfo(req, res) {
-  if (req.method !== "GET") return res.status(405).json({ status: false, message: "Method tidak diizinkan" });
-  const mem = process.memoryUsage();
-  const formatUptime = (seconds) => {
-    const d = Math.floor(seconds / 86400), h = Math.floor(seconds % 86400 / 3600), m = Math.floor(seconds % 3600 / 60);
-    return d ? `${d}h ${h}j ${m}m` : h ? `${h}j ${m}m` : `${m}m ${Math.floor(seconds % 60)}d`;
-  };
-  res.setHeader("Cache-Control", "no-store, max-age=0");
-  return res.status(200).json({
-    status: true,
-    cpuCores: os.cpus().length,
-    platform: `${process.platform} / ${process.arch}`,
-    memoryUsedMb: Math.round(mem.rss / 1024 / 1024),
-    heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
-    heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024),
-    uptimeText: formatUptime(process.uptime()),
-    uptimeSeconds: Math.floor(process.uptime()),
-    note: "Metrik hanya untuk instance yang menangani request ini."
+/* ============================================================
+ * RUDDER CHAT (rudder.chat — model th-rudder:free)
+ * GET  /api/rudder-chat?message=Halo&sessionId=...
+ * POST /api/rudder-chat   body JSON: { "message": "Halo", "sessionId": "..." }
+ *
+ * Kredensial TIDAK ditaruh di kode. Isi di Vercel -> Settings -> Environment Variables:
+ *   RUDDER_USER_ID   : user id akun rudder.chat
+ *   RUDDER_COOKIE_C0 : isi cookie  sb-auth-auth-token.0
+ *   RUDDER_COOKIE_C1 : isi cookie  sb-auth-auth-token.1
+ *   RUDDER_TH_WHO    : isi cookie  th_who (opsional)
+ * Proteksi: rate limit per IP, validasi input, batas ukuran respons, batas waktu total.
+ * ============================================================ */
+const RUDDER_BASE_HOST = "rudder.chat";
+const RUDDER_MODEL = "th-rudder:free";
+const RUDDER_TZ = "Asia/Jakarta";
+const RUDDER_UA = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Mobile Safari/537.36";
+const RUDDER_ATTEST_TTL_MS = 25 * 60 * 1000;
+const RUDDER_DEADLINE_MS = 50000;
+const RUDDER_MAX_BYTES = 1_000_000;
+const RUDDER_MAX_MESSAGE = 4000;
+const RUDDER_RATE = { windowMs: 60_000, max: 10 };
+const rudderHits = new Map();
+let rudderAttestCache = null;
+
+const rudderSecret = (v) => String(v || "").replace(/[\s;\u0000-\u001f]/g, "");
+const rudderError = (message, httpStatus = 502) => Object.assign(new Error(message), { httpStatus });
+
+function rudderConfig() {
+  const userId = rudderSecret(process.env.RUDDER_USER_ID);
+  const c0 = rudderSecret(process.env.RUDDER_COOKIE_C0);
+  const c1 = rudderSecret(process.env.RUDDER_COOKIE_C1);
+  const thWho = rudderSecret(process.env.RUDDER_TH_WHO);
+  if (!userId || !c0 || !c1) return null;
+  const cookie = `th_cookie_consent=essential; sb-auth-auth-token.0=${c0}; sb-auth-auth-token.1=${c1}; th_geo=1${thWho ? `; th_who=${thWho}` : ""}`;
+  return { userId, cookie };
+}
+
+function rudderRateLimit(req) {
+  const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
+  const now = Date.now();
+  const rec = rudderHits.get(ip);
+  if (!rec || now - rec.start > RUDDER_RATE.windowMs) {
+    if (rudderHits.size > 5000) {
+      for (const [k, v] of rudderHits) if (now - v.start > RUDDER_RATE.windowMs) rudderHits.delete(k);
+    }
+    rudderHits.set(ip, { start: now, count: 1 });
+    return { ok: true };
+  }
+  rec.count += 1;
+  if (rec.count > RUDDER_RATE.max) return { ok: false, retryAfter: Math.max(1, Math.ceil((rec.start + RUDDER_RATE.windowMs - now) / 1000)) };
+  return { ok: true };
+}
+
+function rudderHttp(cfg, { method, path, headers = {}, body = null, deadlineAt }) {
+  return new Promise((resolve, reject) => {
+    const remaining = deadlineAt - Date.now();
+    if (remaining < 500) return reject(rudderError("Waktu habis saat menghubungi sumber.", 504));
+    const payload = body ? JSON.stringify(body) : null;
+    const chunks = [];
+    let size = 0;
+    let timer;
+    const req = https.request({
+      hostname: RUDDER_BASE_HOST,
+      port: 443,
+      path,
+      method,
+      headers: {
+        "User-Agent": RUDDER_UA,
+        Cookie: cfg.cookie,
+        ...headers,
+        ...(payload ? { "Content-Length": Buffer.byteLength(payload) } : {})
+      }
+    }, (r) => {
+      r.on("data", (c) => {
+        size += c.length;
+        if (size > RUDDER_MAX_BYTES) { req.destroy(rudderError("Respons sumber terlalu besar.")); return; }
+        chunks.push(c);
+      });
+      r.on("end", () => { clearTimeout(timer); resolve({ status: r.statusCode, raw: Buffer.concat(chunks).toString("utf8") }); });
+      r.on("error", (e) => { clearTimeout(timer); reject(e); });
+    });
+    timer = setTimeout(() => req.destroy(rudderError("Waktu habis saat menunggu jawaban AI.", 504)), remaining);
+    req.on("error", (e) => { clearTimeout(timer); reject(e); });
+    if (payload) req.write(payload);
+    req.end();
   });
+}
+
+function rudderAttestMsg(scheme, epoch, uid) {
+  const n = String(epoch);
+  switch (((scheme % 6) + 6) % 6) {
+    case 0: return `${uid}:${n}`;
+    case 1: return `${n}|${uid}|th`;
+    case 2: return `th.${uid}.${n}.c`;
+    case 3: return `${n}~${uid.slice(0, 8)}~${uid}`;
+    case 4: return `rc/${uid}/${n}/rc`;
+    default: return `${uid.split("-").join("")}#${n}`;
+  }
+}
+
+async function rudderAttestHeader(cfg, deadlineAt) {
+  if (!rudderAttestCache || Date.now() - rudderAttestCache.t >= RUDDER_ATTEST_TTL_MS) {
+    const r = await rudderHttp(cfg, { method: "GET", path: "/api/chat/attest", deadlineAt });
+    if (r.status !== 200) throw rudderError(`Sumber menolak langkah attest (HTTP ${r.status}).`);
+    let d;
+    try { d = JSON.parse(r.raw); } catch { throw rudderError("Respons attest dari sumber tidak valid."); }
+    rudderAttestCache = { d, t: Date.now() };
+  }
+  const a = rudderAttestCache.d;
+  if (!a || "off" in a) return null;
+  if (typeof a.key !== "string" || !Number.isFinite(Number(a.scheme)) || a.epoch == null) throw rudderError("Format attest dari sumber tidak dikenali.");
+  const h = createHmac("sha256", a.key).update(rudderAttestMsg(Number(a.scheme), a.epoch, cfg.userId)).digest("hex");
+  return JSON.stringify({ s: a.scheme, e: a.epoch, h });
+}
+
+function rudderParseSse(raw) {
+  const events = [];
+  for (const block of raw.split(/\r?\n\r?\n/)) {
+    let ev = "message";
+    let data = "";
+    for (const line of block.split(/\r?\n/)) {
+      if (line.startsWith("event:")) ev = line.slice(6).trim();
+      else if (line.startsWith("data:")) data += line.slice(5).trim();
+    }
+    if (data) events.push({ ev, data });
+  }
+  return events;
+}
+
+async function handleRudderChat(req, res) {
+  try {
+    if (req.method !== "GET" && req.method !== "POST") {
+      return res.status(405).json({ success: false, message: "Gunakan method GET atau POST." });
+    }
+
+    const limit = rudderRateLimit(req);
+    if (!limit.ok) {
+      res.setHeader("Retry-After", String(limit.retryAfter));
+      return res.status(429).json({ success: false, message: `Terlalu banyak request. Coba lagi dalam ${limit.retryAfter} detik.` });
+    }
+
+    let input = req.query || {};
+    if (req.method === "POST") {
+      await ensureJsonBody(req);
+      input = { ...input, ...(req.body || {}) };
+    }
+
+    const message = String(input.message ?? input.text ?? input.q ?? "").trim();
+    if (!message) {
+      return res.status(400).json({
+        success: false,
+        message: "Parameter message wajib diisi.",
+        example: "/api/rudder-chat?message=Halo"
+      });
+    }
+    if (message.length > RUDDER_MAX_MESSAGE) {
+      return res.status(400).json({ success: false, message: `Pesan terlalu panjang (maksimal ${RUDDER_MAX_MESSAGE} karakter).` });
+    }
+
+    const sessionIdInput = input.sessionId ? String(input.sessionId).trim() : "";
+    if (sessionIdInput && !/^[A-Za-z0-9_-]{6,80}$/.test(sessionIdInput)) {
+      return res.status(400).json({ success: false, message: "Format sessionId tidak valid." });
+    }
+
+    const cfg = rudderConfig();
+    if (!cfg) {
+      return res.status(503).json({ success: false, message: "Endpoint belum dikonfigurasi di server (kredensial Rudder belum diisi)." });
+    }
+
+    const deadlineAt = Date.now() + RUDDER_DEADLINE_MS;
+    const jsonHeaders = { "Content-Type": "application/json", Accept: "*/*", Origin: `https://${RUDDER_BASE_HOST}` };
+
+    let sessionId = sessionIdInput;
+    if (!sessionId) {
+      const s = await rudderHttp(cfg, {
+        method: "POST",
+        path: "/api/direct-chat/sessions",
+        headers: jsonHeaders,
+        body: { model: RUDDER_MODEL, temporary: false },
+        deadlineAt
+      });
+      if (s.status !== 200) throw rudderError(`Gagal membuat sesi di sumber (HTTP ${s.status}).`);
+      try { sessionId = JSON.parse(s.raw)?.session?.id; } catch { sessionId = ""; }
+      if (!sessionId) throw rudderError("Sumber tidak mengembalikan ID sesi.");
+    }
+
+    const headers = { ...jsonHeaders, Referer: `https://${RUDDER_BASE_HOST}/chat/${encodeURIComponent(sessionId)}` };
+    const attest = await rudderAttestHeader(cfg, deadlineAt);
+    if (attest) headers["x-th-ca"] = attest;
+
+    const r = await rudderHttp(cfg, {
+      method: "POST",
+      path: "/api/direct-chat/stream",
+      headers,
+      body: { sessionId, content: message, model: RUDDER_MODEL, webSearch: "auto", tz: RUDDER_TZ },
+      deadlineAt
+    });
+
+    if (r.status !== 200) {
+      if (r.status === 401 || r.status === 403) rudderAttestCache = null;
+      if (r.status === 429) return res.status(429).json({ success: false, message: "Sumber sedang membatasi request. Coba lagi sebentar lagi." });
+      if (r.status === 401 || r.status === 403) {
+        return res.status(502).json({ success: false, message: `Sumber menolak request (HTTP ${r.status}). Cookie/token di server mungkin sudah kedaluwarsa.` });
+      }
+      return res.status(502).json({ success: false, message: `Sumber mengembalikan HTTP ${r.status}.` });
+    }
+
+    let reply = "";
+    let meta = null;
+    for (const { ev, data } of rudderParseSse(r.raw)) {
+      let p;
+      try { p = JSON.parse(data); } catch { p = { raw: data }; }
+      if (ev === "chunk" && typeof p.delta === "string") reply += p.delta;
+      else if (ev === "done") meta = p;
+      else if (ev === "error") {
+        return res.status(502).json({ success: false, message: String(p.message || p.code || "Terjadi kesalahan pada stream sumber.") });
+      }
+    }
+
+    if (!reply.trim()) {
+      return res.status(502).json({ success: false, message: "AI tidak mengembalikan jawaban. Coba lagi." });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: { message, reply, sessionId, model: RUDDER_MODEL, meta }
+    });
+  } catch (error) {
+    if (error.httpStatus) return res.status(error.httpStatus).json({ success: false, message: error.message });
+    console.error("rudder-chat error:", error?.message || error);
+    return res.status(500).json({ success: false, message: "Terjadi kesalahan saat memproses permintaan." });
+  }
+}
+
+/* ============================================================
+ * STATUS SERVER — GET /api/stats
+ * Statistik live untuk halaman /status: CPU, RAM, request, waktu respons, endpoint terpopuler.
+ * Catatan: angka request dihitung di memori instance yang sedang melayani. Di hosting serverless
+ * (Vercel) tiap instance punya angka sendiri dan akan mulai dari nol saat instance baru dibuat.
+ * Yang dibuka ke publik hanya angka agregat (tanpa hostname, env, IP, atau path).
+ * ============================================================ */
+const STATS = {
+  startedAt: Date.now(),
+  total: 0,
+  errors4xx: 0,
+  errors5xx: 0,
+  buckets: new Map(),
+  durations: [],
+  endpoints: new Map(),
+  cpuPrev: null,
+  cpuLast: null,
+  procPrev: null
+};
+const STATS_RATE = { windowMs: 60_000, max: 60 };
+const statsHits = new Map();
+
+function statsRecord(routeKey, status, ms) {
+  const now = Date.now();
+  STATS.total += 1;
+  if (status >= 500) STATS.errors5xx += 1;
+  else if (status >= 400) STATS.errors4xx += 1;
+
+  const minute = Math.floor(now / 60000);
+  STATS.buckets.set(minute, (STATS.buckets.get(minute) || 0) + 1);
+  for (const k of STATS.buckets.keys()) if (k < minute - 60) STATS.buckets.delete(k);
+
+  STATS.durations.push(ms);
+  if (STATS.durations.length > 200) STATS.durations.shift();
+
+  // 404 digabung supaya path acak dari bot tidak membanjiri daftar
+  let key = status === 404 ? "(tidak ditemukan)" : String(routeKey || "").slice(0, 40);
+  if (!/^[a-z0-9/_()\- ]{1,40}$/i.test(key)) key = "(lainnya)";
+  if (!STATS.endpoints.has(key) && STATS.endpoints.size >= 100) key = "(lainnya)";
+  STATS.endpoints.set(key, (STATS.endpoints.get(key) || 0) + 1);
+}
+
+function statsRateLimit(req) {
+  const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
+  const now = Date.now();
+  const rec = statsHits.get(ip);
+  if (!rec || now - rec.start > STATS_RATE.windowMs) {
+    if (statsHits.size > 5000) {
+      for (const [k, v] of statsHits) if (now - v.start > STATS_RATE.windowMs) statsHits.delete(k);
+    }
+    statsHits.set(ip, { start: now, count: 1 });
+    return { ok: true };
+  }
+  rec.count += 1;
+  if (rec.count > STATS_RATE.max) return { ok: false, retryAfter: Math.max(1, Math.ceil((rec.start + STATS_RATE.windowMs - now) / 1000)) };
+  return { ok: true };
+}
+
+function statsCpuTimes() {
+  let idle = 0;
+  let total = 0;
+  for (const c of nodeOs.cpus()) {
+    const t = c.times;
+    idle += t.idle;
+    total += t.user + t.nice + t.sys + t.idle + t.irq;
+  }
+  return { idle, total, at: Date.now() };
+}
+
+async function statsCpu() {
+  const cores = nodeOs.cpus().length || 1;
+  const now = Date.now();
+  // panggilan beruntun dari banyak pengunjung memakai hasil terakhir agar angkanya tidak loncat-loncat
+  if (STATS.cpuLast && now - STATS.cpuLast.at < 1500) return STATS.cpuLast;
+
+  let prev = STATS.cpuPrev;
+  let cur = statsCpuTimes();
+  let procPrev = STATS.procPrev;
+  if (!prev || now - prev.at < 200) {
+    prev = cur;
+    procPrev = { usage: process.cpuUsage(), at: Date.now() };
+    await new Promise((r) => setTimeout(r, 250));
+    cur = statsCpuTimes();
+  }
+  const dTotal = cur.total - prev.total;
+  const dIdle = cur.idle - prev.idle;
+  const system = dTotal > 0 ? Math.max(0, Math.min(100, (1 - dIdle / dTotal) * 100)) : null;
+
+  const procNow = { usage: process.cpuUsage(), at: Date.now() };
+  let proc = 0;
+  if (procPrev) {
+    const used = (procNow.usage.user - procPrev.usage.user) + (procNow.usage.system - procPrev.usage.system);
+    const wall = Math.max(1, procNow.at - procPrev.at) * 1000;
+    proc = Math.max(0, Math.min(100, (used / wall / cores) * 100));
+  }
+
+  STATS.cpuPrev = cur;
+  STATS.procPrev = procNow;
+  STATS.cpuLast = { pct: system ?? proc, process: proc, at: Date.now() };
+  return STATS.cpuLast;
+}
+
+async function handleStats(req, res) {
+  try {
+    if (req.method !== "GET") {
+      return res.status(405).json({ success: false, message: "Gunakan method GET." });
+    }
+    const limit = statsRateLimit(req);
+    if (!limit.ok) {
+      res.setHeader("Retry-After", String(limit.retryAfter));
+      return res.status(429).json({ success: false, message: `Terlalu banyak request. Coba lagi dalam ${limit.retryAfter} detik.` });
+    }
+
+    const cpu = await statsCpu();
+    const total = nodeOs.totalmem();
+    const free = nodeOs.freemem();
+    const used = Math.max(0, total - free);
+    const mem = process.memoryUsage();
+
+    const nowMin = Math.floor(Date.now() / 60000);
+    const perMinute = Array.from({ length: 30 }, (_, i) => STATS.buckets.get(nowMin - 29 + i) || 0);
+    const sorted = [...STATS.durations].sort((a, b) => a - b);
+    const avgMs = sorted.length ? sorted.reduce((a, b) => a + b, 0) / sorted.length : 0;
+    const p95Ms = sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] : 0;
+    const top = [...STATS.endpoints.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([route, count]) => ({ route, count }));
+
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(200).json({
+      success: true,
+      data: {
+        time: Date.now(),
+        uptimeSec: Math.round(process.uptime()),
+        since: STATS.startedAt,
+        cpu: {
+          pct: Math.round(cpu.pct * 10) / 10,
+          processPct: Math.round(cpu.process * 10) / 10,
+          cores: nodeOs.cpus().length || 1,
+          model: String(nodeOs.cpus()[0]?.model || "").replace(/\s+/g, " ").trim(),
+          load: nodeOs.loadavg().map((n) => Math.round(n * 100) / 100)
+        },
+        memory: {
+          total, used, free,
+          pct: total ? Math.round((used / total) * 1000) / 10 : 0,
+          rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal
+        },
+        requests: {
+          total: STATS.total,
+          lastMinute: perMinute[29],
+          last5Min: perMinute.slice(25).reduce((a, b) => a + b, 0),
+          perMinute,
+          errors4xx: STATS.errors4xx,
+          errors5xx: STATS.errors5xx,
+          avgMs: Math.round(avgMs),
+          p95Ms: Math.round(p95Ms),
+          top
+        },
+        runtime: {
+          node: process.version,
+          platform: `${process.platform}/${process.arch}`,
+          region: process.env.VERCEL_REGION || null,
+          env: process.env.VERCEL_ENV || process.env.NODE_ENV || null
+        }
+      }
+    });
+  } catch (error) {
+    console.error("stats error:", error?.message || error);
+    return res.status(500).json({ success: false, message: "Gagal membaca statistik server." });
+  }
 }
 
 export default async function handler(req, res) {
   const routeKey = getRouteKey(req);
 
+  // hitung statistik untuk halaman /status (endpoint /api/stats sendiri tidak dihitung)
+  if (routeKey !== "stats") {
+    const startedAt = Date.now();
+    res.on("finish", () => statsRecord(routeKey, res.statusCode, Date.now() - startedAt));
+  }
+
   switch (routeKey) {
-    case "system-info":
-      return handleSystemInfo(req, res);
     case "album-search":
       return handleAlbumSearch(req, res);
+    case "rudder-chat":
+      return handleRudderChat(req, res);
+    case "stats":
+      return handleStats(req, res);
     case "add-subdomain":
       return handleAddSubdomain(req, res);
     case "check-host":
@@ -12334,8 +12612,6 @@ case "quotes-anime":
   case "zerochan":
   return handleZerochan(req, res);
   case "nsfw-random": return handleNsfwRandomEndpoint(req, res);
-case "compress-image":
-  return handleCompressImage(req, res);
 case "upscale-image":
   return handleUpscaleImage(req, res);
   case "photoeditor-ai":
