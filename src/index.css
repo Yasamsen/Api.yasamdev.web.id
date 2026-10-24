@@ -309,3 +309,32 @@ pre, code { overflow-wrap: normal; }
 
 .no-scrollbar { scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* ============ MOBILE: kartu kategori vertikal ============ */
+@media (max-width: 639px) {
+  .catcard { flex-direction: column; align-items: flex-start; gap: 0.65rem; padding: 0.8rem 0.8rem 0.85rem; border-radius: 18px; }
+  .catcard .iconbox { width: 2.5rem !important; height: 2.5rem !important; border-radius: 12px; }
+  .catcard .catbody { width: 100%; flex: none !important; }
+  .catcard .catcount { position: absolute; top: 0.7rem; right: 0.7rem; }
+}
+
+/* ============ TOMBOL HAMBURGER (tema sticker) ============ */
+.menubtn { position: relative; flex-shrink: 0; width: 42px; height: 42px; border-radius: 13px; cursor: pointer; background: rgb(var(--yellow)); border: var(--bw) solid rgb(var(--ink)); box-shadow: 2px 2px 0 rgb(var(--shadow)); transition: transform 0.2s var(--pop), box-shadow 0.2s var(--pop), background 0.25s; }
+.menubtn:active { transform: translate(2px, 2px); box-shadow: 0 0 0 rgb(var(--shadow)); }
+.menubtn span { position: absolute; left: 50%; top: 50%; width: 18px; height: 2.5px; margin: -1.25px 0 0 -9px; border-radius: 2px; background: rgb(var(--on-light)); transition: transform 0.35s var(--pop), opacity 0.2s, background 0.25s; }
+.menubtn span:nth-child(1) { transform: translateY(-6px); }
+.menubtn span:nth-child(3) { transform: translateY(6px); width: 11px; margin-left: -9px; }
+.menubtn[aria-expanded="true"] { background: rgb(var(--gold2)); }
+.menubtn[aria-expanded="true"] span { background: #fff; }
+.menubtn[aria-expanded="true"] span:nth-child(1) { transform: rotate(45deg); }
+.menubtn[aria-expanded="true"] span:nth-child(2) { opacity: 0; transform: scaleX(0); }
+.menubtn[aria-expanded="true"] span:nth-child(3) { width: 18px; transform: rotate(-45deg); }
+@media (max-width: 767px) {
+  #theme-btn { width: 42px; height: 42px; border-radius: 13px; margin-right: 0.35rem; color: rgb(var(--fg)); background: rgb(var(--surface)); border: var(--bw) solid rgb(var(--ink)); box-shadow: 2px 2px 0 rgb(var(--shadow)); }
+}
+
+/* ============ MENU MOBILE ============ */
+#mobile-menu { padding: calc(var(--nav-h) + 18px) 18px 36px; background-color: rgb(var(--bg)); background-image: radial-gradient(circle, rgb(var(--dot)) 1.6px, transparent 1.8px); background-size: 22px 22px; }
+.mrow { display: flex; width: 100%; align-items: center; gap: 0.85rem; padding: 0.7rem 0.85rem; border-radius: 18px; color: rgb(var(--fg)); background: rgb(var(--surface)); border: var(--bw) solid rgb(var(--ink)); box-shadow: 3px 3px 0 rgb(var(--shadow)); transition: transform 0.2s var(--pop), box-shadow 0.2s var(--pop); }
+.mrow:active, .mcat:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 rgb(var(--shadow)); }
+.mcat { display: flex; align-items: center; gap: 0.6rem; min-width: 0; padding: 0.55rem 0.65rem; border-radius: 16px; color: rgb(var(--fg)); background: rgb(var(--surface)); border: 2px solid rgb(var(--ink)); box-shadow: 2px 2px 0 rgb(var(--shadow)); transition: transform 0.2s var(--pop), box-shadow 0.2s var(--pop); }
