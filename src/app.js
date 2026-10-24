@@ -5,12 +5,14 @@ import { renderHome, bindHome, renderDocs, bindDocs, renderError } from './pages
 import { getApiBySlug } from './apis/registry.js';
 import { refreshIcons, copyText, icon } from './utils.js';
 import { uiState } from './categories.js';
+import { renderStatus, bindStatus, stopStatus } from './status.js';
 import { initMotion, observeReveals, runBoot } from './motion.js';
 
-const TITLES = { docs: 'Documentation — SamApi', '/500': 'Server Error — SamApi', '/404': 'Not Found — SamApi', '/contact': 'Contact YasamDev — SamApi', home: 'SamApi — Simple, powerful APIs' };
+const TITLES = { docs: 'Documentation — SamApi', '/500': 'Server Error — SamApi', '/404': 'Not Found — SamApi', '/contact': 'Contact YasamDev — SamApi', '/status': 'Status Server — SamApi', home: 'SamApi — Simple, powerful APIs' };
 
 export function renderApp(opts = {}) {
   const html = document.documentElement;
+  stopStatus();
   const path = getPath();
   const scrollY = window.scrollY;
   if (opts.silent) html.classList.add('silent');
@@ -20,12 +22,13 @@ export function renderApp(opts = {}) {
   const isError = path === '/404' || path === '/500';
   document.title = isDocs ? TITLES.docs : TITLES[path] || TITLES.home;
 
-  const page = path === '/' ? renderHome() : path === '/contact' ? renderContact() : isDocs ? renderDocs(path) : path === '/500' ? renderError('500') : renderError('404');
+  const page = path === '/' ? renderHome() : path === '/contact' ? renderContact() : path === '/status' ? renderStatus() : isDocs ? renderDocs(path) : path === '/500' ? renderError('500') : renderError('404');
   document.getElementById('root').innerHTML =
     `<div class="min-h-screen text-fg">${renderNavbar(path)}<div id="page" class="page-enter">${page}</div>${!isError ? renderFooter() : ''}</div>`;
 
   bindNavbar();
   if (path === '/') bindHome();
+  else if (path === '/status') bindStatus();
   else if (isDocs) bindDocs(path.startsWith('/docs/') ? getApiBySlug(path.split('/')[2]?.split('?')[0]) : null);
   else document.getElementById('retry')?.addEventListener('click', () => location.reload());
   bindFooter();
