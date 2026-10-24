@@ -41,6 +41,7 @@ export function renderNavbar(path) {
             </div>
           </div>
           <button data-nav="/docs" class="navlink ${isDocs ? 'is-active' : ''}">Documentation</button>
+          <button data-nav="/status" class="navlink inline-flex items-center gap-1.5 ${path === '/status' ? 'is-active' : ''}"><i class="live-dot !h-[7px] !w-[7px] !border-[1.5px]"></i>Status</button>
           <button data-nav="/contact" class="navlink ${path === '/contact' ? 'is-active' : ''}">Contact</button>
         </nav>
 
@@ -55,8 +56,8 @@ export function renderNavbar(path) {
 
     <div id="mobile-menu" class="md:hidden" aria-hidden="true">
       <div class="mx-auto flex max-w-md flex-col gap-2.5">
-        ${[['/', 'Home', 'House', 'rgb(var(--gold2))', '#fff', ''], ['/docs', 'Documentation', 'BookOpen', 'rgb(var(--yellow))', '#14102b', ''], ['/docs', 'Semua API', 'LayoutGrid', 'rgb(var(--green))', '#14102b', `${apiDefinitions.length}`], ['/contact', 'Contact', 'MessageCircle', '#ff7eb6', '#14102b', '']]
-          .map(([to, label, ic, tile, fg, n], i) => `<button data-nav="${to}" ${label === 'Semua API' ? 'data-docs-cat=""' : ''} style="--i:${i}" class="m-item mrow"><span class="iconbox h-10 w-10 shrink-0" style="--tile:${tile};--tile-fg:${fg}">${icon(ic, 'h-5 w-5')}</span><span class="flex-1 text-left text-[15px] font-extrabold">${label}</span>${n ? `<span class="catcount">${n}</span>` : ''}${icon('ChevronRight', 'h-4 w-4 shrink-0 text-dim')}</button>`).join('')}
+        ${[['/', 'Home', 'House', 'rgb(var(--gold2))', '#fff', '', ''], ['/docs', 'Documentation', 'BookOpen', 'rgb(var(--yellow))', '#14102b', '', ''], ['/status', 'Status Server', 'Activity', '#5bc0ff', '#14102b', 'live', 'CPU, RAM & request secara live'], ['/contact', 'Contact', 'MessageCircle', '#ff7eb6', '#14102b', '', '']]
+          .map(([to, label, ic, tile, fg, badge, caption], i) => `<button data-nav="${to}" style="--i:${i}" class="m-item mrow ${badge ? 'mrow-live' : ''}"><span class="iconbox h-10 w-10 shrink-0" style="--tile:${tile};--tile-fg:${fg}">${icon(ic, 'h-5 w-5')}</span><span class="min-w-0 flex-1 text-left"><span class="block text-[15px] font-extrabold leading-5">${label}</span>${caption ? `<span class="mt-0.5 block text-[11px] font-semibold leading-4 text-muted">${caption}</span>` : ''}</span>${badge ? '<span class="livepill"><i class="live-dot"></i>LIVE</span>' : ''}${icon('ChevronRight', 'h-4 w-4 shrink-0 text-dim')}</button>`).join('')}
 
         <p style="--i:4" class="m-item mt-5 px-1 text-[11px] font-extrabold uppercase tracking-wider text-dim">Pilih kategori</p>
         <div class="grid grid-cols-2 gap-2.5">
@@ -113,7 +114,7 @@ export function renderFooter() {
           <div class="mt-5 flex items-center gap-1">${creatorLinks().map((l) => `<a href="${esc(l.href)}" target="_blank" rel="noopener noreferrer" class="iconbtn" aria-label="${esc(l.label)}" title="${esc(l.label)}">${brandIcon(l.key, 'h-4 w-4')}</a>`).join('')}</div>
         </div>
         <div class="grid grid-cols-2 gap-x-14 gap-y-10 sm:grid-cols-3">
-          ${col('Product', [['Documentation', '/docs'], ['Changelog'], ['Status']])}
+          ${col('Product', [['Documentation', '/docs'], ['Changelog'], ['Status', '/status']])}
           ${col('Resources', [['Examples'], ['SDKs'], ['Community']])}
           ${col('Company', [['About'], ['Contact', '/contact'], ['Privacy']])}
         </div>
