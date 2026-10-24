@@ -54,7 +54,7 @@ export const CATEGORIES = [
   { id: 'adult', label: 'Dewasa 18+', short: 'Khusus usia 18 tahun ke atas', icon: 'shield-alert', tile: '#2a2250', fg: '#ffffff', adult: true,
     desc: 'Konten dewasa. Hanya untuk pengguna berusia 18 tahun ke atas.',
     hint: 'kamu ingin nonton bareng pacar',
-    keywords: 'nsfw 18+ dewasa' },
+    keywords: 'nsfw 18++ dewasa' },
 ];
 
 /* Pemetaan kurasi: slug endpoint -> id kategori. */
