@@ -41,8 +41,8 @@ const homeCount = (id) => apiDefinitions.filter((a) => (!id || a.categoryId === 
 function catCardHtml(c, active, count) {
   return `<button type="button" data-cat-card="${esc(c.id)}" aria-pressed="${active}" class="catcard ${active ? 'is-active' : ''}" ${count === 0 ? 'data-empty' : ''}>
     ${catTile(c, 'h-11 w-11', 'h-5 w-5')}
-    <span class="min-w-0 flex-1">
-      <span class="block truncate text-[13px] font-extrabold leading-5 sm:text-sm">${esc(c.label)}</span>
+    <span class="catbody min-w-0 flex-1">
+      <span class="block text-[13px] font-extrabold leading-[1.15rem] sm:truncate sm:text-sm sm:leading-5">${esc(c.label)}</span>
       <span class="mt-0.5 line-clamp-2 text-[11px] leading-4 text-muted max-sm:hidden">${esc(c.short)}</span>
     </span>
     <span data-cat-count class="catcount">${count}</span>
