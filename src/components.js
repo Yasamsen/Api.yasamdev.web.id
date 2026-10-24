@@ -48,19 +48,26 @@ export function renderNavbar(path) {
           <div class="mr-3 hidden items-center gap-2 lg:flex"><span class="h-1.5 w-1.5 rounded-full bg-ok"></span><span class="text-xs font-semibold text-muted">API online</span></div>
           <button id="theme-btn" class="iconbtn" aria-label="Toggle color theme">${icon(themeIcon, 'h-[17px] w-[17px]')}</button>
           <button data-nav="/docs" class="btn btn-gold btn-sm ml-1 hidden md:inline-flex">Get started</button>
-          <button id="mobile-menu-btn" class="iconbtn md:hidden" aria-label="Toggle menu" aria-expanded="false">${icon('Menu', 'h-5 w-5')}</button>
+          <button id="mobile-menu-btn" class="menubtn md:hidden" aria-label="Buka menu" aria-expanded="false" aria-controls="mobile-menu"><span></span><span></span><span></span></button>
         </div>
       </div>
     </div>
 
     <div id="mobile-menu" class="md:hidden" aria-hidden="true">
-      <div class="mx-auto flex max-w-md flex-col">
-        ${[['/', 'Home'], ['/docs', 'Documentation'], ['/docs', 'All APIs'], ['/contact', 'Contact']].map(([to, label], i) => `<button data-nav="${to}" style="--i:${i}" class="m-item font-display hair border-b-2 py-5 text-left text-2xl">${label}</button>`).join('')}
-        <div style="--i:4" class="m-item mt-8 flex items-center justify-between">
-          <div class="flex items-center gap-2"><span class="h-1.5 w-1.5 rounded-full bg-ok"></span><span class="text-xs font-semibold text-muted">API online</span></div>
-          <button id="mobile-theme-btn" class="flex items-center gap-2 text-sm text-muted">${icon(themeIcon, 'h-4 w-4')} Theme</button>
+      <div class="mx-auto flex max-w-md flex-col gap-2.5">
+        ${[['/', 'Home', 'House', 'rgb(var(--gold2))', '#fff', ''], ['/docs', 'Documentation', 'BookOpen', 'rgb(var(--yellow))', '#14102b', ''], ['/docs', 'Semua API', 'LayoutGrid', 'rgb(var(--green))', '#14102b', `${apiDefinitions.length}`], ['/contact', 'Contact', 'MessageCircle', '#ff7eb6', '#14102b', '']]
+          .map(([to, label, ic, tile, fg, n], i) => `<button data-nav="${to}" ${label === 'Semua API' ? 'data-docs-cat=""' : ''} style="--i:${i}" class="m-item mrow"><span class="iconbox h-10 w-10 shrink-0" style="--tile:${tile};--tile-fg:${fg}">${icon(ic, 'h-5 w-5')}</span><span class="flex-1 text-left text-[15px] font-extrabold">${label}</span>${n ? `<span class="catcount">${n}</span>` : ''}${icon('ChevronRight', 'h-4 w-4 shrink-0 text-dim')}</button>`).join('')}
+
+        <p style="--i:4" class="m-item mt-5 px-1 text-[11px] font-extrabold uppercase tracking-wider text-dim">Pilih kategori</p>
+        <div class="grid grid-cols-2 gap-2.5">
+          ${getCategories().map((c, i) => `<button data-nav="/docs" data-docs-cat="${c.id}" style="--i:${5 + Math.min(i, 8)}" class="m-item mcat">${catTile(c, 'h-8 w-8 !rounded-[10px]', 'h-4 w-4')}<span class="min-w-0 flex-1 text-left text-[12px] font-extrabold leading-4">${esc(c.label)}</span><span class="text-[11px] font-bold text-dim">${c.count}</span></button>`).join('')}
         </div>
-        <button data-nav="/docs" style="--i:5" class="m-item btn btn-gold mt-8 w-full">Get started</button>
+
+        <div style="--i:14" class="m-item mt-5 flex items-center justify-between gap-3 rounded-2xl border-2 border-ink bg-surface px-4 py-3">
+          <div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-ok"></span><span class="text-xs font-bold text-muted">API online</span></div>
+          <button id="mobile-theme-btn" class="inline-flex items-center gap-2 rounded-full border-2 border-ink bg-yellow px-3.5 py-1.5 text-xs font-extrabold text-[rgb(20_16_43)]">${icon(themeIcon, 'h-3.5 w-3.5')} ${getTheme() === 'dark' ? 'Mode terang' : 'Mode gelap'}</button>
+        </div>
+        <button data-nav="/docs" data-docs-cat="" style="--i:15" class="m-item btn btn-gold mt-1 w-full">Get started</button>
       </div>
     </div>
   </header>`;
@@ -83,15 +90,16 @@ export function bindNavbar() {
 
   const mm = document.getElementById('mobile-menu');
   const mmBtn = document.getElementById('mobile-menu-btn');
-  mmBtn?.addEventListener('click', () => {
-    const open = !mm.hasAttribute('data-open');
-    mm.toggleAttribute('data-open', open);
-    mm.setAttribute('aria-hidden', String(!open));
-    mmBtn.setAttribute('aria-expanded', String(open));
+  const setMobile = (open) => {
+    mm?.toggleAttribute('data-open', open);
+    mm?.setAttribute('aria-hidden', String(!open));
+    mmBtn?.setAttribute('aria-expanded', String(open));
+    mmBtn?.setAttribute('aria-label', open ? 'Tutup menu' : 'Buka menu');
     document.documentElement.classList.toggle('menu-open', open);
-    mmBtn.innerHTML = icon(open ? 'X' : 'Menu', 'h-5 w-5');
-    window.lucide?.createIcons({ attrs: { 'stroke-width': 2 } });
-  });
+  };
+  mmBtn?.addEventListener('click', () => setMobile(!mm.hasAttribute('data-open')));
+  // setelah memilih tujuan, tutup menu (termasuk saat tujuannya halaman yang sedang dibuka)
+  mm?.addEventListener('click', (e) => { if (e.target.closest('[data-nav]')) setMobile(false); });
 }
 
 export function renderFooter() {
