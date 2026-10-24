@@ -68,8 +68,8 @@ const SLUGS = {
   info: ['weather', 'earthquake', 'wikipedia', 'mealdb', 'pinterest-search', 'tiktok-search'],
   tools: ['ssweb', 'qrcode', 'tempmail', 'tourl', 'web2apk', 'check-host', 'ip-lookup', 'add-subdomain'],
   social: ['reaction-wa', 'alight-send', 'alight-verify'],
-  fun: ['alya', 'quotes-anime', 'waifuimg', 'zerochan', 'alphacoders-random', 'deviantart-random', 'imgviral'],
-  adult: ['nsfw-random', 'tai'],
+  fun: ['alya', 'quotes-anime', 'waifuimg', 'zerochan', 'alphacoders-random', 'deviantart-random',],
+  adult: ['nsfw-random', 'tai', 'imgviral'],
 };
 const SLUG_TO_ID = Object.fromEntries(Object.entries(SLUGS).flatMap(([id, list]) => list.map((slug) => [slug, id])));
 
