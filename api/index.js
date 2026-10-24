@@ -10515,118 +10515,6 @@ async function handleAlbumSearch(req, res) {
 }
 
 /* ============================================================
- * SPOTIFY SEARCH — cari album dan lagu, beserta track dalam album
- * Menggunakan access token publik dari web player Spotify.
- * API tidak resmi; format/token dapat berubah sewaktu-waktu.
- * ============================================================ */
-async function handleSpotifySearch(req, res) {
-  if (req.method !== "GET") {
-    res.setHeader("Allow", "GET");
-    return res.status(405).json({ status: false, message: "Gunakan metode GET.", error: "Method Not Allowed" });
-  }
-
-  const query = String(req.query?.query || "").trim();
-  const type = String(req.query?.type || "all").trim().toLowerCase();
-  const rawLimit = req.query?.limit === undefined ? 10 : Number(req.query.limit);
-
-  if (!query) {
-    return res.status(400).json({ status: false, message: "Parameter query wajib diisi. Contoh: /api/spotify-search?query=Ipank&type=album&limit=10", error: "Missing query" });
-  }
-  if (!['all', 'album', 'track'].includes(type)) {
-    return res.status(400).json({ status: false, message: "Parameter type harus all, album, atau track.", error: "Invalid type" });
-  }
-  if (!Number.isInteger(rawLimit) || rawLimit < 1 || rawLimit > 10) {
-    return res.status(400).json({ status: false, message: "Parameter limit harus berupa angka 1 sampai 10.", error: "Invalid limit" });
-  }
-
-  try {
-    const tokenResponse = await axios.get("https://open.spotify.com/get_access_token?reason=transport&productType=web_player", {
-      timeout: 12000,
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36", "Accept": "application/json" }
-    });
-    const accessToken = tokenResponse.data?.accessToken;
-    if (!accessToken) throw new Error("Spotify tidak memberikan access token.");
-
-    const searchTypes = type === 'all' ? 'album,track' : type;
-    const searchResponse = await axios.get("https://api.spotify.com/v1/search", {
-      timeout: 15000,
-      params: { q: query, type: searchTypes, limit: rawLimit, market: "ID" },
-      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" }
-    });
-    const payload = searchResponse.data || {};
-    const albums = [];
-    const tracks = [];
-
-    const albumItems = payload.albums?.items || [];
-    for (const album of albumItems) {
-      const artists = (album.artists || []).map((artist) => artist.name).filter(Boolean);
-      let albumTracks = [];
-      try {
-        const trackResponse = await axios.get(`https://api.spotify.com/v1/albums/${encodeURIComponent(album.id)}/tracks`, {
-          timeout: 10000,
-          params: { limit: 50, market: "ID" },
-          headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" }
-        });
-        albumTracks = (trackResponse.data?.items || []).map((track) => ({
-          title: track.name || "",
-          artist: (track.artists || []).map((artist) => artist.name).filter(Boolean).join(", "),
-          duration_ms: track.duration_ms ?? null,
-          track_id: track.id || null,
-          track_url: track.external_urls?.spotify || null
-        }));
-      } catch (trackError) {
-        // Hasil album tetap dikembalikan meski daftar track untuk album tertentu gagal dibaca.
-        console.warn("spotify-search album tracks error:", trackError?.message || trackError);
-      }
-      albums.push({
-        album_name: album.name || "",
-        album_id: album.id || null,
-        album_type: album.album_type || "album",
-        album_url: album.external_urls?.spotify || null,
-        cover_url: album.images?.[0]?.url || null,
-        release_date: album.release_date || null,
-        artist: artists.join(", "),
-        total_tracks: album.total_tracks ?? albumTracks.length,
-        tracks: albumTracks
-      });
-    }
-
-    tracks.push(...(payload.tracks?.items || []).map((track) => ({
-      title: track.name || "",
-      artist: (track.artists || []).map((artist) => artist.name).filter(Boolean).join(", "),
-      album: track.album?.name || "",
-      cover_url: track.album?.images?.[0]?.url || null,
-      duration_ms: track.duration_ms ?? null,
-      track_id: track.id || null,
-      track_url: track.external_urls?.spotify || null
-    })));
-
-    return res.status(200).json({
-      status: true,
-      source: "Spotify",
-      data: {
-        query,
-        type,
-        source: "open.spotify.com",
-        generated_at: new Date().toISOString(),
-        albums,
-        tracks
-      }
-    });
-  } catch (error) {
-    const upstreamStatus = error.response?.status;
-    console.error("spotify-search error:", error?.message || error);
-    return res.status(upstreamStatus === 429 ? 503 : 502).json({
-      status: false,
-      message: upstreamStatus === 429
-        ? "Spotify sedang membatasi permintaan. Coba lagi beberapa saat."
-        : "Pencarian Spotify gagal. Layanan atau token Spotify mungkin berubah; coba lagi nanti.",
-      error: error.response?.data?.error?.message || error.message || "Spotify request failed"
-    });
-  }
-}
-
-/* ============================================================
  * ROUTER UTAMA
  *
  * Route ditentukan dari path URL asli (req.url), BUKAN dari
@@ -12101,14 +11989,248 @@ async function handleCheckHost(req, res) {
 }
 
 
+/* ============================================================
+ * RUDDER CHAT (rudder.chat — model th-rudder:free)
+ * GET  /api/rudder-chat?message=Halo&sessionId=...
+ * POST /api/rudder-chat   body JSON: { "message": "Halo", "sessionId": "..." }
+ *
+ * Kredensial TIDAK ditaruh di kode. Isi di Vercel -> Settings -> Environment Variables:
+ *   RUDDER_USER_ID   : user id akun rudder.chat
+ *   RUDDER_COOKIE_C0 : isi cookie  sb-auth-auth-token.0
+ *   RUDDER_COOKIE_C1 : isi cookie  sb-auth-auth-token.1
+ *   RUDDER_TH_WHO    : isi cookie  th_who (opsional)
+ * Proteksi: rate limit per IP, validasi input, batas ukuran respons, batas waktu total.
+ * ============================================================ */
+const RUDDER_BASE_HOST = "rudder.chat";
+const RUDDER_MODEL = "th-rudder:free";
+const RUDDER_TZ = "Asia/Jakarta";
+const RUDDER_UA = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Mobile Safari/537.36";
+const RUDDER_ATTEST_TTL_MS = 25 * 60 * 1000;
+const RUDDER_DEADLINE_MS = 50000;
+const RUDDER_MAX_BYTES = 1_000_000;
+const RUDDER_MAX_MESSAGE = 4000;
+const RUDDER_RATE = { windowMs: 60_000, max: 10 };
+const rudderHits = new Map();
+let rudderAttestCache = null;
+
+const rudderSecret = (v) => String(v || "").replace(/[\s;\u0000-\u001f]/g, "");
+const rudderError = (message, httpStatus = 502) => Object.assign(new Error(message), { httpStatus });
+
+function rudderConfig() {
+  const userId = rudderSecret(process.env.RUDDER_USER_ID);
+  const c0 = rudderSecret(process.env.RUDDER_COOKIE_C0);
+  const c1 = rudderSecret(process.env.RUDDER_COOKIE_C1);
+  const thWho = rudderSecret(process.env.RUDDER_TH_WHO);
+  if (!userId || !c0 || !c1) return null;
+  const cookie = `th_cookie_consent=essential; sb-auth-auth-token.0=${c0}; sb-auth-auth-token.1=${c1}; th_geo=1${thWho ? `; th_who=${thWho}` : ""}`;
+  return { userId, cookie };
+}
+
+function rudderRateLimit(req) {
+  const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
+  const now = Date.now();
+  const rec = rudderHits.get(ip);
+  if (!rec || now - rec.start > RUDDER_RATE.windowMs) {
+    if (rudderHits.size > 5000) {
+      for (const [k, v] of rudderHits) if (now - v.start > RUDDER_RATE.windowMs) rudderHits.delete(k);
+    }
+    rudderHits.set(ip, { start: now, count: 1 });
+    return { ok: true };
+  }
+  rec.count += 1;
+  if (rec.count > RUDDER_RATE.max) return { ok: false, retryAfter: Math.max(1, Math.ceil((rec.start + RUDDER_RATE.windowMs - now) / 1000)) };
+  return { ok: true };
+}
+
+function rudderHttp(cfg, { method, path, headers = {}, body = null, deadlineAt }) {
+  return new Promise((resolve, reject) => {
+    const remaining = deadlineAt - Date.now();
+    if (remaining < 500) return reject(rudderError("Waktu habis saat menghubungi sumber.", 504));
+    const payload = body ? JSON.stringify(body) : null;
+    const chunks = [];
+    let size = 0;
+    let timer;
+    const req = https.request({
+      hostname: RUDDER_BASE_HOST,
+      port: 443,
+      path,
+      method,
+      headers: {
+        "User-Agent": RUDDER_UA,
+        Cookie: cfg.cookie,
+        ...headers,
+        ...(payload ? { "Content-Length": Buffer.byteLength(payload) } : {})
+      }
+    }, (r) => {
+      r.on("data", (c) => {
+        size += c.length;
+        if (size > RUDDER_MAX_BYTES) { req.destroy(rudderError("Respons sumber terlalu besar.")); return; }
+        chunks.push(c);
+      });
+      r.on("end", () => { clearTimeout(timer); resolve({ status: r.statusCode, raw: Buffer.concat(chunks).toString("utf8") }); });
+      r.on("error", (e) => { clearTimeout(timer); reject(e); });
+    });
+    timer = setTimeout(() => req.destroy(rudderError("Waktu habis saat menunggu jawaban AI.", 504)), remaining);
+    req.on("error", (e) => { clearTimeout(timer); reject(e); });
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+function rudderAttestMsg(scheme, epoch, uid) {
+  const n = String(epoch);
+  switch (((scheme % 6) + 6) % 6) {
+    case 0: return `${uid}:${n}`;
+    case 1: return `${n}|${uid}|th`;
+    case 2: return `th.${uid}.${n}.c`;
+    case 3: return `${n}~${uid.slice(0, 8)}~${uid}`;
+    case 4: return `rc/${uid}/${n}/rc`;
+    default: return `${uid.split("-").join("")}#${n}`;
+  }
+}
+
+async function rudderAttestHeader(cfg, deadlineAt) {
+  if (!rudderAttestCache || Date.now() - rudderAttestCache.t >= RUDDER_ATTEST_TTL_MS) {
+    const r = await rudderHttp(cfg, { method: "GET", path: "/api/chat/attest", deadlineAt });
+    if (r.status !== 200) throw rudderError(`Sumber menolak langkah attest (HTTP ${r.status}).`);
+    let d;
+    try { d = JSON.parse(r.raw); } catch { throw rudderError("Respons attest dari sumber tidak valid."); }
+    rudderAttestCache = { d, t: Date.now() };
+  }
+  const a = rudderAttestCache.d;
+  if (!a || "off" in a) return null;
+  if (typeof a.key !== "string" || !Number.isFinite(Number(a.scheme)) || a.epoch == null) throw rudderError("Format attest dari sumber tidak dikenali.");
+  const h = createHmac("sha256", a.key).update(rudderAttestMsg(Number(a.scheme), a.epoch, cfg.userId)).digest("hex");
+  return JSON.stringify({ s: a.scheme, e: a.epoch, h });
+}
+
+function rudderParseSse(raw) {
+  const events = [];
+  for (const block of raw.split(/\r?\n\r?\n/)) {
+    let ev = "message";
+    let data = "";
+    for (const line of block.split(/\r?\n/)) {
+      if (line.startsWith("event:")) ev = line.slice(6).trim();
+      else if (line.startsWith("data:")) data += line.slice(5).trim();
+    }
+    if (data) events.push({ ev, data });
+  }
+  return events;
+}
+
+async function handleRudderChat(req, res) {
+  try {
+    if (req.method !== "GET" && req.method !== "POST") {
+      return res.status(405).json({ success: false, message: "Gunakan method GET atau POST." });
+    }
+
+    const limit = rudderRateLimit(req);
+    if (!limit.ok) {
+      res.setHeader("Retry-After", String(limit.retryAfter));
+      return res.status(429).json({ success: false, message: `Terlalu banyak request. Coba lagi dalam ${limit.retryAfter} detik.` });
+    }
+
+    let input = req.query || {};
+    if (req.method === "POST") {
+      await ensureJsonBody(req);
+      input = { ...input, ...(req.body || {}) };
+    }
+
+    const message = String(input.message ?? input.text ?? input.q ?? "").trim();
+    if (!message) {
+      return res.status(400).json({
+        success: false,
+        message: "Parameter message wajib diisi.",
+        example: "/api/rudder-chat?message=Halo"
+      });
+    }
+    if (message.length > RUDDER_MAX_MESSAGE) {
+      return res.status(400).json({ success: false, message: `Pesan terlalu panjang (maksimal ${RUDDER_MAX_MESSAGE} karakter).` });
+    }
+
+    const sessionIdInput = input.sessionId ? String(input.sessionId).trim() : "";
+    if (sessionIdInput && !/^[A-Za-z0-9_-]{6,80}$/.test(sessionIdInput)) {
+      return res.status(400).json({ success: false, message: "Format sessionId tidak valid." });
+    }
+
+    const cfg = rudderConfig();
+    if (!cfg) {
+      return res.status(503).json({ success: false, message: "Endpoint belum dikonfigurasi di server (kredensial Rudder belum diisi)." });
+    }
+
+    const deadlineAt = Date.now() + RUDDER_DEADLINE_MS;
+    const jsonHeaders = { "Content-Type": "application/json", Accept: "*/*", Origin: `https://${RUDDER_BASE_HOST}` };
+
+    let sessionId = sessionIdInput;
+    if (!sessionId) {
+      const s = await rudderHttp(cfg, {
+        method: "POST",
+        path: "/api/direct-chat/sessions",
+        headers: jsonHeaders,
+        body: { model: RUDDER_MODEL, temporary: false },
+        deadlineAt
+      });
+      if (s.status !== 200) throw rudderError(`Gagal membuat sesi di sumber (HTTP ${s.status}).`);
+      try { sessionId = JSON.parse(s.raw)?.session?.id; } catch { sessionId = ""; }
+      if (!sessionId) throw rudderError("Sumber tidak mengembalikan ID sesi.");
+    }
+
+    const headers = { ...jsonHeaders, Referer: `https://${RUDDER_BASE_HOST}/chat/${encodeURIComponent(sessionId)}` };
+    const attest = await rudderAttestHeader(cfg, deadlineAt);
+    if (attest) headers["x-th-ca"] = attest;
+
+    const r = await rudderHttp(cfg, {
+      method: "POST",
+      path: "/api/direct-chat/stream",
+      headers,
+      body: { sessionId, content: message, model: RUDDER_MODEL, webSearch: "auto", tz: RUDDER_TZ },
+      deadlineAt
+    });
+
+    if (r.status !== 200) {
+      if (r.status === 401 || r.status === 403) rudderAttestCache = null;
+      if (r.status === 429) return res.status(429).json({ success: false, message: "Sumber sedang membatasi request. Coba lagi sebentar lagi." });
+      if (r.status === 401 || r.status === 403) {
+        return res.status(502).json({ success: false, message: `Sumber menolak request (HTTP ${r.status}). Cookie/token di server mungkin sudah kedaluwarsa.` });
+      }
+      return res.status(502).json({ success: false, message: `Sumber mengembalikan HTTP ${r.status}.` });
+    }
+
+    let reply = "";
+    let meta = null;
+    for (const { ev, data } of rudderParseSse(r.raw)) {
+      let p;
+      try { p = JSON.parse(data); } catch { p = { raw: data }; }
+      if (ev === "chunk" && typeof p.delta === "string") reply += p.delta;
+      else if (ev === "done") meta = p;
+      else if (ev === "error") {
+        return res.status(502).json({ success: false, message: String(p.message || p.code || "Terjadi kesalahan pada stream sumber.") });
+      }
+    }
+
+    if (!reply.trim()) {
+      return res.status(502).json({ success: false, message: "AI tidak mengembalikan jawaban. Coba lagi." });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: { message, reply, sessionId, model: RUDDER_MODEL, meta }
+    });
+  } catch (error) {
+    if (error.httpStatus) return res.status(error.httpStatus).json({ success: false, message: error.message });
+    console.error("rudder-chat error:", error?.message || error);
+    return res.status(500).json({ success: false, message: "Terjadi kesalahan saat memproses permintaan." });
+  }
+}
+
 export default async function handler(req, res) {
   const routeKey = getRouteKey(req);
 
   switch (routeKey) {
     case "album-search":
       return handleAlbumSearch(req, res);
-    case "spotify-search":
-      return handleSpotifySearch(req, res);
+    case "rudder-chat":
+      return handleRudderChat(req, res);
     case "add-subdomain":
       return handleAddSubdomain(req, res);
     case "check-host":
