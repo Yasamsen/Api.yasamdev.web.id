@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import dns from "node:dns/promises";
 import Busboy from "busboy";
 import net from "node:net";
+import nodeOs from "node:os";
 import http from "node:http";
 import tls from "node:tls";
 import zlib from "node:zlib";
@@ -12223,14 +12224,192 @@ async function handleRudderChat(req, res) {
   }
 }
 
+/* ============================================================
+ * STATUS SERVER — GET /api/stats
+ * Statistik live untuk halaman /status: CPU, RAM, request, waktu respons, endpoint terpopuler.
+ * Catatan: angka request dihitung di memori instance yang sedang melayani. Di hosting serverless
+ * (Vercel) tiap instance punya angka sendiri dan akan mulai dari nol saat instance baru dibuat.
+ * Yang dibuka ke publik hanya angka agregat (tanpa hostname, env, IP, atau path).
+ * ============================================================ */
+const STATS = {
+  startedAt: Date.now(),
+  total: 0,
+  errors4xx: 0,
+  errors5xx: 0,
+  buckets: new Map(),
+  durations: [],
+  endpoints: new Map(),
+  cpuPrev: null,
+  cpuLast: null,
+  procPrev: null
+};
+const STATS_RATE = { windowMs: 60_000, max: 60 };
+const statsHits = new Map();
+
+function statsRecord(routeKey, status, ms) {
+  const now = Date.now();
+  STATS.total += 1;
+  if (status >= 500) STATS.errors5xx += 1;
+  else if (status >= 400) STATS.errors4xx += 1;
+
+  const minute = Math.floor(now / 60000);
+  STATS.buckets.set(minute, (STATS.buckets.get(minute) || 0) + 1);
+  for (const k of STATS.buckets.keys()) if (k < minute - 60) STATS.buckets.delete(k);
+
+  STATS.durations.push(ms);
+  if (STATS.durations.length > 200) STATS.durations.shift();
+
+  // 404 digabung supaya path acak dari bot tidak membanjiri daftar
+  let key = status === 404 ? "(tidak ditemukan)" : String(routeKey || "").slice(0, 40);
+  if (!/^[a-z0-9/_()\- ]{1,40}$/i.test(key)) key = "(lainnya)";
+  if (!STATS.endpoints.has(key) && STATS.endpoints.size >= 100) key = "(lainnya)";
+  STATS.endpoints.set(key, (STATS.endpoints.get(key) || 0) + 1);
+}
+
+function statsRateLimit(req) {
+  const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
+  const now = Date.now();
+  const rec = statsHits.get(ip);
+  if (!rec || now - rec.start > STATS_RATE.windowMs) {
+    if (statsHits.size > 5000) {
+      for (const [k, v] of statsHits) if (now - v.start > STATS_RATE.windowMs) statsHits.delete(k);
+    }
+    statsHits.set(ip, { start: now, count: 1 });
+    return { ok: true };
+  }
+  rec.count += 1;
+  if (rec.count > STATS_RATE.max) return { ok: false, retryAfter: Math.max(1, Math.ceil((rec.start + STATS_RATE.windowMs - now) / 1000)) };
+  return { ok: true };
+}
+
+function statsCpuTimes() {
+  let idle = 0;
+  let total = 0;
+  for (const c of nodeOs.cpus()) {
+    const t = c.times;
+    idle += t.idle;
+    total += t.user + t.nice + t.sys + t.idle + t.irq;
+  }
+  return { idle, total, at: Date.now() };
+}
+
+async function statsCpu() {
+  const cores = nodeOs.cpus().length || 1;
+  const now = Date.now();
+  // panggilan beruntun dari banyak pengunjung memakai hasil terakhir agar angkanya tidak loncat-loncat
+  if (STATS.cpuLast && now - STATS.cpuLast.at < 1500) return STATS.cpuLast;
+
+  let prev = STATS.cpuPrev;
+  let cur = statsCpuTimes();
+  let procPrev = STATS.procPrev;
+  if (!prev || now - prev.at < 200) {
+    prev = cur;
+    procPrev = { usage: process.cpuUsage(), at: Date.now() };
+    await new Promise((r) => setTimeout(r, 250));
+    cur = statsCpuTimes();
+  }
+  const dTotal = cur.total - prev.total;
+  const dIdle = cur.idle - prev.idle;
+  const system = dTotal > 0 ? Math.max(0, Math.min(100, (1 - dIdle / dTotal) * 100)) : null;
+
+  const procNow = { usage: process.cpuUsage(), at: Date.now() };
+  let proc = 0;
+  if (procPrev) {
+    const used = (procNow.usage.user - procPrev.usage.user) + (procNow.usage.system - procPrev.usage.system);
+    const wall = Math.max(1, procNow.at - procPrev.at) * 1000;
+    proc = Math.max(0, Math.min(100, (used / wall / cores) * 100));
+  }
+
+  STATS.cpuPrev = cur;
+  STATS.procPrev = procNow;
+  STATS.cpuLast = { pct: system ?? proc, process: proc, at: Date.now() };
+  return STATS.cpuLast;
+}
+
+async function handleStats(req, res) {
+  try {
+    if (req.method !== "GET") {
+      return res.status(405).json({ success: false, message: "Gunakan method GET." });
+    }
+    const limit = statsRateLimit(req);
+    if (!limit.ok) {
+      res.setHeader("Retry-After", String(limit.retryAfter));
+      return res.status(429).json({ success: false, message: `Terlalu banyak request. Coba lagi dalam ${limit.retryAfter} detik.` });
+    }
+
+    const cpu = await statsCpu();
+    const total = nodeOs.totalmem();
+    const free = nodeOs.freemem();
+    const used = Math.max(0, total - free);
+    const mem = process.memoryUsage();
+
+    const nowMin = Math.floor(Date.now() / 60000);
+    const perMinute = Array.from({ length: 30 }, (_, i) => STATS.buckets.get(nowMin - 29 + i) || 0);
+    const sorted = [...STATS.durations].sort((a, b) => a - b);
+    const avgMs = sorted.length ? sorted.reduce((a, b) => a + b, 0) / sorted.length : 0;
+    const p95Ms = sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] : 0;
+    const top = [...STATS.endpoints.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([route, count]) => ({ route, count }));
+
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(200).json({
+      success: true,
+      data: {
+        time: Date.now(),
+        uptimeSec: Math.round(process.uptime()),
+        since: STATS.startedAt,
+        cpu: {
+          pct: Math.round(cpu.pct * 10) / 10,
+          processPct: Math.round(cpu.process * 10) / 10,
+          cores: nodeOs.cpus().length || 1,
+          model: String(nodeOs.cpus()[0]?.model || "").replace(/\s+/g, " ").trim(),
+          load: nodeOs.loadavg().map((n) => Math.round(n * 100) / 100)
+        },
+        memory: {
+          total, used, free,
+          pct: total ? Math.round((used / total) * 1000) / 10 : 0,
+          rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal
+        },
+        requests: {
+          total: STATS.total,
+          lastMinute: perMinute[29],
+          last5Min: perMinute.slice(25).reduce((a, b) => a + b, 0),
+          perMinute,
+          errors4xx: STATS.errors4xx,
+          errors5xx: STATS.errors5xx,
+          avgMs: Math.round(avgMs),
+          p95Ms: Math.round(p95Ms),
+          top
+        },
+        runtime: {
+          node: process.version,
+          platform: `${process.platform}/${process.arch}`,
+          region: process.env.VERCEL_REGION || null,
+          env: process.env.VERCEL_ENV || process.env.NODE_ENV || null
+        }
+      }
+    });
+  } catch (error) {
+    console.error("stats error:", error?.message || error);
+    return res.status(500).json({ success: false, message: "Gagal membaca statistik server." });
+  }
+}
+
 export default async function handler(req, res) {
   const routeKey = getRouteKey(req);
+
+  // hitung statistik untuk halaman /status (endpoint /api/stats sendiri tidak dihitung)
+  if (routeKey !== "stats") {
+    const startedAt = Date.now();
+    res.on("finish", () => statsRecord(routeKey, res.statusCode, Date.now() - startedAt));
+  }
 
   switch (routeKey) {
     case "album-search":
       return handleAlbumSearch(req, res);
     case "rudder-chat":
       return handleRudderChat(req, res);
+    case "stats":
+      return handleStats(req, res);
     case "add-subdomain":
       return handleAddSubdomain(req, res);
     case "check-host":
