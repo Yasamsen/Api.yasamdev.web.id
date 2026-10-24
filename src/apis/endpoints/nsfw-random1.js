@@ -1,6 +1,6 @@
 export default {
   slug: "nsfw-random1",
-  name: "NSFW-RANDOM V1",
+  name: "Nsfw Random V1",
   description:
     "Mengambil gambar atau video secara acak dari media repository Hentai.",
 
