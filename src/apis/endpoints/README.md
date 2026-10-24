@@ -62,3 +62,17 @@ Kategori ditampilkan dari `src/categories.js`, bukan dari teks `category` mentah
 - **Mau memastikan posisinya** — tambahkan slug endpoint ke daftar `SLUGS` di `src/categories.js`.
 - **Label yang benar-benar baru** — kategori dibuat otomatis (ikon folder) dan muncul di beranda, dokumentasi, dan sidebar.
 - **Mengubah teks/ikon/warna kategori** — edit array `CATEGORIES` di `src/categories.js`.
+
+
+## Endpoint `rudder-chat` (AI Chat)
+
+`GET /api/rudder-chat?message=Halo` (atau `POST` dengan body JSON `{"message":"Halo"}`). Opsional `sessionId` untuk melanjutkan percakapan.
+Atur environment variables berikut di Vercel (Project → Settings → Environment Variables), lalu **redeploy**:
+
+- `RUDDER_USER_ID`: user id akun rudder.chat.
+- `RUDDER_COOKIE_C0`: isi cookie `sb-auth-auth-token.0` (export dari browser yang sedang login).
+- `RUDDER_COOKIE_C1`: isi cookie `sb-auth-auth-token.1`.
+- `RUDDER_TH_WHO`: isi cookie `th_who` (opsional).
+
+Rate limit 10 request/menit per IP. Jika muncul error "cookie/token kedaluwarsa", ambil cookie baru dari browser lalu perbarui env var.
+Respons AI bisa memakan waktu >10 detik; jika di Vercel sering timeout, naikkan `maxDuration` fungsi `api/index.js` di `vercel.json`.
