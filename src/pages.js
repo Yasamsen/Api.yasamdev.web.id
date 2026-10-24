@@ -3,6 +3,7 @@ import { renderCreatorSection } from './creator.js';
 import { esc, icon, refreshIcons, copyText } from './utils.js';
 import { renderApiCard } from './components.js';
 import { observeReveals } from './motion.js';
+import { uiState, ALL, categoryById, catTile, matchApi, adultNotice } from './categories.js';
 import { extractMedia, mediaFromBlob, renderResponse } from './response-view.js';
 
 /* =========================================================
@@ -28,6 +29,84 @@ const typed = (text, delay, dur, cls = '') =>
 const reveal = (html, d = 0, tag = 'div', cls = '') => `<${tag} class="reveal ${cls}" style="--d:${d}ms">${html}</${tag}>`;
 
 /* =========================================================
+   HOME — EXPLORER KATEGORI
+   ========================================================= */
+
+const homeList = () => {
+  const { q, cat } = uiState.home;
+  return apiDefinitions.filter((a) => (!cat || a.categoryId === cat) && matchApi(a, q));
+};
+const homeCount = (id) => apiDefinitions.filter((a) => (!id || a.categoryId === id) && matchApi(a, uiState.home.q)).length;
+
+function catCardHtml(c, active, count) {
+  return `<button type="button" data-cat-card="${esc(c.id)}" aria-pressed="${active}" class="catcard ${active ? 'is-active' : ''}" ${count === 0 ? 'data-empty' : ''}>
+    ${catTile(c, 'h-11 w-11', 'h-5 w-5')}
+    <span class="min-w-0 flex-1">
+      <span class="block truncate text-[13px] font-extrabold leading-5 sm:text-sm">${esc(c.label)}</span>
+      <span class="mt-0.5 line-clamp-2 text-[11px] leading-4 text-muted max-sm:hidden">${esc(c.short)}</span>
+    </span>
+    <span data-cat-count class="catcount">${count}</span>
+  </button>`;
+}
+
+function bannerHtml() {
+  const c = uiState.home.cat ? categoryById(uiState.home.cat) : null;
+  if (!c) {
+    return `<div class="catbanner flex items-start gap-3 !shadow-none">${icon('Lightbulb', 'mt-0.5 h-5 w-5 shrink-0 text-gold')}<p class="text-sm leading-6 text-muted"><b class="text-fg">Bingung mulai dari mana?</b> Pilih kategori sesuai kebutuhanmu di atas, atau ketik kata kunci seperti <button data-suggest="download" class="font-bold text-gold underline decoration-2 underline-offset-2">download</button>, <button data-suggest="background" class="font-bold text-gold underline decoration-2 underline-offset-2">background</button> atau <button data-suggest="cuaca" class="font-bold text-gold underline decoration-2 underline-offset-2">cuaca</button> di kolom pencarian.</p></div>`;
+  }
+  return `<div class="catbanner flex flex-col gap-4 sm:flex-row sm:items-center">
+    <div class="flex min-w-0 flex-1 items-start gap-4">${catTile(c, 'h-12 w-12', 'h-5 w-5')}<div class="min-w-0">
+      <h3 class="text-lg font-extrabold leading-tight">${esc(c.label)}</h3>
+      <p class="mt-1 text-sm leading-6 text-muted">${esc(c.desc)}</p>
+      ${c.hint ? `<p class="mt-1.5 text-xs font-bold text-gold">Cocok kalau ${esc(c.hint)}.</p>` : ''}
+    </div></div>
+    <div class="flex shrink-0 gap-2"><button data-scroll="cats" class="btn btn-ghost btn-sm">Ganti kategori</button><button data-cat-card="" class="btn btn-gold btn-sm">Lihat semua</button></div>
+  </div>${c.adult ? `<div class="mt-4">${adultNotice}</div>` : ''}`;
+}
+
+function metaHtml(list) {
+  const q = uiState.home.q.trim();
+  return `<span>Menampilkan <b class="text-fg">${list.length}</b> dari ${apiDefinitions.length} API${q ? ` untuk “${esc(q)}”` : ''}</span>${q ? `<button data-clear-q class="inline-flex items-center gap-1 text-gold hover:underline">${icon('X', 'h-3.5 w-3.5')} Hapus pencarian</button>` : ''}`;
+}
+
+function emptyHtml() {
+  const { q, cat } = uiState.home;
+  const where = cat ? ` di kategori <b>${esc(categoryById(cat)?.label || '')}</b>` : '';
+  const others = getCategories()
+    .filter((c) => c.id !== cat)
+    .map((c) => [c, c.apis.filter((a) => matchApi(a, q)).length])
+    .filter(([, n]) => n > 0);
+  return `${icon('SearchX', 'mx-auto h-9 w-9 text-dim')}
+    <p class="mt-4 text-sm font-extrabold">Belum ada API yang cocok${q ? ` dengan “${esc(q.trim())}”` : ''}${where}</p>
+    ${others.length ? `<p class="mt-3 text-xs text-muted">Tapi ada hasil di kategori lain:</p><div class="mt-3 flex flex-wrap justify-center gap-2">${others.map(([c, n]) => `<button data-cat-card="${esc(c.id)}" class="catlink">${catTile(c, 'h-5 w-5 !rounded-md', 'h-3 w-3')}${esc(c.label)} <span class="text-dim">${n}</span></button>`).join('')}</div>` : '<p class="mt-1 text-xs text-dim">Coba kata kunci lain, atau pilih kategori dari daftar di atas.</p>'}
+    <button data-reset-filter class="btn btn-ghost btn-sm mt-6">${icon('RotateCcw', 'h-3.5 w-3.5')} Reset filter</button>`;
+}
+
+function renderExplorer() {
+  const { q, cat } = uiState.home;
+  const list = homeList();
+  const cards = [ALL, ...getCategories()].map((c) => catCardHtml(c, c.id === cat, homeCount(c.id))).join('');
+  return `<section class="mx-auto max-w-7xl scroll-mt-[calc(var(--nav-h)+8px)] px-4 py-16 sm:px-8 sm:py-24" id="apis">
+    ${reveal(`<div class="mb-8 flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
+      <div>
+        <p class="text-sm font-bold text-gold">Mulai dari sini</p>
+        <h2 class="text-balance mt-2 max-w-xl text-[2rem] leading-[1.1] sm:text-[2.75rem]">Kamu mau ngapain hari ini?</h2>
+        <p class="mt-4 max-w-lg text-sm leading-7 text-muted">Pilih kategori sesuai kebutuhanmu. Setiap kategori berisi API yang sejenis, jadi kamu tidak perlu menebak-nebak.</p>
+      </div>
+      <div class="relative w-full lg:w-80">${icon('Search', 'pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-dim')}<input id="home-search" value="${esc(q)}" placeholder="Cari: download, foto, cuaca…" aria-label="Cari API" autocomplete="off" class="input !rounded-full !pl-11"></div>
+    </div>`)}
+    ${reveal(`<div id="cats" class="mb-6 grid scroll-mt-[calc(var(--nav-h)+12px)] grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">${cards}</div>`, 60)}
+    <div id="cat-banner" class="mb-8">${bannerHtml()}</div>
+    <div id="results" class="scroll-mt-[calc(var(--nav-h)+12px)]">
+      <div id="result-meta" class="mb-4 flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-muted">${metaHtml(list)}</div>
+      <div id="api-grid" class="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3">${list.map((a, i) => renderApiCard(a, i)).join('')}</div>
+      <div id="no-apis" class="${list.length ? 'hidden' : ''} rounded-3xl border-2 border-dashed border-ink px-4 py-16 text-center">${emptyHtml()}</div>
+    </div>
+    ${reveal(`<button data-nav="/docs" class="group inline-flex items-center gap-2 text-sm font-bold text-gold">View all documentation ${icon('ArrowRight', 'h-4 w-4 transition-transform duration-500 group-hover:translate-x-1')}</button>`, 0, 'div', 'mt-12 text-center')}
+  </section>`;
+}
+
+/* =========================================================
    HOME
    ========================================================= */
 
@@ -50,7 +129,7 @@ export function renderHome() {
         </h1>
         <p class="seq mt-7 max-w-md text-base leading-8 text-muted" style="--d:.6s">Fast, reliable APIs for modern developers. Download media, generate content, and ship faster.</p>
         <div class="seq mt-9 flex flex-col gap-3 sm:flex-row" style="--d:.75s">
-          <button id="explore-apis" type="button" class="btn btn-gold">Explore the APIs ${icon('ArrowRight', 'arr h-4 w-4')}</button>
+          <button data-scroll="cats" class="btn btn-gold">Explore the APIs ${icon('ArrowRight', 'arr h-4 w-4')}</button>
           <button data-nav="/docs" class="btn btn-ghost">Read documentation</button>
         </div>
       </div>
@@ -68,7 +147,7 @@ export function renderHome() {
           <div class="mt-5 flex items-center gap-3"><div class="bar flex-1"><i style="--p:92%"></i></div><span class="text-xs font-extrabold">&lt;120ms</span></div>
         </div>
         <div class="grid grid-cols-4 gap-2.5 sm:gap-3">
-          ${[['BookOpen', 'Docs', '/docs', 'rgb(var(--gold2))', ''], ['Play', 'Try it', '/docs/instagram?try=true', 'rgb(var(--green))', '20 16 43'], ['Flame', 'Popular', '/docs/tiktok', 'rgb(var(--yellow))', '20 16 43'], ['Search', 'Browse', '/docs', 'rgb(var(--red))', '']].map(([ic, l, to, c, fg], i) => `<button data-nav="${to}" class="qtile"><span class="qico bob" style="--tile:${c};${fg ? `--tile-fg:rgb(${fg});` : ''}--d:${i * 0.35}s">${icon(ic, 'h-5 w-5')}</span><span class="text-xs font-extrabold">${l}</span></button>`).join('')}
+          ${[['BookOpen', 'Docs', '/docs', 'rgb(var(--gold2))', ''], ['Play', 'Try it', '/docs/instagram?try=true', 'rgb(var(--green))', '20 16 43'], ['Flame', 'Popular', '/docs/tiktok', 'rgb(var(--yellow))', '20 16 43'], ['Search', 'Browse', '#cats', 'rgb(var(--red))', '']].map(([ic, l, to, c, fg], i) => `<button ${to.startsWith('#') ? `data-scroll="${to.slice(1)}"` : `data-nav="${to}"`} class="qtile"><span class="qico bob" style="--tile:${c};${fg ? `--tile-fg:rgb(${fg});` : ''}--d:${i * 0.35}s">${icon(ic, 'h-5 w-5')}</span><span class="text-xs font-extrabold">${l}</span></button>`).join('')}
         </div>
         <div class="code">
           <div class="code-head">
@@ -98,19 +177,7 @@ export function renderHome() {
     </div>
   </section>
 
-  <section class="mx-auto max-w-7xl px-4 py-16 sm:px-8 sm:py-24" id="apis">
-    ${reveal(`<div class="mb-10 flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
-      <div>
-        <h2 class="text-balance max-w-xl text-[2rem] leading-[1.1] sm:text-[2.75rem]">Everything you need to build.</h2>
-        <p class="mt-4 max-w-md text-sm leading-7 text-muted">Production-ready endpoints with clear documentation and predictable responses.</p>
-      </div>
-      <div class="relative w-full lg:w-72">${icon('Search', 'pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-dim')}<input id="home-search" placeholder="Search APIs..." aria-label="Search APIs" class="input !rounded-full !pl-11"></div>
-    </div>`)}
-    ${reveal(`<div id="cat-chips" class="mb-8 flex flex-wrap gap-2"><button class="chip is-active" data-cat="">All</button>${cats.map((c) => `<button class="chip" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}</div>`, 60)}
-    <div id="api-grid" class="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3">${apiDefinitions.map((a, i) => renderApiCard(a, i)).join('')}</div>
-    <div id="no-apis" class="hidden rounded-3xl border-2 border-dashed border-ink py-20 text-center">${icon('Search', 'mx-auto h-8 w-8 text-dim')}<p class="mt-4 text-sm font-bold">No APIs found</p><p class="mt-1 text-xs text-dim">Try a different search term or category.</p></div>
-    ${reveal(`<button data-nav="/docs" class="group inline-flex items-center gap-2 text-sm font-bold text-gold">View all documentation ${icon('ArrowRight', 'h-4 w-4 transition-transform duration-500 group-hover:translate-x-1')}</button>`, 0, 'div', 'mt-12 text-center')}
-  </section>
+  ${renderExplorer()}
 
   <section class="band">
     <div class="mx-auto grid max-w-7xl grid-cols-[minmax(0,1fr)] gap-14 px-4 py-16 sm:px-8 sm:py-24 lg:grid-cols-2 lg:items-center lg:gap-20">
@@ -146,45 +213,48 @@ console.log(data.media[<span class="tk-n">0</span>].url);</code></pre>
 }
 
 export function bindHome() {
-  const state = { q: '', cat: '' };
-  const grid = document.getElementById('api-grid');
-  const empty = document.getElementById('no-apis');
+  const hs = uiState.home;
+  const $ = (id) => document.getElementById(id);
+  const input = $('home-search');
 
-  // Smoothly scroll from the hero to the API introduction and first endpoint cards.
-  document.getElementById('explore-apis')?.addEventListener('click', () => {
-    const section = document.getElementById('apis');
-    if (!section) return;
-    section.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
-    section.classList.remove('apis-arrival');
-    requestAnimationFrame(() => {
-      section.classList.add('apis-arrival');
-      window.setTimeout(() => section.classList.remove('apis-arrival'), 1100);
+  const paint = ({ scroll = false } = {}) => {
+    const list = homeList();
+    $('api-grid').innerHTML = list.map((a, i) => renderApiCard(a, i)).join('');
+    $('no-apis').innerHTML = emptyHtml();
+    $('no-apis').classList.toggle('hidden', list.length !== 0);
+    $('result-meta').innerHTML = metaHtml(list);
+    $('cat-banner').innerHTML = bannerHtml();
+    document.querySelectorAll('#cats [data-cat-card]').forEach((el) => {
+      const id = el.dataset.catCard;
+      const n = homeCount(id);
+      const on = id === hs.cat;
+      el.querySelector('[data-cat-count]').textContent = n;
+      el.toggleAttribute('data-empty', n === 0);
+      el.classList.toggle('is-active', on);
+      el.setAttribute('aria-pressed', String(on));
     });
-  });
-
-  const paint = () => {
-    const q = state.q.toLowerCase();
-    const list = apiDefinitions.filter((api) =>
-      (!state.cat || api.category === state.cat) &&
-      `${api.name} ${api.description} ${api.category}`.toLowerCase().includes(q)
-    );
-    grid.innerHTML = list.map((a, i) => renderApiCard(a, i)).join('');
-    empty.classList.toggle('hidden', list.length !== 0);
     refreshIcons();
     observeReveals();
+    if (scroll) $('results')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  document.getElementById('home-search')?.addEventListener('input', (e) => { state.q = e.target.value; paint(); });
+  input?.addEventListener('input', (e) => { hs.q = e.target.value; paint(); });
 
-  document.getElementById('cat-chips')?.addEventListener('click', (e) => {
-    const chip = e.target.closest('[data-cat]');
-    if (!chip) return;
-    state.cat = chip.dataset.cat;
-    document.querySelectorAll('#cat-chips .chip').forEach((c) => c.classList.toggle('is-active', c === chip));
-    paint();
+  $('apis')?.addEventListener('click', (e) => {
+    const card = e.target.closest('[data-cat-card]');
+    if (card) {
+      const id = card.dataset.catCard;
+      hs.cat = id && id === hs.cat ? '' : id;   // klik kategori yang sama lagi = kembali ke semua
+      paint({ scroll: !!card.closest('#cats') });
+      return;
+    }
+    const suggest = e.target.closest('[data-suggest]');
+    if (suggest) { hs.q = suggest.dataset.suggest; if (input) input.value = hs.q; paint({ scroll: true }); return; }
+    if (e.target.closest('[data-clear-q]')) { hs.q = ''; if (input) input.value = ''; paint(); return; }
+    if (e.target.closest('[data-reset-filter]')) { hs.q = ''; hs.cat = ''; if (input) input.value = ''; paint(); }
   });
 
-  document.getElementById('copy-base-url')?.addEventListener('click', async (e) => {
+  $('copy-base-url')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget;
     try { await copyText(window.location.origin); } catch { return; }
     btn.innerHTML = `${icon('Check', 'h-3.5 w-3.5 text-emerald-400')} Base URL copied`;
@@ -217,11 +287,11 @@ function tryPanel(api) {
       return `<label class="block"><span class="mb-2 block text-xs font-bold">${label}</span><select data-param="${esc(p.name)}" class="input font-mono !text-xs">${options}</select></label>`;
     }
     if (p.type === 'file') {
-      const uploadLabel = api.slug === 'tourl' || api.slug === 'upscale-image' || api.slug === 'compress-image' || api.slug === 'freeconvert-video-to-mp3' || api.slug === 'bgremover' || api.slug === 'ocr';
+      const uploadLabel = api.slug === 'tourl' || api.slug === 'freeconvert-video-to-mp3' || api.slug === 'bgremover' || api.slug === 'ocr';
       if (uploadLabel) return `<div class="sm:col-span-2">
         <span class="mb-2 block text-xs font-bold">Pilih file ${p.required ? '<span class="text-red-400">*</span>' : ''}</span>
         <label class="group relative flex cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border border-dashed border-[rgb(var(--gold)/.42)] bg-[rgb(var(--gold)/.04)] px-5 py-8 text-center transition-all hover:border-[rgb(var(--gold)/.8)] hover:bg-[rgb(var(--gold)/.08)] sm:py-10">
-          <input data-param="${esc(p.name)}" data-upload-input type="file" accept="${api.slug === 'upscale-image' ? 'image/png,image/jpeg,image/webp' : (api.slug === 'compress-image' ? 'image/png,image/jpeg,image/webp,image/gif,image/avif' : '*/*')}" class="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0" aria-label="Pilih file untuk diunggah" required="${p.required ? 'required' : ''}">
+          <input data-param="${esc(p.name)}" data-upload-input type="file" class="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0" aria-label="Pilih file untuk diunggah" required="${p.required ? 'required' : ''}">
           <span class="mb-3 grid h-14 w-14 place-items-center rounded-2xl border border-[rgb(var(--gold)/.25)] bg-[rgb(var(--gold)/.10)] text-gold transition-transform group-hover:-translate-y-0.5">${icon('UploadCloud', 'h-7 w-7')}</span>
           <span class="text-sm font-bold text-fg">Klik untuk memilih file</span>
           <span class="mt-1 text-xs text-muted">Pilih file dari perangkat kamu · ${esc(p.maxSizeLabel || 'Maksimal 4 MB')}</span>
@@ -263,9 +333,13 @@ export function renderDocs(path) {
       <div class="flex h-full flex-col">
         <div class="px-5 pb-4 pt-5">
           <div class="mb-4 flex items-center justify-between"><div class="flex items-center gap-2 text-sm font-extrabold">${icon('BookOpen', 'h-4 w-4 text-gold')} API Reference</div><button id="close-sidebar" class="iconbtn !h-8 !w-8 lg:hidden" aria-label="Close menu">${icon('X', 'h-4 w-4')}</button></div>
-          <div class="relative">${icon('Search', 'pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-dim')}<input id="docs-search" placeholder="Search endpoints" aria-label="Search endpoints" class="input !h-10 !rounded-full !pl-10 !text-xs"></div>
+          <div class="relative">${icon('Search', 'pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-dim')}<input id="docs-search" placeholder="Cari endpoint…" aria-label="Search endpoints" class="input !h-10 !rounded-full !pl-10 !text-xs"></div>
+          <div class="mt-3 flex items-center justify-between px-1 text-[11px] font-bold text-dim"><span>${categories.length} kategori · ${apiDefinitions.length} API</span><button id="toggle-all" class="text-gold hover:underline">${selected || uiState.docs.cat ? 'Tutup semua' : 'Buka semua'}</button></div>
         </div>
-        <nav id="docs-nav" class="flex-1 overflow-auto px-3 pb-4">${categories.map((cat) => `<div class="mb-3" data-category="${esc(cat)}"><button data-category-toggle class="mb-1 flex w-full items-center justify-between px-2 py-1 text-xs font-bold text-dim transition-colors hover:text-gold"><span>${esc(cat)}</span>${icon('ChevronDown', 'chev h-3 w-3')}</button><div class="fold"><div data-category-items>${apiDefinitions.filter((a) => a.category === cat).map((api) => docNavItem(api, selected)).join('')}</div></div></div>`).join('')}</nav>
+        <nav id="docs-nav" class="flex-1 overflow-auto px-3 pb-4">${categories.map((c) => {
+          const open = selected ? c.id === selected.categoryId : c.id === uiState.docs.cat;
+          return `<div class="mb-1.5" data-category="${esc(c.id)}" data-init-collapsed="${open ? '0' : '1'}" ${open ? '' : 'data-collapsed'}><button data-category-toggle class="catrow" aria-label="Buka atau tutup ${esc(c.label)}">${catTile(c, 'h-7 w-7 !rounded-lg', 'h-3.5 w-3.5')}<span class="flex-1 truncate text-left text-[13px] font-extrabold">${esc(c.label)}</span><span class="text-[11px] font-bold text-dim">${c.count}</span>${icon('ChevronDown', 'chev h-3.5 w-3.5 text-dim')}</button><div class="fold"><div data-category-items class="pb-1 pl-2">${c.apis.map((api) => docNavItem(api, selected)).join('')}</div></div></div>`;
+        }).join('')}<p id="docs-nav-empty" class="hidden px-3 py-6 text-center text-xs text-dim">Tidak ada endpoint yang cocok.</p></nav>
         <div class="border-t hair p-4"><div class="flex items-center gap-2.5 px-1 py-1"><span class="h-1.5 w-1.5 rounded-full bg-ok"></span><div><div class="text-xs font-bold">All systems operational</div><div class="text-[10px] text-dim">Last checked just now</div></div></div></div>
       </div>
     </aside>
@@ -279,14 +353,44 @@ function docNavItem(api, selected) {
   return `<button data-nav="/docs/${encodeURIComponent(api.slug)}" data-doc-api="${esc(api.slug)}" class="navitem ${active ? 'is-active' : ''}">${icon(api.icon, 'h-4 w-4')}<span class="flex-1 truncate">${esc(api.name)}</span><span class="text-[9px] font-extrabold ${api.method === 'GET' ? 'text-ok' : 'text-warn'}">${esc(api.method)}</span></button>`;
 }
 
+const docsMatches = (c) => c.apis.filter((a) => matchApi(a, uiState.docs.q));
+
+function docCard(api, i = 0) {
+  const c = categoryById(api.categoryId);
+  return reveal(`<button data-nav="/docs/${encodeURIComponent(api.slug)}" class="card group flex h-full w-full items-start gap-4 p-4 text-left"><span class="iconbox h-10 w-10 shrink-0" style="--tile:${c.tile};--tile-fg:${c.fg}">${icon(api.icon, 'h-4 w-4')}</span><span class="min-w-0 flex-1"><span class="flex items-center gap-2"><span class="truncate text-sm font-extrabold">${esc(api.name)}</span>${c.adult ? '<span class="badge !bg-red !py-0 !text-[9px] !text-white">18+</span>' : ''}</span><span class="mt-1 line-clamp-2 block text-[11.5px] leading-[1.15rem] text-muted">${esc(api.description)}</span><span class="mt-2 flex items-center gap-1.5"><span class="badge ${api.method === 'GET' ? 'badge-get' : 'badge-post'} !py-0 !text-[9px]">${esc(api.method)}</span><span class="truncate font-mono text-[10px] text-dim">${esc(api.endpoint)}</span></span></span>${icon('ChevronRight', 'mt-1 h-4 w-4 shrink-0 text-dim transition-all duration-300 group-hover:translate-x-1 group-hover:text-gold')}</button>`, (i % 2) * 90, 'div', 'h-full');
+}
+
+function docsChipsHtml() {
+  const cats = getCategories();
+  const chip = (id, label, n) => `<button data-docs-cat="${esc(id)}" class="chip ${uiState.docs.cat === id ? 'is-active' : ''}" ${n === 0 ? 'data-empty' : ''}>${esc(label)}<span class="chipn">${n}</span></button>`;
+  return chip('', 'Semua', cats.reduce((n, c) => n + docsMatches(c).length, 0)) + cats.map((c) => chip(c.id, c.label, docsMatches(c).length)).join('');
+}
+
+function docsSectionsHtml() {
+  const { cat, q } = uiState.docs;
+  const groups = getCategories().filter((c) => !cat || c.id === cat).map((c) => [c, docsMatches(c)]).filter(([, list]) => list.length);
+  if (!groups.length) {
+    return `<div class="rounded-3xl border-2 border-dashed border-ink px-4 py-16 text-center">${icon('SearchX', 'mx-auto h-9 w-9 text-dim')}<p class="mt-4 text-sm font-extrabold">Tidak ada endpoint yang cocok${q.trim() ? ` dengan “${esc(q.trim())}”` : ''}</p><p class="mt-1 text-xs text-dim">Coba kata kunci lain atau pilih kategori yang berbeda.</p><button data-docs-reset class="btn btn-ghost btn-sm mt-6">${icon('RotateCcw', 'h-3.5 w-3.5')} Reset filter</button></div>`;
+  }
+  return groups.map(([c, list]) => `<section class="mb-12">
+    <div class="mb-4 flex items-center gap-3">${catTile(c, 'h-11 w-11', 'h-5 w-5')}<div class="min-w-0 flex-1"><h2 class="text-xl leading-tight sm:text-2xl">${esc(c.label)} <span class="ml-1 text-sm font-bold text-dim">${list.length}</span></h2><p class="text-xs text-muted">${esc(c.short)}</p></div></div>
+    ${c.adult ? adultNotice : ''}
+    <div class="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2">${list.map((api, i) => docCard(api, i)).join('')}</div>
+  </section>`).join('');
+}
+
 function renderDocsIndex() {
   return `<div class="max-w-4xl">
-    <div class="mb-12">
+    <div class="mb-10">
       <p class="seq text-sm font-semibold text-gold" style="--d:.05s">Documentation</p>
       <h1 class="mt-3 text-[clamp(2.2rem,7vw,3.75rem)] leading-[1.05]"><span class="hl"><span style="--d:.12s">API Reference</span></span></h1>
-      <p class="seq mt-6 max-w-xl text-[15px] leading-8 text-muted" style="--d:.35s">Everything you need to integrate SamApi into your project. Pick an endpoint from the menu to get started.</p>
+      <p class="seq mt-6 max-w-xl text-[15px] leading-8 text-muted" style="--d:.35s">Semua endpoint dikelompokkan per kategori. Pilih kategori di bawah, atau cari langsung dengan kata kunci.</p>
     </div>
-    <div id="docs-cards" class="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2">${apiDefinitions.map((api, i) => reveal(`<button data-nav="/docs/${encodeURIComponent(api.slug)}" class="card group flex w-full items-center gap-4 p-4 text-left"><span class="iconbox h-10 w-10 shrink-0">${icon(api.icon, 'h-4 w-4')}</span><span class="min-w-0 flex-1"><span class="block truncate text-sm font-extrabold">${esc(api.name)}</span><span class="mt-1 block truncate font-mono text-[10px] text-dim">${esc(api.method)} ${esc(api.endpoint)}</span></span>${icon('ChevronRight', 'h-4 w-4 text-dim transition-all duration-300 group-hover:translate-x-1 group-hover:text-gold')}</button>`, (i % 2) * 90)).join('')}</div>
+    <div class="mb-8">
+      <div class="relative mb-4">${icon('Search', 'pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-dim')}<input id="docs-main-search" value="${esc(uiState.docs.q)}" placeholder="Cari endpoint: instagram, cuaca, hapus background…" aria-label="Cari endpoint" autocomplete="off" class="input !rounded-full !pl-11"></div>
+      <div id="docs-chips" class="no-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1 pb-2 sm:flex-wrap sm:overflow-visible">${docsChipsHtml()}</div>
+    </div>
+    <div id="docs-sections" class="scroll-mt-[calc(var(--nav-h)+16px)]">${docsSectionsHtml()}</div>
   </div>`;
 }
 
@@ -304,13 +408,15 @@ function renderApiDetail(api) {
   ).join('');
 
   const currentEndpoint = `${window.location.origin}${api.endpoint}`;
+  const cat = categoryById(api.categoryId);
+  const related = apiDefinitions.filter((a) => a.categoryId === api.categoryId && a.slug !== api.slug).slice(0, 4);
   const h2 = (t) => `<h2 class="mb-4 text-2xl">${t}</h2>`;
 
   return `<div class="max-w-3xl">
     <div class="mb-8 flex items-start gap-5">
       <div class="seq iconbox h-14 w-14 shrink-0" style="--d:.05s">${icon(api.icon, 'h-6 w-6')}</div>
       <div class="min-w-0">
-        <div class="seq mb-3 flex flex-wrap items-center gap-2.5" style="--d:.1s"><span class="badge badge-cat">${esc(api.category)}</span><span class="text-xs text-dim">Updated recently</span></div>
+        <div class="seq mb-3 flex flex-wrap items-center gap-2.5" style="--d:.1s"><button data-cat-jump="${esc(cat.id)}" class="catlink" title="Lihat semua API di kategori ${esc(cat.label)}"><i class="dot" style="--tile:${cat.tile}"></i>${esc(cat.label)}${icon('ChevronRight', 'h-3 w-3 text-dim')}</button>${cat.adult ? '<span class="badge !bg-red !text-white">18+</span>' : ''}<span class="text-xs text-dim">Updated recently</span></div>
         <h1 class="text-balance text-[clamp(2rem,7vw,3.75rem)] leading-[1]"><span class="hl"><span style="--d:.15s">${esc(api.name)}</span></span></h1>
       </div>
     </div>
@@ -321,6 +427,7 @@ function renderApiDetail(api) {
     ${reveal(`${h2('Example request')}${codeBlock(getCurrentApiUrl(api.exampleRequest), api.method === 'POST' ? 'http' : 'url')}`, 0, 'section', 'mb-12')}
     ${reveal(`${h2('Example response')}${codeBlock(JSON.stringify(api.responseExample, null, 2))}${fields ? `<div class="card mt-6"><div class="border-b hair px-5 py-3.5 text-xs font-semibold text-dim">Response fields</div>${fields}</div>` : ''}`, 0, 'section')}
     ${reveal(tryPanel(api), 0, 'div')}
+    ${related.length ? `<section class="mt-16"><div class="mb-4 flex items-end justify-between gap-3"><h2 class="text-2xl">Lainnya di ${esc(cat.label)}</h2><button data-cat-jump="${esc(cat.id)}" class="shrink-0 text-sm font-bold text-gold hover:underline">Lihat semua ${apiDefinitions.filter((a) => a.categoryId === cat.id).length}</button></div><div class="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2">${related.map((a, i) => docCard(a, i)).join('')}</div></section>` : ''}
   </div>`;
 }
 
@@ -347,21 +454,69 @@ export function bindDocs(api) {
     new IntersectionObserver(([entry]) => fab.toggleAttribute('data-hide', entry.isIntersecting), { threshold: 0 }).observe(footer);
   }
 
+  // ---- sidebar: buka/tutup kategori, "buka semua", pencarian
+  const nav = document.getElementById('docs-nav');
+  const catEls = () => [...document.querySelectorAll('#docs-nav [data-category]')];
+  const toggleAll = document.getElementById('toggle-all');
+  const syncToggleAll = () => { if (toggleAll) toggleAll.textContent = catEls().some((c) => !c.hasAttribute('data-collapsed')) ? 'Tutup semua' : 'Buka semua'; };
   document.querySelectorAll('[data-category-toggle]').forEach((btn) =>
-    btn.addEventListener('click', () => btn.closest('[data-category]').toggleAttribute('data-collapsed'))
+    btn.addEventListener('click', () => { btn.closest('[data-category]').toggleAttribute('data-collapsed'); syncToggleAll(); })
   );
+  toggleAll?.addEventListener('click', () => {
+    const anyOpen = catEls().some((c) => !c.hasAttribute('data-collapsed'));
+    catEls().forEach((c) => c.toggleAttribute('data-collapsed', anyOpen));
+    syncToggleAll();
+  });
 
   document.getElementById('docs-search')?.addEventListener('input', (e) => {
-    const q = e.target.value.toLowerCase();
-    document.querySelectorAll('[data-doc-api]').forEach((el) =>
-      el.classList.toggle('hidden', !`${el.textContent} ${el.dataset.docApi}`.toLowerCase().includes(q))
-    );
-    document.querySelectorAll('[data-category]').forEach((cat) => {
-      const has = !!cat.querySelector('[data-doc-api]:not(.hidden)');
-      cat.classList.toggle('hidden', !has);
-      if (q && has) cat.removeAttribute('data-collapsed');
+    const q = e.target.value.trim();
+    document.querySelectorAll('[data-doc-api]').forEach((el) => {
+      const item = getApiBySlug(el.dataset.docApi);
+      el.classList.toggle('hidden', !!q && !(item && matchApi(item, q)));
     });
+    let visible = 0;
+    catEls().forEach((cat) => {
+      const has = !!cat.querySelector('[data-doc-api]:not(.hidden)');
+      if (has) visible += 1;
+      cat.classList.toggle('hidden', !has);
+      // saat mencari: buka kategori yang ada hasilnya; saat dikosongkan: kembali ke keadaan awal
+      cat.toggleAttribute('data-collapsed', q ? !has : cat.dataset.initCollapsed === '1');
+    });
+    document.getElementById('docs-nav-empty')?.classList.toggle('hidden', visible > 0);
+    syncToggleAll();
   });
+
+  // gulirkan sidebar ke endpoint yang sedang dibuka
+  const activeItem = nav?.querySelector('.navitem.is-active');
+  if (nav && activeItem) nav.scrollTop = Math.max(0, activeItem.getBoundingClientRect().top - nav.getBoundingClientRect().top + nav.scrollTop - nav.clientHeight / 3);
+
+  // ---- indeks dokumentasi: chip kategori + pencarian
+  const sections = document.getElementById('docs-sections');
+  if (sections) {
+    const ds = uiState.docs;
+    const chips = document.getElementById('docs-chips');
+    const searchBox = document.getElementById('docs-main-search');
+    const paintDocs = ({ scroll = false } = {}) => {
+      sections.innerHTML = docsSectionsHtml();
+      chips.innerHTML = docsChipsHtml();
+      refreshIcons();
+      observeReveals();
+      if (scroll) sections.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    searchBox?.addEventListener('input', (e) => { ds.q = e.target.value; paintDocs(); });
+    chips?.addEventListener('click', (e) => {
+      const chip = e.target.closest('[data-docs-cat]');
+      if (!chip) return;
+      const id = chip.dataset.docsCat;
+      ds.cat = id && id === ds.cat ? '' : id;
+      paintDocs({ scroll: true });
+    });
+    sections.addEventListener('click', (e) => {
+      if (!e.target.closest('[data-docs-reset]')) return;
+      ds.q = ''; ds.cat = ''; if (searchBox) searchBox.value = '';
+      paintDocs();
+    });
+  }
 
   if (!api) return;
 
@@ -490,109 +645,6 @@ export function bindDocs(api) {
 /* =========================================================
    ERROR
    ========================================================= */
-
-
-export function renderWebInfo() {
-  return `<section class="mx-auto max-w-5xl px-4 pb-20 pt-32 sm:px-8">
-    <div class="mb-8"><span class="eyebrow">SYSTEM OVERVIEW</span><h1 class="mt-3 font-display text-4xl font-bold sm:text-5xl">Informasi <span class="text-gold">Web</span></h1><p class="mt-4 max-w-2xl text-sm leading-7 text-muted">Ringkasan kondisi runtime yang melayani website SamApi. Nilai CPU dan memori berlaku untuk instance server yang merespons permintaan ini.</p></div>
-    <div class="mb-5 flex items-center gap-3 rounded-2xl border hair p-4"><span class="web-info-pulse"></span><div><strong class="block text-sm">Kondisi sistem</strong><span id="web-info-status" class="text-xs text-muted">Menghubungkan ke server…</span></div></div>
-    <div id="web-info-statistics" class="web-info-grid web-info-page-grid" aria-label="Statistik informasi web">
-      <article class="web-info-card web-info-cpu-card"><span class="web-info-icon">${icon('Cpu','h-5 w-5')}</span><span class="web-info-label">CPU / Core</span><strong id="web-cpu">Memuat…</strong><div id="web-core-bars" class="web-core-bars" aria-label="Visual jumlah core CPU"></div><small id="web-cpu-sub">Core runtime server</small></article>
-      <article class="web-info-card"><span class="web-info-icon">${icon('MemoryStick','h-5 w-5')}</span><span class="web-info-label">RAM Server</span><strong id="web-ram">Memuat…</strong><small id="web-ram-sub">Pemakaian proses</small></article>
-      <article class="web-info-card"><span class="web-info-icon">${icon('Activity','h-5 w-5')}</span><span class="web-info-label">Uptime Proses</span><strong id="web-uptime">Memuat…</strong><small>Lama proses aktif pada instance ini</small></article>
-      <article class="web-info-card"><span class="web-info-icon">${icon('BarChart3','h-5 w-5')}</span><span class="web-info-label">Request Harian</span><strong id="web-requests">—</strong><small id="web-requests-sub">Total global perlu database statistik</small></article>
-    </div>
-    <p class="web-info-note mt-5">Angka diperbarui otomatis dan diberi animasi saat nilainya berubah. Metrik CPU dan memori mewakili instance server yang merespons; total request harian global memerlukan penyimpanan statistik bersama.</p>
-  </section>`;
-}
-
-export function bindWebInfo() {
-  // Guide attention to the statistics with a gentle, responsive scroll on entry.
-  // Respect reduced-motion preferences and avoid a sudden jump on small screens.
-  const stats = document.getElementById('web-info-statistics');
-  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-  if (stats && !reduceMotion) {
-    window.setTimeout(() => {
-      if (!document.body.contains(stats)) return;
-      stats.scrollIntoView({ behavior: 'smooth', block: window.innerWidth < 640 ? 'center' : 'start' });
-      stats.querySelectorAll('.web-info-card').forEach((card, index) => {
-        card.classList.add('web-stat-enter');
-        card.style.setProperty('--stat-enter-delay', `${index * 100}ms`);
-      });
-    }, 450);
-  }
-
-  const put = (id, value, animate = false) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    const next = String(value);
-    if (el.textContent !== next) {
-      el.textContent = next;
-      if (animate) {
-        el.classList.remove('web-info-value-change');
-        // Force a style recalculation so the transition can replay on each real update.
-        void el.offsetWidth;
-        el.classList.add('web-info-value-change');
-      }
-    }
-  };
-  const renderCoreBars = (count) => {
-    const host = document.getElementById('web-core-bars');
-    if (!host) return;
-    const total = Math.max(1, Math.min(32, Number(count) || 1));
-    if (Number(host.dataset.cores) === total) return;
-    host.dataset.cores = String(total);
-    host.innerHTML = Array.from({ length: total }, (_, i) => `<span class="web-core-bar" style="--core-index:${i};--core-delay:${(i % 8) * 55}ms" title="Core ${i + 1}"><i></i></span>`).join('');
-    host.setAttribute('aria-label', `${total} core terdeteksi`);
-  };
-  let fetchTimer = null;
-  let tickTimer = null;
-  let inFlight = false;
-  let uptimeSeconds = null;
-  let uptimeBase = 0;
-  const formatUptime = (seconds) => {
-    const n = Math.max(0, Math.floor(seconds));
-    const d = Math.floor(n / 86400), h = Math.floor(n % 86400 / 3600), m = Math.floor(n % 3600 / 60), sec = n % 60;
-    if (d) return `${d}h ${h}j ${m}m`;
-    if (h) return `${h}j ${m}m ${sec}d`;
-    if (m) return `${m}m ${sec}d`;
-    return `${sec} detik`;
-  };
-  const load = async () => {
-    if (inFlight || !document.getElementById('web-info-status')) return;
-    inFlight = true;
-    try {
-      const response = await fetch('/api/system-info', { headers: { accept: 'application/json' }, cache: 'no-store' });
-      if (!response.ok) throw new Error('Info server tidak tersedia');
-      const info = await response.json();
-      put('web-cpu', `${info.cpuCores} core`, true);
-      renderCoreBars(info.cpuCores);
-      put('web-cpu-sub', info.platform || 'Runtime server');
-      put('web-ram', `${info.memoryUsedMb} MB`, true);
-      put('web-ram-sub', `Heap ${info.heapUsedMb} / ${info.heapTotalMb} MB`);
-      uptimeSeconds = Number(info.uptimeSeconds ?? 0);
-      uptimeBase = Date.now();
-      put('web-uptime', formatUptime(uptimeSeconds), true);
-      put('web-info-status', 'Data sistem diperbarui otomatis');
-    } catch {
-      put('web-info-status', 'Menghubungkan kembali…');
-    } finally {
-      inFlight = false;
-    }
-  };
-  load();
-  // Fetch real server metrics at a modest interval; animate the displayed uptime every second.
-  fetchTimer = window.setInterval(load, 5000);
-  tickTimer = window.setInterval(() => {
-    if (uptimeSeconds !== null) put('web-uptime', formatUptime(uptimeSeconds + (Date.now() - uptimeBase) / 1000), true);
-  }, 1000);
-  const cleanup = () => {
-    if (fetchTimer) window.clearInterval(fetchTimer);
-    if (tickTimer) window.clearInterval(tickTimer);
-    window.removeEventListener('pagehide', cleanup);
-  };
-  window.addEventListener('pagehide', cleanup, { once: true });
-}
 
 export function renderError(type) {
   const is500 = type === '500';
