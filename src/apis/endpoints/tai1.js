@@ -1,6 +1,6 @@
 export default {
   slug: "tai1",
-  name: "Tai V1",
+  name: "Tai Random V1",
   description:
     "Mengambil gambar atau video secara acak dari media repository Hentai.",
 
