@@ -13058,27 +13058,17 @@ async function handleStats(req, res) {
 }
 
 /* ============================================================
- * MUSIC ALBUM — 1 ENDPOINT UNTUK SEARCH + DOWNLOAD
+ * MUSIC ALBUM — 1 ENDPOINT, 1 PARAMETER
  *   GET /api/music-album?artist=Ipank
- *       -> semua album + semua lagu milik artis, tiap lagu punya download_url
- *   GET /api/music-album?album_id=302127
- *       -> daftar lagu satu album
- *   GET /api/music-album?artist=Ipank&resolve=1-5
- *       -> sama seperti di atas, lagu nomor 1-5 langsung berisi audio_url (MP3)
- *   GET /api/music-album?track_id=3135553            -> JSON berisi audio_url
- *   GET /api/music-album?track_id=3135553&redirect=1 -> 302 langsung ke file MP3
+ *       -> semua lagu artis + audio_url (MP3 penuh) / download_url tiap lagu
  *
- * Metadata  : Deezer public API (tanpa API key). Deezer hanya memberi preview 30 detik.
- * Audio penuh: tiap lagu dicari di YouTube lalu dikonversi ke MP3 (ytSearch + insvidConvert,
- *              sama seperti /api/ytplay). Konversi memakan beberapa detik per lagu, jadi tidak
- *              dilakukan untuk seluruh katalog dalam satu request serverless: daftar lagu
- *              langsung muncul semua, MP3 dibuat saat download_url dibuka (atau lewat resolve).
+ * Daftar lagu : Deezer public API (tanpa API key), tanpa thumbnail & tanpa preview 30 detik.
+ * Audio penuh : tiap lagu dicari di YouTube lalu dikonversi ke MP3 (ytSearch + insvidConvert).
+ *               Dikerjakan paralel selama waktu fungsi masih cukup; sisanya tetap bisa lewat
+ *               download_url (dibuat saat dibuka).
  * ============================================================ */
 const MALBUM_API = "https://api.deezer.com";
-const MALBUM_MAX_BATCH = 5; // maksimal lagu yang dikonversi dalam satu request (resolve)
 const MALBUM_TRACK_TIMEOUT_MS = 40000;
-const MALBUM_DEFAULT_ALBUMS = 40;
-const MALBUM_MAX_ALBUMS = 100;
 const MALBUM_CONCURRENCY = 8; // Deezer membatasi ±50 request / 5 detik
 
 function malbumPrelude(req, res) {
@@ -13149,11 +13139,6 @@ async function malbumMapLimit(items, size, fn) {
   return out;
 }
 
-const malbumCover = (o) =>
-  o?.cover_xl || o?.cover_big || o?.cover_medium || o?.cover ||
-  o?.picture_xl || o?.picture_big || o?.picture_medium || o?.picture ||
-  o?.album?.cover_xl || o?.album?.cover_big || o?.album?.cover_medium || null;
-
 function malbumNorm(text) {
   return String(text || "")
     .toLowerCase()
@@ -13175,92 +13160,53 @@ function malbumFilename(artist, title) {
 
 /* ------------------------------ METADATA ------------------------------ */
 const MALBUM_TYPE_RANK = { album: 0, ep: 1, single: 2, compile: 3 };
-
-function malbumAlbumInfo(a, base, totalTracks) {
-  return {
-    album_id: String(a.id),
-    album_name: a.title || "",
-    album_type: a.record_type || "album",
-    release_date: a.release_date || null,
-    total_tracks: totalTracks ?? a.nb_tracks ?? null,
-    explicit: Boolean(a.explicit_lyrics),
-    cover_url: malbumCover(a),
-    album_url: a.link || null,
-    album_endpoint: `${base}/api/music-album?album_id=${a.id}`
-  };
-}
+const MALBUM_BUDGET_MS = 50000; // sisa waktu aman sebelum fungsi serverless habis (maxDuration 60 detik)
+const MALBUM_AUDIO_CONCURRENCY = 6;
+const MALBUM_CACHE_TTL_MS = 10 * 60 * 1000;
+const malbumAudioCache = new Map(); // track_id -> { audio_url, expires } (best effort, per instance)
 
 function malbumTrackInfo(t, album, base) {
   const artist = t.artist?.name || album.artist?.name || null;
-  const title = t.title || "";
   return {
     track_id: String(t.id),
-    title,
+    title: t.title || "",
     artist,
-    album_id: String(album.id),
     album_name: album.title || "",
     release_date: album.release_date || null,
     duration_sec: t.duration ?? null,
-    explicit: Boolean(t.explicit_lyrics),
-    cover_url: malbumCover(album),
-    preview_url: t.preview || null,
-    track_url: t.link || null,
-    filename: malbumFilename(artist, title),
-    // buka link ini -> langsung diarahkan (302) ke file MP3
-    download_url: `${base}/api/music-album?track_id=${t.id}&redirect=1`,
-    // sama, tetapi hasilnya JSON (audio_url + info YouTube)
-    json_url: `${base}/api/music-album?track_id=${t.id}`
+    filename: malbumFilename(artist, t.title),
+    // link MP3 penuh (bukan preview). Dibuka -> langsung diarahkan (302) ke file MP3.
+    download_url: `${base}/api/music-album?track_id=${t.id}&redirect=1`
   };
 }
 
-async function malbumAlbumTracks(albumId) {
-  const res = await malbumDeezer(`/album/${albumId}/tracks`, { limit: 500 });
-  return res.data || [];
-}
-
-// Cari artis; pilih yang namanya persis sama, kalau tidak ada pakai hasil teratas.
 async function malbumFindArtist(query) {
   const list = (await malbumDeezer("/search/artist", { q: query, limit: 5 })).data || [];
   if (!list.length) return null;
   const q = malbumNorm(query);
-  const exact = list.find((a) => malbumNorm(a.name) === q);
-  const picked = exact || list[0];
-  return {
-    picked,
-    others: list.filter((a) => a.id !== picked.id).map((a) => ({
-      artist_id: String(a.id),
-      name: a.name,
-      fans: a.nb_fan ?? null
-    }))
-  };
+  return list.find((a) => malbumNorm(a.name) === q) || list[0];
 }
 
-async function malbumArtistAlbums(artistId, maxAlbums) {
+async function malbumArtistAlbums(artistId) {
   const all = [];
-  let index = 0;
-  while (all.length < maxAlbums * 2 && index < 500) {
+  for (let index = 0; index < 1000; index += 100) {
     const page = await malbumDeezer(`/artist/${artistId}/albums`, { limit: 100, index });
     const data = page.data || [];
     all.push(...data);
     if (!page.next || data.length < 100) break;
-    index += 100;
   }
-
-  // Buang album dobel (judul sama), utamakan album > ep > single, lalu yang paling lama dulu.
+  // Utamakan album > ep > single, lalu yang paling lama dulu; buang judul album yang sama.
   const sorted = all.slice().sort((a, b) => {
     const r = (MALBUM_TYPE_RANK[a.record_type] ?? 9) - (MALBUM_TYPE_RANK[b.record_type] ?? 9);
     return r || String(a.release_date || "").localeCompare(String(b.release_date || ""));
   });
   const seen = new Set();
-  const unique = [];
-  for (const a of sorted) {
+  return sorted.filter((a) => {
     const key = malbumNorm(a.title);
-    if (!key || seen.has(key)) continue;
+    if (!key || seen.has(key)) return false;
     seen.add(key);
-    unique.push(a);
-    if (unique.length >= maxAlbums) break;
-  }
-  return unique;
+    return true;
+  });
 }
 
 /* ------------------------------ AUDIO ------------------------------ */
@@ -13342,53 +13288,53 @@ async function malbumResolveAudio(track, fallbackArtist) {
   };
 }
 
-function malbumParseSelection(raw, total) {
-  const m = String(raw).trim().match(/^(\d{1,4})(?:\s*-\s*(\d{1,4}))?$/);
-  if (!m) return { error: "Parameter resolve harus berupa nomor lagu (contoh: 3) atau rentang (contoh: 1-5)." };
-  const from = Number(m[1]);
-  const to = m[2] ? Number(m[2]) : from;
-  if (from < 1 || to < from) return { error: "Nomor lagu tidak valid. Nomor dimulai dari 1." };
-  if (to > total) return { error: `Hasil ini hanya punya ${total} lagu.` };
-  if (to - from + 1 > MALBUM_MAX_BATCH) {
-    return { error: `Maksimal ${MALBUM_MAX_BATCH} lagu per request. Pecah jadi beberapa request (mis. resolve=1-${MALBUM_MAX_BATCH}, lalu resolve=${MALBUM_MAX_BATCH + 1}-${MALBUM_MAX_BATCH * 2}).` };
-  }
-  return { numbers: Array.from({ length: to - from + 1 }, (_, i) => from + i) };
-}
-
 /* ------------------------------ HANDLER ------------------------------ */
+// Dipakai oleh download_url tiap lagu (bukan parameter yang perlu diisi manual).
 async function handleMusicAlbumTrack(req, res, trackId) {
   const wantsRedirect = /^(1|true|yes)$/i.test(String(req.query?.redirect || ""));
   try {
-    const track = await malbumDeezer(`/track/${trackId}`);
-    const artist = track.artist?.name || "";
-    const audio = await malbumResolveAudio(track, artist);
-
-    res.setHeader("Cache-Control", "no-store"); // link audio bersifat sementara
+    const cached = malbumAudioCache.get(trackId);
+    let audioUrl = cached && cached.expires > Date.now() ? cached.audio_url : null;
+    let track = null;
+    if (!audioUrl) {
+      track = await malbumDeezer(`/track/${trackId}`);
+      audioUrl = (await malbumResolveAudio(track, track.artist?.name || "")).audio_url;
+      malbumAudioCache.set(trackId, { audio_url: audioUrl, expires: Date.now() + MALBUM_CACHE_TTL_MS });
+    }
+    res.setHeader("Cache-Control", "no-store");
     if (wantsRedirect) {
-      res.setHeader("Location", audio.audio_url);
+      res.setHeader("Location", audioUrl);
       return res.status(302).end();
     }
-    return res.status(200).json({
-      status: true,
-      source: "Deezer + YouTube",
-      data: {
-        track_id: String(track.id),
-        title: track.title || "",
-        artist: artist || null,
-        album_id: track.album?.id != null ? String(track.album.id) : null,
-        album_name: track.album?.title || null,
-        duration_sec: track.duration ?? null,
-        cover_url: malbumCover(track),
-        filename: malbumFilename(artist, track.title),
-        ...audio
-      }
-    });
+    return res.status(200).json({ status: true, data: { track_id: trackId, audio_url: audioUrl } });
   } catch (error) {
-    if (error?.notFound) {
-      return res.status(404).json({ status: false, message: "Lagu tidak ditemukan." });
-    }
+    if (error?.notFound) return res.status(404).json({ status: false, message: "Lagu tidak ditemukan." });
     return malbumFail(res, error, "Gagal mengambil audio lagu.");
   }
+}
+
+// Buat audio_url sebanyak mungkin selama masih ada sisa waktu. Sisanya tetap bisa lewat download_url.
+async function malbumFillAudio(entries, deadline) {
+  let next = 0;
+  const worker = async () => {
+    while (next < entries.length && Date.now() < deadline - 3000) {
+      const { info, raw } = entries[next++];
+      const cached = malbumAudioCache.get(info.track_id);
+      if (cached && cached.expires > Date.now()) {
+        info.audio_url = cached.audio_url;
+        continue;
+      }
+      try {
+        const left = Math.max(5000, deadline - Date.now());
+        const audio = await malbumWithTimeout(malbumResolveAudio(raw, info.artist), left, "Konversi audio terlalu lama.");
+        info.audio_url = audio.audio_url;
+        malbumAudioCache.set(info.track_id, { audio_url: audio.audio_url, expires: Date.now() + MALBUM_CACHE_TTL_MS });
+      } catch (error) {
+        info.error = error?.message || "Gagal mengambil audio.";
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: MALBUM_AUDIO_CONCURRENCY }, worker));
 }
 
 async function handleMusicAlbum(req, res) {
@@ -13396,159 +13342,93 @@ async function handleMusicAlbum(req, res) {
 
   const q = req.query || {};
   const trackId = String(q.track_id ?? "").trim();
-  const albumIdParam = String(q.album_id ?? q.id ?? "").trim();
-  const artistIdParam = String(q.artist_id ?? "").trim();
-  const artistQuery = String(q.artist ?? q.query ?? q.q ?? "").trim();
-
-  // 1) satu lagu -> audio_url / redirect ke MP3
   if (trackId) {
     if (!/^\d{1,15}$/.test(trackId)) {
-      return res.status(400).json({ status: false, message: "Parameter track_id tidak valid." });
+      return res.status(400).json({ status: false, message: "track_id tidak valid." });
     }
     return handleMusicAlbumTrack(req, res, trackId);
   }
 
-  if (!artistQuery && !artistIdParam && !albumIdParam) {
-    return res.status(400).json({
-      status: false,
-      message: "Isi parameter artist (nama artis). Alternatif: album_id atau track_id.",
-      example: "/api/music-album?artist=Ipank"
-    });
-  }
-  for (const [name, val] of [["album_id", albumIdParam], ["artist_id", artistIdParam]]) {
-    if (val && !/^\d{1,15}$/.test(val)) {
-      return res.status(400).json({ status: false, message: `Parameter ${name} tidak valid.` });
-    }
+  const startedAt = Date.now();
+  const artistQuery = String(q.artist ?? q.query ?? q.q ?? "").trim();
+  if (!artistQuery) {
+    return res.status(400).json({ status: false, message: "Parameter artist wajib diisi.", example: "/api/music-album?artist=Ipank" });
   }
   if (artistQuery.length > 100) {
     return res.status(400).json({ status: false, message: "Parameter artist maksimal 100 karakter." });
   }
 
   const base = malbumBase(req);
-  const maxAlbums = Math.min(MALBUM_MAX_ALBUMS, Math.max(1, parseInt(q.max_albums, 10) || MALBUM_DEFAULT_ALBUMS));
-  const dedupe = !/^(0|false|no)$/i.test(String(q.dedupe ?? "true"));
-  const resolveParam = q.resolve !== undefined && String(q.resolve).trim() !== "" ? String(q.resolve) : null;
 
   try {
-    let artistInfo = null;
-    let otherMatches = [];
-    let rawAlbums = [];
-    let artistId = null;
-
-    if (albumIdParam) {
-      // 2) satu album
-      const album = await malbumDeezer(`/album/${albumIdParam}`);
-      rawAlbums = [album];
-      artistId = album.artist?.id ?? null;
-      artistInfo = album.artist
-        ? { artist_id: String(album.artist.id), name: album.artist.name, picture_url: malbumCover(album.artist), artist_url: album.artist.link || null }
-        : null;
-    } else {
-      // 3) semua album milik artis
-      let artist = null;
-      if (artistIdParam) {
-        artist = await malbumDeezer(`/artist/${artistIdParam}`);
-      } else {
-        const found = await malbumFindArtist(artistQuery);
-        if (!found) {
-          return res.status(404).json({ status: false, message: `Artis "${artistQuery}" tidak ditemukan.`, example: "/api/music-album?artist=Ipank" });
-        }
-        artist = found.picked;
-        otherMatches = found.others;
-      }
-      artistId = artist.id;
-      artistInfo = {
-        artist_id: String(artist.id),
-        name: artist.name,
-        picture_url: malbumCover(artist),
-        fans: artist.nb_fan ?? null,
-        artist_url: artist.link || null
-      };
-      rawAlbums = await malbumArtistAlbums(artist.id, maxAlbums);
+    const artist = await malbumFindArtist(artistQuery);
+    if (!artist) {
+      return res.status(404).json({ status: false, message: `Artis "${artistQuery}" tidak ditemukan.` });
     }
 
+    const rawAlbums = await malbumArtistAlbums(artist.id);
     if (!rawAlbums.length) {
-      return res.status(404).json({ status: false, message: "Artis ini tidak punya album yang bisa dibaca.", data: { artist: artistInfo } });
+      return res.status(404).json({ status: false, message: `${artist.name} tidak punya album yang bisa dibaca.` });
     }
 
-    // Ambil lagu tiap album (paralel terbatas).
     const trackLists = await malbumMapLimit(rawAlbums, MALBUM_CONCURRENCY, async (a) => {
       try {
-        return await malbumAlbumTracks(a.id);
+        return (await malbumDeezer(`/album/${a.id}/tracks`, { limit: 500 })).data || [];
       } catch {
         return [];
       }
     });
 
-    const tracks = [];
-    const seenTitles = new Set();
+    const entries = [];
     const albums = [];
+    const seenTitles = new Set();
     rawAlbums.forEach((a, i) => {
-      // Lewati lagu artis lain (mis. di album kompilasi).
-      const mine = trackLists[i].filter((t) => !artistId || !t.artist?.id || String(t.artist.id) === String(artistId));
       let added = 0;
-      for (const t of mine) {
-        if (dedupe) {
-          const key = malbumNorm(t.title_short || t.title);
-          if (key && seenTitles.has(key)) continue;
-          seenTitles.add(key);
-        }
-        tracks.push(malbumTrackInfo(t, a, base));
+      for (const t of trackLists[i]) {
+        if (t.artist?.id && String(t.artist.id) !== String(artist.id)) continue; // lagu artis lain
+        const key = malbumNorm(t.title_short || t.title);
+        if (key && seenTitles.has(key)) continue; // judul sama di album/single lain
+        seenTitles.add(key);
+        entries.push({ info: malbumTrackInfo(t, a, base), raw: t });
         added++;
       }
-      if (added || albumIdParam) albums.push(malbumAlbumInfo(a, base, added));
+      if (added) {
+        albums.push({
+          album_name: a.title || "",
+          album_type: a.record_type || "album",
+          release_date: a.release_date || null,
+          total_tracks: added
+        });
+      }
     });
 
-    if (!tracks.length) {
-      return res.status(404).json({ status: false, message: "Tidak ada lagu yang ditemukan.", data: { artist: artistInfo } });
+    if (!entries.length) {
+      return res.status(404).json({ status: false, message: `Tidak ada lagu ${artist.name} yang ditemukan.` });
     }
-    tracks.forEach((t, i) => { t.no = i + 1; });
+    entries.forEach((e, i) => { e.info.no = i + 1; });
 
-    // Opsional: langsung buat audio_url untuk beberapa lagu pertama/terpilih.
-    let resolved = null;
-    if (resolveParam) {
-      const selection = malbumParseSelection(resolveParam, tracks.length);
-      if (selection.error) {
-        return res.status(400).json({ status: false, message: selection.error, total_tracks: tracks.length });
-      }
-      const rawById = new Map();
-      trackLists.forEach((list) => list.forEach((t) => rawById.set(String(t.id), t)));
-      const settled = await Promise.allSettled(
-        selection.numbers.map((no) => {
-          const info = tracks[no - 1];
-          const raw = rawById.get(info.track_id) || { id: info.track_id, title: info.title, duration: info.duration_sec };
-          return malbumResolveAudio(raw, info.artist);
-        })
-      );
-      settled.forEach((r, i) => {
-        const t = tracks[selection.numbers[i] - 1];
-        if (r.status === "fulfilled") Object.assign(t, r.value);
-        else t.error = r.reason?.message || "Gagal mengambil audio.";
-      });
-      const succeeded = selection.numbers.filter((no) => tracks[no - 1].audio_url).length;
-      resolved = { requested: selection.numbers.length, succeeded, failed: selection.numbers.length - succeeded };
-      res.setHeader("Cache-Control", "no-store");
-    } else {
-      res.setHeader("Cache-Control", "public, s-maxage=600, stale-while-revalidate=3600");
-    }
+    // Link MP3 penuh untuk sebanyak mungkin lagu selama waktu masih cukup.
+    await malbumFillAudio(entries, startedAt + MALBUM_BUDGET_MS);
 
+    const tracks = entries.map((e) => {
+      const { no, track_id, title, artist: by, album_name, release_date, duration_sec, filename, audio_url, download_url } = e.info;
+      return { no, track_id, title, artist: by, album_name, release_date, duration_sec, filename, audio_url: audio_url || null, download_url };
+    });
+    const ready = tracks.filter((t) => t.audio_url).length;
+
+    res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({
       status: true,
-      source: "Deezer + YouTube",
-      data: {
-        query: artistQuery || null,
-        artist: artistInfo,
-        other_matches: otherMatches,
-        total_albums: albums.length,
-        total_tracks: tracks.length,
-        ...(resolved ? { resolved } : {}),
-        albums,
-        tracks,
-        how_to_download:
-          `Buka download_url tiap lagu untuk langsung mengunduh MP3 (diarahkan 302), atau json_url untuk mendapat audio_url dalam JSON. ` +
-          `Tambah &resolve=1-${MALBUM_MAX_BATCH} agar ${MALBUM_MAX_BATCH} lagu pertama langsung berisi audio_url (maksimal ${MALBUM_MAX_BATCH} lagu per request). Link audio bersifat sementara.`,
-        generated_at: new Date().toISOString()
-      }
+      artist: artist.name,
+      total_albums: albums.length,
+      total_tracks: tracks.length,
+      audio_ready: ready,
+      audio_pending: tracks.length - ready,
+      ...(ready < tracks.length
+        ? { note: "Lagu yang audio_url-nya null belum sempat diproses dalam batas waktu. Buka download_url-nya (MP3 penuh), atau panggil endpoint ini sekali lagi." }
+        : {}),
+      albums,
+      tracks
     });
   } catch (error) {
     return malbumFail(res, error, "Gagal memproses permintaan musik.");

@@ -78,16 +78,12 @@ Rate limit 10 request/menit per IP. Jika muncul error "cookie/token kedaluwarsa"
 Respons AI bisa memakan waktu >10 detik; jika di Vercel sering timeout, naikkan `maxDuration` fungsi `api/index.js` di `vercel.json`.
 
 
-## Endpoint `music-album` (search + download dalam satu endpoint)
+## Endpoint `music-album`
 
-Tanpa API key dan tanpa environment variable. Metadata dari Deezer, audio penuh dari hasil konversi YouTube (helper yang sama dengan `ytplay`).
+Tanpa API key dan tanpa environment variable. Hanya satu parameter:
 
-- `GET /api/music-album?artist=Ipank` — semua album dan **semua lagu** milik artis. Tiap lagu punya `download_url` (klik/buka -> diarahkan ke MP3) dan `json_url` (hasil JSON berisi `audio_url`).
-- `GET /api/music-album?artist=Ipank&resolve=1-5` — sama, tetapi lagu nomor 1-5 langsung berisi `audio_url` (maksimal 5 lagu per request).
-- `GET /api/music-album?album_id=302127` — lagu satu album saja.
-- `GET /api/music-album?track_id=3135553` — JSON `audio_url` satu lagu; tambah `&redirect=1` untuk langsung 302 ke file MP3.
-- Opsional: `max_albums` (default 40, maksimal 100), `dedupe=false` untuk menampilkan semua versi lagu, `artist_id` jika `other_matches` menunjukkan artis lain yang dimaksud.
+- `GET /api/music-album?artist=Ipank` — semua lagu/karya artis. Tiap lagu berisi `audio_url` (MP3 penuh, bukan preview 30 detik) dan `download_url` (selalu ada; dibuka -> diarahkan ke MP3 penuh). Tanpa thumbnail.
 
-Konversi satu lagu memakan beberapa detik, jadi MP3 tidak dibuat untuk seluruh katalog dalam satu request serverless; daftar lagu muncul semua, MP3 dibuat saat `download_url` dibuka. `audio_url` bersifat sementara. Deezer hanya menyediakan preview 30 detik (`preview_url`).
+Daftar lagu dari Deezer, audio penuh dari hasil konversi YouTube (helper yang sama dengan `ytplay`). Konversi dikerjakan paralel selama waktu fungsi cukup (±50 detik, `maxDuration` 60 detik di `vercel.json`). Lagu yang belum sempat diproses berisi `audio_url: null`, tetapi `download_url`-nya tetap berfungsi; memanggil endpoint sekali lagi juga melanjutkan sisanya (hasil dicache ±10 menit). `audio_url` bersifat sementara.
 
-Route lama `music-album-search` dan `music-album-download` masih diarahkan ke handler ini sebagai alias (`query` = `artist`, `id` = `album_id`).
+Route lama `music-album-search` dan `music-album-download` diarahkan ke handler ini (`query` = `artist`).
