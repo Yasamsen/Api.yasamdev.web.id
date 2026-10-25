@@ -1,0 +1,75 @@
+export default {
+  slug: "to-anime",
+  name: "To Anime",
+  description:
+    "Ubah foto menjadi gambar bergaya anime (anime, ghibli, manga, chibi, atau cyberpunk) memakai AI. Kirim link langsung ke gambar (JPG/PNG/WEBP, maksimal 4 MB).",
+  category: "Image",
+  method: "GET",
+  endpoint: "/api/to-anime",
+  icon: "Wand2",
+  parameters: [
+    {
+      name: "image",
+      type: "string",
+      required: true,
+      description: "Link langsung ke file gambar (JPG, PNG, atau WEBP, maksimal 4 MB). Link yang di-redirect tidak didukung.",
+      example: "https://example.com/foto.jpg",
+    },
+    {
+      name: "style",
+      type: "select",
+      required: false,
+      description: "Gaya hasil. Default: anime.",
+      options: [
+        { value: "anime", label: "Anime" },
+        { value: "ghibli", label: "Ghibli" },
+        { value: "manga", label: "Manga (hitam putih)" },
+        { value: "chibi", label: "Chibi" },
+        { value: "cyberpunk", label: "Cyberpunk" },
+      ],
+      example: "anime",
+    },
+    {
+      name: "ratio",
+      type: "select",
+      required: false,
+      description: "Rasio hasil. Default: sama dengan gambar asli.",
+      options: ["match_input_image", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
+      example: "match_input_image",
+    },
+    {
+      name: "format",
+      type: "select",
+      required: false,
+      description: "json (default) membalas link hasil. image membalas langsung berupa gambar.",
+      options: [
+        { value: "json", label: "JSON" },
+        { value: "image", label: "Gambar langsung" },
+      ],
+      example: "json",
+    },
+  ],
+  responseExample: {
+    status: true,
+    source: "PhotoEditorAI",
+    data: {
+      style: "anime",
+      ratio: "match_input_image",
+      job_id: "abc123",
+      result_url: "https://example.com/hasil-anime.png",
+      other_urls: [],
+      runtime_ms: 21450,
+    },
+  },
+  responseFields: [
+    { name: "status", type: "boolean", description: "true jika berhasil." },
+    { name: "source", type: "string", description: "Layanan AI yang dipakai." },
+    { name: "data.style", type: "string", description: "Gaya yang dipakai." },
+    { name: "data.job_id", type: "string", description: "ID job di layanan AI." },
+    { name: "data.result_url", type: "string", description: "Link gambar hasil anime." },
+    { name: "data.other_urls", type: "array", description: "Link tambahan dari layanan AI (jika ada)." },
+    { name: "data.runtime_ms", type: "number", description: "Lama proses dalam milidetik." },
+  ],
+  exampleRequest:
+    "https://samapi.example.com/api/to-anime?image=https://example.com/foto.jpg&style=anime",
+};

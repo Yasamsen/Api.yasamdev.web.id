@@ -13776,6 +13776,204 @@ async function handleEndpointStatus(req, res) {
   return res.status(200).json({ status: true, endpoints: out });
 }
 
+/* ============================================================
+ * TO ANIME — ubah foto jadi gaya anime
+ *   GET /api/to-anime?image=https://.../foto.jpg&style=anime
+ *   &format=image  -> balas langsung berupa gambar (default: JSON berisi URL hasil)
+ * Upstream: PhotoEditorAI (dipakai juga oleh /api/photoeditor-ai).
+ * Batas waktu total 50 detik supaya aman di bawah maxDuration Vercel (60 detik).
+ * ============================================================ */
+const TOANIME_MAX_BYTES = 4_000_000;
+const TOANIME_DEADLINE_MS = 50000;
+const TOANIME_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const TOANIME_RATIOS = ["match_input_image", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"];
+const TOANIME_KEEP = "Keep the same subject, face identity, pose, composition and hair/clothing colors.";
+const TOANIME_STYLES = {
+  anime: `Convert this photo into a high-quality anime illustration. ${TOANIME_KEEP} Clean line art, cel shading, large expressive eyes, vibrant colors, detailed anime background.`,
+  ghibli: `Redraw this photo as a hand-painted Studio Ghibli style animation frame. ${TOANIME_KEEP} Soft watercolor background, warm natural light, gentle shading.`,
+  manga: `Redraw this photo as a black and white Japanese manga panel. ${TOANIME_KEEP} Ink line art, screentone shading, dramatic contrast.`,
+  chibi: `Redraw this photo as a cute chibi anime character with a big head and small body. ${TOANIME_KEEP} Pastel colors, clean outlines, kawaii style.`,
+  cyberpunk: `Redraw this photo as a cyberpunk anime illustration. ${TOANIME_KEEP} Neon lights, futuristic city background, glowing accents.`
+};
+
+function toAnimeImageType(buf) {
+  if (!buf || buf.length < 12) return null;
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return { mime: "image/jpeg", ext: "jpg" };
+  if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return { mime: "image/png", ext: "png" };
+  if (buf.subarray(0, 4).toString("ascii") === "RIFF" && buf.subarray(8, 12).toString("ascii") === "WEBP") return { mime: "image/webp", ext: "webp" };
+  return null;
+}
+
+// Ambil semua URL http(s) dari objek hasil upstream, gambar didahulukan.
+function toAnimeCollectUrls(root) {
+  const urls = [];
+  const walk = (v, depth) => {
+    if (v == null || depth > 8) return;
+    if (typeof v === "string") { if (/^https?:\/\/\S+$/i.test(v)) urls.push(v); }
+    else if (Array.isArray(v)) v.forEach((x) => walk(x, depth + 1));
+    else if (typeof v === "object") Object.values(v).forEach((x) => walk(x, depth + 1));
+  };
+  walk(root, 0);
+  const unique = [...new Set(urls)];
+  const isImg = (u) => /\.(jpe?g|png|webp|gif)(?:[?#]|$)/i.test(u);
+  return [...unique.filter(isImg), ...unique.filter((u) => !isImg(u))];
+}
+
+async function toAnimeFetchInput(rawUrl) {
+  let parsed;
+  try { parsed = new URL(rawUrl); } catch { throw Object.assign(new Error("URL gambar tidak valid."), { httpStatus: 400 }); }
+  if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) {
+    throw Object.assign(new Error("Hanya URL http/https tanpa username/password yang diizinkan."), { httpStatus: 400 });
+  }
+  // Cegah SSRF ke jaringan internal
+  const addrs = net.isIP(parsed.hostname)
+    ? [{ address: parsed.hostname }]
+    : await dns.lookup(parsed.hostname, { all: true }).catch(() => []);
+  if (!addrs.length || addrs.some((a) => isPrivateIp(a.address))) {
+    throw Object.assign(new Error("Host gambar tidak diizinkan atau tidak ditemukan."), { httpStatus: 400 });
+  }
+  let r;
+  try {
+    r = await axios.get(parsed.href, {
+      responseType: "arraybuffer",
+      timeout: 15000,
+      maxRedirects: 0, // redirect tidak diikuti agar tidak lolos dari pengecekan SSRF
+      maxContentLength: TOANIME_MAX_BYTES,
+      maxBodyLength: TOANIME_MAX_BYTES,
+      headers: { "User-Agent": TOANIME_UA, Accept: "image/*,*/*;q=0.8" },
+      validateStatus: () => true
+    });
+  } catch (e) {
+    if (/maxContentLength|maxBodyLength/i.test(e.message)) throw Object.assign(new Error("Gambar terlalu besar. Maksimal 4 MB."), { httpStatus: 413 });
+    throw Object.assign(new Error(`Gagal mengunduh gambar: ${e.message}`), { httpStatus: 502 });
+  }
+  if (r.status >= 300 && r.status < 400) throw Object.assign(new Error("URL gambar mengalihkan (redirect). Gunakan link langsung ke file gambar."), { httpStatus: 400 });
+  if (r.status !== 200) throw Object.assign(new Error(`Server gambar membalas HTTP ${r.status}.`), { httpStatus: 400 });
+  const buffer = Buffer.from(r.data);
+  const type = toAnimeImageType(buffer);
+  if (!type) throw Object.assign(new Error("File bukan gambar yang didukung (JPG, PNG, atau WEBP)."), { httpStatus: 415 });
+  return { buffer, ...type };
+}
+
+async function toAnimeRun(file, prompt, ratio, deadlineAt) {
+  const serial = Array.from({ length: 32 }, () => "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 36)]).join("");
+  const common = { "Product-Serial": serial, Origin: "https://photoeditorai.io", Referer: "https://photoeditorai.io/", "User-Agent": TOANIME_UA };
+  const left = () => Math.max(1000, deadlineAt - Date.now());
+
+  const form = new FormData();
+  form.append("model_name", "photoeditor_4.0");
+  form.append("feature", "photo_editor");
+  form.append("target_images", file.buffer, { filename: `image-${Date.now()}.${file.ext}`, contentType: file.mime });
+  form.append("prompt", prompt);
+  form.append("ratio", ratio);
+  form.append("image_resolution", "1K");
+
+  const created = await axios.post("https://api.photoeditorai.io/pe/photo-editor/create-job", form, {
+    headers: { ...form.getHeaders(), ...common },
+    timeout: Math.min(20000, left())
+  });
+  if (created.data?.code !== 100000) {
+    throw Object.assign(new Error(`Server AI menolak permintaan: ${created.data?.message || "unknown error"}`), { httpStatus: 502 });
+  }
+  const jobId = created.data?.result?.job_id;
+  if (!jobId) throw Object.assign(new Error("Job ID tidak ditemukan dari server AI."), { httpStatus: 502 });
+
+  while (Date.now() < deadlineAt - 3500) {
+    await new Promise((r) => setTimeout(r, 3000));
+    const poll = await axios.get(`https://api.photoeditorai.io/pe/photo-editor/get-job/${encodeURIComponent(jobId)}?feature=photo_editor`, {
+      headers: common,
+      timeout: Math.min(10000, left()),
+      validateStatus: () => true
+    });
+    const result = poll.data?.result;
+    if (!result) continue;
+    if (result.status === 2) {
+      const urls = toAnimeCollectUrls(result);
+      if (!urls.length) throw Object.assign(new Error("Proses selesai tetapi URL hasil tidak ditemukan."), { httpStatus: 502 });
+      return { jobId, urls };
+    }
+    if ([3, 4, -1].includes(result.status)) {
+      throw Object.assign(new Error(result.message || "Proses AI gagal (gambar mungkin ditolak oleh server AI)."), { httpStatus: 422 });
+    }
+  }
+  throw Object.assign(new Error("Proses AI belum selesai dalam batas waktu. Coba lagi."), { httpStatus: 504 });
+}
+
+async function handleToAnime(req, res) {
+  try {
+    if (req.method !== "GET") {
+      res.setHeader("Allow", "GET");
+      return res.status(405).json({ status: false, message: "Method tidak diizinkan. Gunakan GET.", error: "Method Not Allowed" });
+    }
+
+    const image = String(req.query?.image || req.query?.url || "").trim();
+    const style = String(req.query?.style || "anime").trim().toLowerCase();
+    const ratio = String(req.query?.ratio || "match_input_image").trim();
+    const asImage = String(req.query?.format || "").toLowerCase() === "image";
+
+    if (!image) {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter image wajib diisi.",
+        error: 'example: "/api/to-anime?image=https://example.com/foto.jpg&style=anime"'
+      });
+    }
+    if (!TOANIME_STYLES[style]) {
+      return res.status(400).json({ status: false, message: "Style tidak didukung.", error: `Pilihan: ${Object.keys(TOANIME_STYLES).join(", ")}` });
+    }
+    if (!TOANIME_RATIOS.includes(ratio)) {
+      return res.status(400).json({ status: false, message: "Ratio tidak didukung.", error: `Pilihan: ${TOANIME_RATIOS.join(", ")}` });
+    }
+
+    const startedAt = Date.now();
+    const deadlineAt = startedAt + TOANIME_DEADLINE_MS;
+    const file = await toAnimeFetchInput(image);
+    const { jobId, urls } = await toAnimeRun(file, TOANIME_STYLES[style], ratio, deadlineAt);
+    const resultUrl = urls[0];
+
+    if (asImage) {
+      const img = await axios.get(resultUrl, {
+        responseType: "arraybuffer",
+        timeout: Math.max(3000, deadlineAt - Date.now() + 8000),
+        maxContentLength: 4_200_000,
+        headers: { "User-Agent": TOANIME_UA },
+        validateStatus: () => true
+      }).catch(() => null);
+      const buf = img && img.status === 200 ? Buffer.from(img.data) : null;
+      const type = toAnimeImageType(buf);
+      if (type) {
+        res.setHeader("Content-Type", type.mime);
+        res.setHeader("Content-Disposition", `inline; filename="to-anime-${style}.${type.ext}"`);
+        res.setHeader("Cache-Control", "no-store");
+        return res.status(200).send(buf);
+      }
+      // gagal / terlalu besar untuk dikirim langsung: jatuh ke respons JSON
+    }
+
+    return res.status(200).json({
+      status: true,
+      source: "PhotoEditorAI",
+      data: {
+        style,
+        ratio,
+        job_id: jobId,
+        result_url: resultUrl,
+        other_urls: urls.slice(1),
+        runtime_ms: Date.now() - startedAt
+      }
+    });
+  } catch (error) {
+    if (res.headersSent) return res.destroy();
+    const code = error.httpStatus || (error.response?.status >= 400 && error.response?.status < 600 ? 502 : 500);
+    console.error("to-anime error:", error?.message || error);
+    return res.status(code).json({
+      status: false,
+      message: "Gagal mengubah gambar menjadi anime.",
+      error: error.response?.data?.message || error.message
+    });
+  }
+}
+
 export default async function handler(req, res) {
   const routeKey = getRouteKey(req);
 
@@ -13790,6 +13988,8 @@ export default async function handler(req, res) {
   }
 
   switch (routeKey) {
+    case "to-anime":
+      return handleToAnime(req, res);
     case "album-search":
       return handleAlbumSearch(req, res);
     case "music-album":

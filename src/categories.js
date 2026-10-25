@@ -61,7 +61,7 @@ export const CATEGORIES = [
 const SLUGS = {
   downloader: ['instagram', 'tiktok', 'facebook', 'twitter-video', 'capcut', 'terabox', 'omdown', 'motionbgs', 'spotify', 'youtube-mp3', 'ytplay'],
   ai: ['ai-chat', 'rudder-chat', 'ai-image', 'autoai', 'editimg', 'photoeditor-ai', 'video-to-prompt'],
-  image: ['bgremover', 'brat', 'ocr', 'unblur-img', 'unwatermark-nano-banana', 'upscale-image'],
+  image: ['to-anime', 'bgremover', 'brat', 'ocr', 'unblur-img', 'unwatermark-nano-banana', 'upscale-image'],
   audio: ['album-search', 'lyrics', 'ringtone', 'text-to-speech', 'freeconvert-video-to-mp3'],
   profile: ['githubstalk', 'instagram-stalker', 'x-stalker', 'youtube-stalker', 'npmstalk'],
   game: ['ff-stalk', 'mlstalk', 'prime-ff'],
