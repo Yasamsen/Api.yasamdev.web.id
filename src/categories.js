@@ -66,7 +66,7 @@ const SLUGS = {
   profile: ['githubstalk', 'instagram-stalker', 'x-stalker', 'youtube-stalker', 'npmstalk'],
   game: ['ff-stalk', 'mlstalk', 'prime-ff'],
   info: ['weather', 'earthquake', 'wikipedia', 'mealdb', 'pinterest-search', 'tiktok-search'],
-  tools: ['ssweb', 'qrcode', 'tempmail', 'tourl', 'imgbb', 'web2apk', 'check-host', 'ip-lookup', 'add-subdomain'],
+  tools: ['ssweb', 'qrcode', 'tempmail', 'tourl', 'web2apk', 'check-host', 'ip-lookup', 'add-subdomain'],
   social: ['reaction-wa', 'alight-send', 'alight-verify'],
   fun: ['alya', 'quotes-anime', 'waifuimg', 'zerochan', 'alphacoders-random', 'deviantart-random'],
   adult: ['nsfw-random', 'nsfw-random1', 'tai1', 'tai', 'imgviral'],
