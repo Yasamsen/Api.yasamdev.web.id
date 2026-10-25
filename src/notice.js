@@ -1,5 +1,5 @@
 import { apiDefinitions, getApiBySlug } from './apis/registry.js';
-import { esc } from './utils.js';
+import { esc, icon, refreshIcons } from './utils.js';
 import { getPath } from './router.js';
 
 /* Menampilkan endpoint yang sedang error / dikunci oleh admin di halaman dokumentasi. */
@@ -41,12 +41,13 @@ export async function applyNotices(path) {
   const api = slug && getApiBySlug(slug);
   const s = api && st[keyOf(api)];
   if (!s || page.querySelector('.adm-banner')) return;
+  const err = s.status === 'error';
   const box = document.createElement('div');
-  box.className = 'adm-banner';
+  box.className = 'adm-banner card mb-6 flex items-start gap-3 p-4 text-left';
   box.setAttribute('role', 'status');
-  box.style.cssText = 'margin:12px 0;padding:12px 16px;border:2.5px solid #14102b;border-radius:12px;font-weight:700;color:#14102b;background:' + (s.status === 'error' ? '#f4546e' : '#ffc83d');
-  box.innerHTML = s.status === 'error'
-    ? `Endpoint ini sedang bermasalah. ${esc(s.message || 'Coba lagi nanti.')}`
-    : 'Endpoint ini dikunci. Tambahkan API key lewat <code>?apikey=KEY</code> atau header <code>x-api-key</code>. Hubungi admin untuk mendapatkan key.';
-  page.prepend(box);
+  box.innerHTML = `<span class="iconbox h-10 w-10 shrink-0" style="--tile:rgb(var(--${err ? 'red' : 'yellow'}));--tile-fg:#14102b">${icon(err ? 'TriangleAlert' : 'Lock', 'h-5 w-5')}</span>
+    <div class="min-w-0"><p class="text-sm font-extrabold">${err ? 'Endpoint ini sedang bermasalah' : 'Endpoint ini dikunci'}</p>
+    <p class="mt-1 text-[13px] leading-6 text-muted">${err ? esc(s.message || 'Coba lagi nanti.') : 'Tambahkan API key lewat <code class="font-mono text-gold">?apikey=KEY</code> atau header <code class="font-mono text-gold">x-api-key</code>. Hubungi admin untuk mendapatkan key.'}</p></div>`;
+  (page.querySelector('main') || page).prepend(box);
+  refreshIcons();
 }
