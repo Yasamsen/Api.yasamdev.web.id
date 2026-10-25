@@ -13778,8 +13778,8 @@ async function handleEndpointStatus(req, res) {
 
 /* ============================================================
  * TO ANIME — ubah foto jadi gaya anime
- *   GET /api/to-anime?image=https://.../foto.jpg&style=anime
- *   &format=image  -> balas langsung berupa gambar (default: JSON berisi URL hasil)
+ *   POST /api/to-anime  (multipart/form-data, field "file" maks 4 MB; opsional: style, ratio, format)
+ *   format=image  -> balas langsung berupa gambar (default: JSON berisi URL hasil)
  * Upstream: PhotoEditorAI (dipakai juga oleh /api/photoeditor-ai).
  * Batas waktu total 50 detik supaya aman di bawah maxDuration Vercel (60 detik).
  * ============================================================ */
@@ -13817,42 +13817,6 @@ function toAnimeCollectUrls(root) {
   const unique = [...new Set(urls)];
   const isImg = (u) => /\.(jpe?g|png|webp|gif)(?:[?#]|$)/i.test(u);
   return [...unique.filter(isImg), ...unique.filter((u) => !isImg(u))];
-}
-
-async function toAnimeFetchInput(rawUrl) {
-  let parsed;
-  try { parsed = new URL(rawUrl); } catch { throw Object.assign(new Error("URL gambar tidak valid."), { httpStatus: 400 }); }
-  if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) {
-    throw Object.assign(new Error("Hanya URL http/https tanpa username/password yang diizinkan."), { httpStatus: 400 });
-  }
-  // Cegah SSRF ke jaringan internal
-  const addrs = net.isIP(parsed.hostname)
-    ? [{ address: parsed.hostname }]
-    : await dns.lookup(parsed.hostname, { all: true }).catch(() => []);
-  if (!addrs.length || addrs.some((a) => isPrivateIp(a.address))) {
-    throw Object.assign(new Error("Host gambar tidak diizinkan atau tidak ditemukan."), { httpStatus: 400 });
-  }
-  let r;
-  try {
-    r = await axios.get(parsed.href, {
-      responseType: "arraybuffer",
-      timeout: 15000,
-      maxRedirects: 0, // redirect tidak diikuti agar tidak lolos dari pengecekan SSRF
-      maxContentLength: TOANIME_MAX_BYTES,
-      maxBodyLength: TOANIME_MAX_BYTES,
-      headers: { "User-Agent": TOANIME_UA, Accept: "image/*,*/*;q=0.8" },
-      validateStatus: () => true
-    });
-  } catch (e) {
-    if (/maxContentLength|maxBodyLength/i.test(e.message)) throw Object.assign(new Error("Gambar terlalu besar. Maksimal 4 MB."), { httpStatus: 413 });
-    throw Object.assign(new Error(`Gagal mengunduh gambar: ${e.message}`), { httpStatus: 502 });
-  }
-  if (r.status >= 300 && r.status < 400) throw Object.assign(new Error("URL gambar mengalihkan (redirect). Gunakan link langsung ke file gambar."), { httpStatus: 400 });
-  if (r.status !== 200) throw Object.assign(new Error(`Server gambar membalas HTTP ${r.status}.`), { httpStatus: 400 });
-  const buffer = Buffer.from(r.data);
-  const type = toAnimeImageType(buffer);
-  if (!type) throw Object.assign(new Error("File bukan gambar yang didukung (JPG, PNG, atau WEBP)."), { httpStatus: 415 });
-  return { buffer, ...type };
 }
 
 async function toAnimeRun(file, prompt, ratio, deadlineAt) {
@@ -13900,24 +13864,41 @@ async function toAnimeRun(file, prompt, ratio, deadlineAt) {
 }
 
 async function handleToAnime(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
+  if (req.method === "OPTIONS") return res.status(204).end();
   try {
-    if (req.method !== "GET") {
-      res.setHeader("Allow", "GET");
-      return res.status(405).json({ status: false, message: "Method tidak diizinkan. Gunakan GET.", error: "Method Not Allowed" });
+    if (req.method !== "POST") {
+      res.setHeader("Allow", "POST, OPTIONS");
+      return res.status(405).json({ status: false, message: "Metode tidak diizinkan. Gunakan POST dengan multipart/form-data.", error: "Method Not Allowed" });
     }
 
-    const image = String(req.query?.image || req.query?.url || "").trim();
-    const style = String(req.query?.style || "anime").trim().toLowerCase();
-    const ratio = String(req.query?.ratio || "match_input_image").trim();
-    const asImage = String(req.query?.format || "").toLowerCase() === "image";
-
-    if (!image) {
+    const declaredLength = Number(req.headers["content-length"] || 0);
+    if (declaredLength > 4_200_000) {
+      return res.status(413).json({ status: false, message: "File terlalu besar.", error: "Maksimal 4 MB." });
+    }
+    if (!/multipart\/form-data/i.test(req.headers["content-type"] || "")) {
       return res.status(400).json({
         status: false,
-        message: "Parameter image wajib diisi.",
-        error: 'example: "/api/to-anime?image=https://example.com/foto.jpg&style=anime"'
+        message: 'Kirim gambar lewat multipart/form-data pada field "file".',
+        error: 'example: curl -X POST "/api/to-anime" -F "file=@foto.jpg" -F "style=anime"'
       });
     }
+
+    const { file: upload, fields } = await bgremoverParseMultipart(req, TOANIME_MAX_BYTES);
+    if (!upload || !upload.buffer.length) {
+      return res.status(400).json({
+        status: false,
+        message: "Gambar wajib diunggah.",
+        error: 'Pilih file pada field "file". example: curl -X POST "/api/to-anime" -F "file=@foto.jpg"'
+      });
+    }
+
+    const style = String(fields.style || req.query?.style || "anime").trim().toLowerCase();
+    const ratio = String(fields.ratio || req.query?.ratio || "match_input_image").trim();
+    const asImage = String(fields.format || req.query?.format || "").toLowerCase() === "image";
+
     if (!TOANIME_STYLES[style]) {
       return res.status(400).json({ status: false, message: "Style tidak didukung.", error: `Pilihan: ${Object.keys(TOANIME_STYLES).join(", ")}` });
     }
@@ -13925,9 +13906,14 @@ async function handleToAnime(req, res) {
       return res.status(400).json({ status: false, message: "Ratio tidak didukung.", error: `Pilihan: ${TOANIME_RATIOS.join(", ")}` });
     }
 
+    const type = toAnimeImageType(upload.buffer);
+    if (!type) {
+      return res.status(415).json({ status: false, message: "Format gambar tidak didukung.", error: "Gunakan file gambar asli: JPG, PNG, atau WEBP." });
+    }
+    const file = { buffer: upload.buffer, ...type };
+
     const startedAt = Date.now();
     const deadlineAt = startedAt + TOANIME_DEADLINE_MS;
-    const file = await toAnimeFetchInput(image);
     const { jobId, urls } = await toAnimeRun(file, TOANIME_STYLES[style], ratio, deadlineAt);
     const resultUrl = urls[0];
 
@@ -13964,6 +13950,9 @@ async function handleToAnime(req, res) {
     });
   } catch (error) {
     if (res.headersSent) return res.destroy();
+    if (error.code === "TOO_LARGE") {
+      return res.status(413).json({ status: false, message: "File terlalu besar. Maksimal 4 MB.", error: error.message });
+    }
     const code = error.httpStatus || (error.response?.status >= 400 && error.response?.status < 600 ? 502 : 500);
     console.error("to-anime error:", error?.message || error);
     return res.status(code).json({

@@ -2,18 +2,19 @@ export default {
   slug: "to-anime",
   name: "To Anime",
   description:
-    "Ubah foto menjadi gambar bergaya anime (anime, ghibli, manga, chibi, atau cyberpunk) memakai AI. Kirim link langsung ke gambar (JPG/PNG/WEBP, maksimal 4 MB).",
+    "Unggah foto dari perangkat kamu (maksimal 4 MB) dan ubah menjadi gambar bergaya anime, ghibli, manga, chibi, atau cyberpunk memakai AI.",
   category: "Image",
-  method: "GET",
+  method: "POST",
   endpoint: "/api/to-anime",
   icon: "Wand2",
   parameters: [
     {
-      name: "image",
-      type: "string",
+      name: "file",
+      type: "file",
       required: true,
-      description: "Link langsung ke file gambar (JPG, PNG, atau WEBP, maksimal 4 MB). Link yang di-redirect tidak didukung.",
-      example: "https://example.com/foto.jpg",
+      description: "Pilih foto dari perangkat kamu. Format JPG, PNG, atau WEBP, maksimal 4 MB.",
+      maxSizeLabel: "JPG, PNG, WEBP · Maksimal 4 MB",
+      example: "",
     },
     {
       name: "style",
@@ -66,10 +67,9 @@ export default {
     { name: "source", type: "string", description: "Layanan AI yang dipakai." },
     { name: "data.style", type: "string", description: "Gaya yang dipakai." },
     { name: "data.job_id", type: "string", description: "ID job di layanan AI." },
-    { name: "data.result_url", type: "string", description: "Link gambar hasil anime." },
+    { name: "data.result_url", type: "string", description: "Link gambar hasil." },
     { name: "data.other_urls", type: "array", description: "Link tambahan dari layanan AI (jika ada)." },
     { name: "data.runtime_ms", type: "number", description: "Lama proses dalam milidetik." },
   ],
-  exampleRequest:
-    "https://samapi.example.com/api/to-anime?image=https://example.com/foto.jpg&style=anime",
+  exampleRequest: "POST https://samapi.example.com/api/to-anime (multipart/form-data)",
 };
