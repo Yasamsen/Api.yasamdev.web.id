@@ -2,7 +2,7 @@ export default {
   slug: "to-anime",
   name: "To Anime",
   description:
-    "Unggah foto dari perangkat kamu (maksimal 4 MB) dan ubah menjadi gambar bergaya anime, ghibli, manga, chibi, atau cyberpunk memakai AI.",
+    "Unggah foto dari perangkat kamu (maksimal 4 MB) dan ubah menjadi gambar bergaya anime, ghibli, manga, chibi, atau cyberpunk memakai AI. Jika satu penyedia AI sedang error atau kena limit, otomatis dicoba penyedia cadangan.",
   category: "Image",
   method: "POST",
   endpoint: "/api/to-anime",
@@ -56,6 +56,9 @@ export default {
     data: {
       style: "anime",
       ratio: "match_input_image",
+      provider: "Unwatermark AI",
+      fallback_used: true,
+      tried: [{ provider: "PhotoEditorAI", error: "HTTP 429: limit tercapai" }],
       job_id: "abc123",
       result_url: "https://example.com/hasil-anime.png",
       other_urls: [],
@@ -64,8 +67,11 @@ export default {
   },
   responseFields: [
     { name: "status", type: "boolean", description: "true jika berhasil." },
-    { name: "source", type: "string", description: "Layanan AI yang dipakai." },
+    { name: "source", type: "string", description: "Nama penyedia AI yang dipakai." },
     { name: "data.style", type: "string", description: "Gaya yang dipakai." },
+    { name: "data.provider", type: "string", description: "Penyedia AI yang berhasil membuat hasil." },
+    { name: "data.fallback_used", type: "boolean", description: "true jika penyedia utama gagal dan memakai cadangan." },
+    { name: "data.tried", type: "array", description: "Penyedia yang gagal sebelum berhasil (muncul hanya jika ada)." },
     { name: "data.job_id", type: "string", description: "ID job di layanan AI." },
     { name: "data.result_url", type: "string", description: "Link gambar hasil." },
     { name: "data.other_urls", type: "array", description: "Link tambahan dari layanan AI (jika ada)." },

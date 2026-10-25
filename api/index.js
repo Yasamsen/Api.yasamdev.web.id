@@ -13780,11 +13780,12 @@ async function handleEndpointStatus(req, res) {
  * TO ANIME — ubah foto jadi gaya anime
  *   POST /api/to-anime  (multipart/form-data, field "file" maks 4 MB; opsional: style, ratio, format)
  *   format=image  -> balas langsung berupa gambar (default: JSON berisi URL hasil)
- * Upstream: PhotoEditorAI (dipakai juga oleh /api/photoeditor-ai).
- * Batas waktu total 50 detik supaya aman di bawah maxDuration Vercel (60 detik).
+ * Penyedia dicoba berurutan (fallback otomatis bila gagal / kena limit):
+ *   PhotoEditorAI -> Unwatermark AI -> MagicEraser.
+ * Batas waktu total 55 detik supaya aman di bawah maxDuration Vercel (60 detik).
  * ============================================================ */
 const TOANIME_MAX_BYTES = 4_000_000;
-const TOANIME_DEADLINE_MS = 50000;
+const TOANIME_DEADLINE_MS = 55000;
 const TOANIME_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 const TOANIME_RATIOS = ["match_input_image", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"];
 const TOANIME_KEEP = "Keep the same subject, face identity, pose, composition and hair/clothing colors.";
@@ -13819,9 +13820,22 @@ function toAnimeCollectUrls(root) {
   return [...unique.filter(isImg), ...unique.filter((u) => !isImg(u))];
 }
 
-async function toAnimeRun(file, prompt, ratio, deadlineAt) {
-  const serial = Array.from({ length: 32 }, () => "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 36)]).join("");
-  const common = { "Product-Serial": serial, Origin: "https://photoeditorai.io", Referer: "https://photoeditorai.io/", "User-Agent": TOANIME_UA };
+const TOANIME_SLICE_MS = 26000; // jatah waktu maksimal per penyedia sebelum pindah ke cadangan
+
+function toAnimeRandom(len, chars = "abcdefghijklmnopqrstuvwxyz0123456789") {
+  return Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+}
+
+function toAnimeErrMsg(e) {
+  const d = e?.response?.data;
+  const detail = (typeof d === "string" ? d : d?.message || d?.error || "") || e?.message || "error";
+  const status = e?.response?.status ? `HTTP ${e.response.status}: ` : "";
+  return `${status}${String(typeof detail === "string" ? detail : JSON.stringify(detail))}`.replace(/\s+/g, " ").slice(0, 200);
+}
+
+// Penyedia 1 — PhotoEditorAI
+async function toAnimePhotoEditorAi(file, prompt, ratio, deadlineAt) {
+  const common = { "Product-Serial": toAnimeRandom(32), Origin: "https://photoeditorai.io", Referer: "https://photoeditorai.io/", "User-Agent": TOANIME_UA };
   const left = () => Math.max(1000, deadlineAt - Date.now());
 
   const form = new FormData();
@@ -13837,30 +13851,122 @@ async function toAnimeRun(file, prompt, ratio, deadlineAt) {
     timeout: Math.min(20000, left())
   });
   if (created.data?.code !== 100000) {
-    throw Object.assign(new Error(`Server AI menolak permintaan: ${created.data?.message || "unknown error"}`), { httpStatus: 502 });
+    throw new Error(`ditolak: ${created.data?.message || JSON.stringify(created.data).slice(0, 150)}`);
   }
   const jobId = created.data?.result?.job_id;
-  if (!jobId) throw Object.assign(new Error("Job ID tidak ditemukan dari server AI."), { httpStatus: 502 });
+  if (!jobId) throw new Error("Job ID tidak ditemukan.");
 
   while (Date.now() < deadlineAt - 3500) {
     await new Promise((r) => setTimeout(r, 3000));
     const poll = await axios.get(`https://api.photoeditorai.io/pe/photo-editor/get-job/${encodeURIComponent(jobId)}?feature=photo_editor`, {
-      headers: common,
-      timeout: Math.min(10000, left()),
-      validateStatus: () => true
+      headers: common, timeout: Math.min(10000, left()), validateStatus: () => true
     });
     const result = poll.data?.result;
     if (!result) continue;
     if (result.status === 2) {
       const urls = toAnimeCollectUrls(result);
-      if (!urls.length) throw Object.assign(new Error("Proses selesai tetapi URL hasil tidak ditemukan."), { httpStatus: 502 });
+      if (!urls.length) throw new Error("URL hasil tidak ditemukan.");
       return { jobId, urls };
     }
-    if ([3, 4, -1].includes(result.status)) {
-      throw Object.assign(new Error(result.message || "Proses AI gagal (gambar mungkin ditolak oleh server AI)."), { httpStatus: 422 });
+    if ([3, 4, -1].includes(result.status)) throw new Error(result.message || "proses AI gagal.");
+  }
+  throw new Error("waktu habis menunggu hasil.");
+}
+
+// Penyedia 2 — Unwatermark AI (Nano Banana)
+async function toAnimeUnwatermark(file, prompt, ratio, deadlineAt) {
+  const base = "https://api.unwatermark.ai/api/web/v1/photo-editor-nano-banana";
+  const headers = {
+    "accept-language": "en-GB,en;q=0.9,id-ID;q=0.8,id;q=0.7,en-US;q=0.6",
+    origin: "https://unwatermark.ai",
+    referer: "https://unwatermark.ai/",
+    "Product-Code": "067003",
+    "Product-Serial": toAnimeRandom(16, "0123456789abcdef"),
+    "user-agent": TOANIME_UA
+  };
+  const left = () => Math.max(1000, deadlineAt - Date.now());
+
+  const form = new FormData();
+  form.append("target_images", file.buffer, { filename: `image.${file.ext}`, contentType: file.mime });
+  form.append("prompt", prompt);
+  form.append("ratio", ratio);
+
+  const created = await axios.post(`${base}/create-job`, form, {
+    headers: { ...form.getHeaders(), ...headers }, timeout: Math.min(20000, left())
+  });
+  const jobId = created.data?.result?.job_id;
+  if (!jobId) throw new Error(`ditolak: ${JSON.stringify(created.data).slice(0, 150)}`);
+
+  while (Date.now() < deadlineAt - 3000) {
+    await new Promise((r) => setTimeout(r, 2500));
+    const poll = await axios.get(`${base}/get-job/${encodeURIComponent(jobId)}`, {
+      headers, timeout: Math.min(10000, left()), validateStatus: () => true
+    });
+    const result = poll.data?.result;
+    if (!result) continue;
+    if (result.status === 1) {
+      const urls = toAnimeCollectUrls(result);
+      if (!urls.length) throw new Error("URL hasil tidak ditemukan.");
+      return { jobId, urls };
+    }
+    if ([-1, 3, 4].includes(result.status)) throw new Error(result.message || "proses AI gagal.");
+  }
+  throw new Error("waktu habis menunggu hasil.");
+}
+
+// Penyedia 3 — MagicEraser (sama seperti /api/editimg). Butuh URL publik, jadi gambar diunggah dulu
+// ke hosting sementara milik ToURL.
+async function toAnimeMagicEraser(file, prompt, ratio, deadlineAt) {
+  let publicUrl = null;
+  const upErr = [];
+  for (const p of TOURL_PROVIDERS) {
+    if (deadlineAt - Date.now() < 12000) break;
+    try {
+      publicUrl = await p.upload({ buffer: file.buffer, mimetype: file.mime, filename: `image.${file.ext}` });
+      break;
+    } catch (e) { upErr.push(`${p.name}: ${e.message}`); }
+  }
+  if (!publicUrl) throw new Error(`gagal menyiapkan URL sementara (${upErr.join(" | ") || "waktu habis"})`);
+
+  await editimgFetchProxies();
+  let last = null;
+  for (let attempt = 0; attempt < 2 && deadlineAt - Date.now() > 10000; attempt++) {
+    try {
+      const api = editimgGetAxiosInstance();
+      const jobId = await editimgCreateJobFromUrl(api, publicUrl, prompt);
+      const maxAttempts = Math.max(1, Math.floor((deadlineAt - Date.now() - 2000) / 3000));
+      const out = await editimgPollJobStatus(api, jobId, maxAttempts, 3000);
+      return { jobId, urls: [out] };
+    } catch (e) { last = e; editimgRotateProxy(); }
+  }
+  throw last || new Error("waktu habis.");
+}
+
+const TOANIME_PROVIDERS = [
+  { name: "PhotoEditorAI", run: toAnimePhotoEditorAi },
+  { name: "Unwatermark AI", run: toAnimeUnwatermark },
+  { name: "MagicEraser", run: toAnimeMagicEraser }
+];
+
+// Coba penyedia satu per satu; kalau gagal / kena limit, lanjut ke berikutnya.
+async function toAnimeGenerate(file, prompt, ratio, deadlineAt, providers = TOANIME_PROVIDERS) {
+  const tried = [];
+  for (let i = 0; i < providers.length; i++) {
+    const p = providers[i];
+    const remaining = deadlineAt - Date.now();
+    if (remaining < 6000) { tried.push({ provider: p.name, error: "tidak sempat dicoba (waktu habis)" }); break; }
+    const slice = i === providers.length - 1 ? remaining : Math.min(remaining, TOANIME_SLICE_MS);
+    try {
+      const r = await p.run(file, prompt, ratio, Date.now() + slice);
+      return { ...r, provider: p.name, tried };
+    } catch (e) {
+      tried.push({ provider: p.name, error: toAnimeErrMsg(e) });
     }
   }
-  throw Object.assign(new Error("Proses AI belum selesai dalam batas waktu. Coba lagi."), { httpStatus: 504 });
+  const err = new Error(`Semua penyedia AI gagal atau sedang kena limit. ${tried.map((t) => `${t.provider}: ${t.error}`).join(" | ")}`);
+  err.httpStatus = tried.length && tried.every((t) => /waktu|timeout/i.test(t.error)) ? 504 : 502;
+  err.tried = tried;
+  throw err;
 }
 
 async function handleToAnime(req, res) {
@@ -13914,13 +14020,13 @@ async function handleToAnime(req, res) {
 
     const startedAt = Date.now();
     const deadlineAt = startedAt + TOANIME_DEADLINE_MS;
-    const { jobId, urls } = await toAnimeRun(file, TOANIME_STYLES[style], ratio, deadlineAt);
+    const { jobId, urls, provider, tried } = await toAnimeGenerate(file, TOANIME_STYLES[style], ratio, deadlineAt);
     const resultUrl = urls[0];
 
     if (asImage) {
       const img = await axios.get(resultUrl, {
         responseType: "arraybuffer",
-        timeout: Math.max(3000, deadlineAt - Date.now() + 8000),
+        timeout: Math.max(2000, startedAt + 58000 - Date.now()),
         maxContentLength: 4_200_000,
         headers: { "User-Agent": TOANIME_UA },
         validateStatus: () => true
@@ -13938,10 +14044,13 @@ async function handleToAnime(req, res) {
 
     return res.status(200).json({
       status: true,
-      source: "PhotoEditorAI",
+      source: provider,
       data: {
         style,
         ratio,
+        provider,
+        fallback_used: tried.length > 0,
+        ...(tried.length ? { tried } : {}),
         job_id: jobId,
         result_url: resultUrl,
         other_urls: urls.slice(1),
@@ -13958,7 +14067,8 @@ async function handleToAnime(req, res) {
     return res.status(code).json({
       status: false,
       message: "Gagal mengubah gambar menjadi anime.",
-      error: error.response?.data?.message || error.message
+      error: error.response?.data?.message || error.message,
+      ...(error.tried ? { tried: error.tried } : {})
     });
   }
 }
