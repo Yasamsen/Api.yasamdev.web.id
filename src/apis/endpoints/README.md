@@ -76,3 +76,14 @@ Atur environment variables berikut di Vercel (Project → Settings → Environme
 
 Rate limit 10 request/menit per IP. Jika muncul error "cookie/token kedaluwarsa", ambil cookie baru dari browser lalu perbarui env var.
 Respons AI bisa memakan waktu >10 detik; jika di Vercel sering timeout, naikkan `maxDuration` fungsi `api/index.js` di `vercel.json`.
+
+
+## Endpoint `music-album-search` & `music-album-download`
+
+Tanpa API key dan tanpa environment variable.
+
+- `GET /api/music-album-search?query=Ipank&type=album&limit=5` — cari album/lagu (metadata dari Deezer). Tambah `&tracks=true` untuk menampilkan daftar lagu tiap album.
+- `GET /api/music-album-download?id=<album_id>` — daftar lagu album + `track_endpoint` tiap lagu.
+- `GET /api/music-album-download?id=<album_id>&track=3` atau `&track=1-5` — link MP3 lagu (maksimal 5 lagu per request). Audio dicari di YouTube lalu dikonversi (helper yang sama dengan `ytplay`), jadi link `audio_url` bersifat sementara.
+
+Deezer hanya menyediakan preview 30 detik (`preview_url`); audio penuh berasal dari hasil konversi YouTube.
