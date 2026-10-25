@@ -1642,6 +1642,237 @@ async function handlePhotoEditorAi(req, res) {
 
     }
 }
+//photoeditor video
+// @description Image to video AI (prompt)
+// @category AI
+// @url https://photoeditorai.io/ai-video-generator/
+
+/* ============================================================
+ * PHOTOEDITOR VIDEO — gambar + prompt -> video
+ *   GET /api/photoeditor-video?image=URL&prompt=...&ratio=9:16&duration=5&resolution=720p
+ *
+ * Alurnya sama dengan photoeditor-ai: unduh gambar -> kirim multipart (create-job) ->
+ * polling get-job. Bedanya video lama diproses, jadi polling dibatasi ±50 detik; jika belum
+ * selesai, respons berisi check_url untuk dicek ulang (job_id + serial).
+ *
+ * PERHATIAN: URL & nama field API video PhotoEditorAI TIDAK dipublikasikan. Nilai di PE_VIDEO
+ * di bawah adalah TEBAKAN yang meniru API foto (/pe/photo-editor/...). Cocokkan dengan request
+ * asli: buka photoeditorai.io/ai-video-generator -> DevTools -> Network -> klik Generate video
+ * -> lihat request "create-job". Nilainya bisa diubah lewat environment variable (lihat README)
+ * tanpa mengedit kode.
+ * ============================================================ */
+const PE_VIDEO = {
+  createUrl: process.env.PE_VIDEO_CREATE_URL || "https://api.photoeditorai.io/pe/ai-video/create-job", // TEBAKAN
+  // {id} dan {feature} diganti otomatis
+  statusUrl: process.env.PE_VIDEO_STATUS_URL || "https://api.photoeditorai.io/pe/ai-video/get-job/{id}?feature={feature}", // TEBAKAN
+  feature: process.env.PE_VIDEO_FEATURE || "ai_video", // TEBAKAN
+  model: process.env.PE_VIDEO_MODEL || "photoeditor_mini", // TEBAKAN (di web: PhotoEditorAI Mini, tanpa audio)
+  imageField: process.env.PE_VIDEO_IMAGE_FIELD || "first_frame_image", // TEBAKAN (foto memakai target_images)
+  fields: { model: "model_name", feature: "feature", prompt: "prompt", ratio: "ratio", duration: "duration", resolution: "resolution" } // TEBAKAN
+};
+const PE_VIDEO_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4"];
+const PE_VIDEO_RESOLUTIONS = ["480p", "720p", "1080p"];
+const PE_VIDEO_BUDGET_MS = 50000;
+const PE_VIDEO_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3";
+
+function peVideoHeaders(serial, extra = {}) {
+  return {
+    "Product-Serial": serial,
+    Origin: "https://photoeditorai.io",
+    Referer: "https://photoeditorai.io/",
+    "User-Agent": PE_VIDEO_UA,
+    ...extra
+  };
+}
+
+function peVideoPrivateHost(host) {
+  const h = String(host || "").toLowerCase().replace(/^\[|\]$/g, "");
+  if (!h || h === "localhost" || h.endsWith(".localhost") || h.endsWith(".internal") || h.endsWith(".local")) return true;
+  if (net.isIPv6(h)) return h === "::1" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80") || h.startsWith("::ffff:");
+  if (net.isIPv4(h)) {
+    const [a, b] = h.split(".").map(Number);
+    return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+  }
+  return false;
+}
+
+// Cari URL video di dalam respons (struktur respons API video belum terverifikasi).
+function peVideoFindUrl(node, depth = 0) {
+  if (!node || depth > 6) return null;
+  if (typeof node === "string") return /^https?:\/\/\S+\.(mp4|webm|mov)(\?\S*)?$/i.test(node) ? node : null;
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = peVideoFindUrl(item, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (typeof node === "object") {
+    for (const key of ["video_url", "videoUrl", "video", "url", "output_url", "result_url"]) {
+      const found = peVideoFindUrl(node[key], depth + 1);
+      if (found) return found;
+    }
+    for (const value of Object.values(node)) {
+      const found = peVideoFindUrl(value, depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+async function peVideoCreateJob(imageUrl, prompt, { ratio, duration, resolution }) {
+  const image = await axios.get(imageUrl, {
+    responseType: "arraybuffer",
+    timeout: 20000,
+    maxContentLength: 24 * 1024 * 1024,
+    headers: { "User-Agent": PE_VIDEO_UA }
+  });
+  const type = String(image.headers?.["content-type"] || "").split(";")[0].trim().toLowerCase();
+  if (type && !type.startsWith("image/")) {
+    const err = new Error("URL yang diberikan bukan gambar.");
+    err.badInput = true;
+    throw err;
+  }
+  const ext = type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg";
+
+  const f = PE_VIDEO.fields;
+  const form = new FormData();
+  form.append(f.model, PE_VIDEO.model);
+  form.append(f.feature, PE_VIDEO.feature);
+  form.append(PE_VIDEO.imageField, Buffer.from(image.data), { filename: `image-${Date.now()}.${ext}`, contentType: type || "image/jpeg" });
+  form.append(f.prompt, prompt);
+  form.append(f.ratio, ratio);
+  form.append(f.duration, String(duration));
+  form.append(f.resolution, resolution);
+
+  const serial = photoEditorAiGenerateProductSerial();
+  const created = await axios.post(PE_VIDEO.createUrl, form, {
+    headers: peVideoHeaders(serial, form.getHeaders()),
+    timeout: 30000
+  });
+
+  if (created.data?.code !== 100000) {
+    throw new Error("Gagal membuat job video: " + (created.data?.message || "respons tidak dikenali"));
+  }
+  const jobId = created.data?.result?.job_id;
+  if (!jobId) throw new Error("Job ID tidak ditemukan dari server.");
+  return { jobId, serial };
+}
+
+// Satu kali cek status. Mengembalikan { state: "done" | "processing", data }.
+async function peVideoCheckJob(jobId, serial) {
+  const url = PE_VIDEO.statusUrl.replace("{id}", encodeURIComponent(jobId)).replace("{feature}", encodeURIComponent(PE_VIDEO.feature));
+  const res = await axios.get(url, { headers: peVideoHeaders(serial), timeout: 30000 });
+  const result = res.data?.result;
+  if (!result) return { state: "processing", data: res.data };
+  if (result.status === 2) return { state: "done", data: res.data };
+  if (result.status === 3 || result.status === 4 || result.status === -1) {
+    throw new Error(result.message || "Proses pembuatan video gagal.");
+  }
+  return { state: "processing", data: res.data };
+}
+
+function peVideoDone(res, jobId, data) {
+  return res.status(200).json({
+    status: true,
+    source: "PhotoEditorAI",
+    data: { job_id: jobId, video_url: peVideoFindUrl(data?.result) || peVideoFindUrl(data), raw: data }
+  });
+}
+
+async function handlePhotoEditorVideo(req, res) {
+  const startedAt = Date.now();
+  try {
+    if (req.method !== "GET") {
+      return res.status(405).json({ status: false, message: "Method tidak diizinkan. Gunakan GET.", error: "Method Not Allowed" });
+    }
+
+    const q = req.query || {};
+    const base = malbumBase(req);
+    const example = "/api/photoeditor-video?image=https://example.com/foto.jpg&prompt=Kamera%20zoom%20perlahan&ratio=9:16";
+
+    // ---- cek ulang job yang belum selesai ----
+    const jobParam = String(q.job_id || "").trim();
+    if (jobParam) {
+      const serial = String(q.serial || "").trim();
+      if (!/^[A-Za-z0-9_-]{4,128}$/.test(jobParam) || !/^[a-z0-9]{32}$/.test(serial)) {
+        return res.status(400).json({ status: false, message: "job_id / serial tidak valid. Pakai check_url dari respons sebelumnya." });
+      }
+      const check = await peVideoCheckJob(jobParam, serial);
+      res.setHeader("Cache-Control", "no-store");
+      if (check.state === "done") return peVideoDone(res, jobParam, check.data);
+      return res.status(202).json({
+        status: true,
+        processing: true,
+        message: "Video masih diproses. Cek lagi beberapa detik lagi.",
+        data: { job_id: jobParam, check_url: `${base}/api/photoeditor-video?job_id=${encodeURIComponent(jobParam)}&serial=${serial}` }
+      });
+    }
+
+    // ---- buat video baru ----
+    const imageUrl = String(q.image || "").trim();
+    const prompt = String(q.prompt || "").trim();
+    if (!imageUrl) return res.status(400).json({ status: false, message: "Parameter image wajib diisi.", error: `Example: "${example}"` });
+    if (!prompt) return res.status(400).json({ status: false, message: "Parameter prompt wajib diisi.", error: `Example: "${example}"` });
+    if (prompt.length > 1000) return res.status(400).json({ status: false, message: "Parameter prompt maksimal 1000 karakter." });
+
+    let parsed;
+    try {
+      parsed = new URL(imageUrl);
+    } catch {
+      return res.status(400).json({ status: false, message: "URL gambar tidak valid.", error: "Parameter image harus berupa URL yang valid." });
+    }
+    if (!/^https?:$/.test(parsed.protocol) || peVideoPrivateHost(parsed.hostname)) {
+      return res.status(400).json({ status: false, message: "URL gambar harus http/https publik." });
+    }
+
+    const ratio = String(q.ratio || "16:9");
+    if (!PE_VIDEO_RATIOS.includes(ratio)) {
+      return res.status(400).json({ status: false, message: "Aspect ratio tidak didukung.", error: `Gunakan salah satu: ${PE_VIDEO_RATIOS.join(", ")}` });
+    }
+    const resolution = String(q.resolution || "720p").toLowerCase();
+    if (!PE_VIDEO_RESOLUTIONS.includes(resolution)) {
+      return res.status(400).json({ status: false, message: "Resolusi tidak didukung.", error: `Gunakan salah satu: ${PE_VIDEO_RESOLUTIONS.join(", ")}` });
+    }
+    const duration = q.duration === undefined || q.duration === "" ? 5 : Number(q.duration);
+    if (!Number.isInteger(duration) || duration < 2 || duration > 30) {
+      return res.status(400).json({ status: false, message: "Durasi harus bilangan bulat 2–30 detik." });
+    }
+
+    const { jobId, serial } = await peVideoCreateJob(imageUrl, prompt, { ratio, duration, resolution });
+
+    // Polling sampai batas waktu fungsi serverless.
+    while (Date.now() - startedAt < PE_VIDEO_BUDGET_MS) {
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      const check = await peVideoCheckJob(jobId, serial);
+      if (check.state === "done") {
+        res.setHeader("Cache-Control", "no-store");
+        return peVideoDone(res, jobId, check.data);
+      }
+    }
+
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(202).json({
+      status: true,
+      processing: true,
+      message: "Video sedang dibuat dan butuh waktu lebih lama. Buka check_url untuk mengambil hasilnya.",
+      data: { job_id: jobId, check_url: `${base}/api/photoeditor-video?job_id=${encodeURIComponent(jobId)}&serial=${serial}` }
+    });
+  } catch (error) {
+    console.error("PhotoEditorVideo Error:", error?.response?.data || error?.message || error);
+    const upstream = error.response?.status;
+    const statusCode = error.badInput ? 400 : upstream >= 400 && upstream < 600 ? upstream : 500;
+    return res.status(statusCode).json({
+      status: false,
+      message: "Gagal membuat video dengan PhotoEditorAI.",
+      error: error.response?.data?.message || error.response?.data?.error || error.message,
+      ...(upstream === 404 || upstream === 400 || upstream === 422
+        ? { hint: "Kemungkinan URL/nama field API video belum cocok. Lihat komentar PE_VIDEO di api/index.js dan README." }
+        : {})
+    });
+  }
+}
+
 //unblur
 // @description Unblur and enhance image
 // @category Tools
@@ -13699,6 +13930,8 @@ case "upscale-image":
   return handleUpscaleImage(req, res);
   case "photoeditor-ai":
     return handlePhotoEditorAi(req, res);
+  case "photoeditor-video":
+    return handlePhotoEditorVideo(req, res);
     case "unblur-img":
     return handleUnblurImg(req, res);
 case "video-to-prompt":

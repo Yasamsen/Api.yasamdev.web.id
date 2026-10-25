@@ -87,3 +87,20 @@ Tanpa API key dan tanpa environment variable. Hanya satu parameter:
 Daftar lagu dicari berurutan: **Deezer -> iTunes Search API -> pencarian YouTube**, berhenti di sumber pertama yang punya hasil (field `source` menunjukkan sumbernya). Audio penuh dari hasil konversi YouTube (helper yang sama dengan `ytplay`). Konversi dikerjakan paralel selama waktu fungsi cukup (±50 detik, `maxDuration` 60 detik di `vercel.json`). Lagu yang belum sempat diproses berisi `audio_url: null`, tetapi `download_url`-nya tetap berfungsi; memanggil endpoint sekali lagi juga melanjutkan sisanya (hasil dicache ±10 menit). `audio_url` bersifat sementara.
 
 Route lama `music-album-search` dan `music-album-download` diarahkan ke handler ini (`query` = `artist`).
+
+
+## Endpoint `photoeditor-video` (gambar + prompt -> video)
+
+`GET /api/photoeditor-video?image=URL&prompt=...` — opsional `ratio` (16:9, 9:16, 1:1, 4:3, 3:4), `duration` (2–30 detik, default 5), `resolution` (480p/720p/1080p). Logikanya sama dengan `photoeditor-ai`: unduh gambar -> `create-job` -> polling `get-job`.
+
+Video diproses lebih lama dari foto. Endpoint menunggu ±50 detik; jika belum selesai, responsnya HTTP 202 berisi `data.check_url` (`?job_id=...&serial=...`) yang dipanggil ulang sampai `data.video_url` muncul.
+
+**Wajib dicocokkan sekali:** API video PhotoEditorAI tidak dipublikasikan, jadi URL dan nama field-nya di `PE_VIDEO` (`api/index.js`) adalah tebakan yang meniru API foto. Cara memastikan: buka `photoeditorai.io/ai-video-generator`, DevTools -> Network, klik Generate video, lalu lihat request `create-job` (URL, field form, dan nilai `feature`/`model_name`) dan request `get-job`. Nilai berikut bisa diganti lewat environment variable di Vercel tanpa mengedit kode:
+
+- `PE_VIDEO_CREATE_URL`: URL create-job video.
+- `PE_VIDEO_STATUS_URL`: URL get-job; tulis `{id}` dan `{feature}` sebagai placeholder.
+- `PE_VIDEO_FEATURE`: nilai `feature`.
+- `PE_VIDEO_MODEL`: nilai `model_name`.
+- `PE_VIDEO_IMAGE_FIELD`: nama field file gambar.
+
+Nama field lain (`prompt`, `ratio`, `duration`, `resolution`) ada di `PE_VIDEO.fields`. Kredit PhotoEditorAI terpakai per detik video, jadi mulai dengan `duration` kecil saat mencoba.
