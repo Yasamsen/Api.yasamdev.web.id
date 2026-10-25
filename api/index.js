@@ -11274,6 +11274,295 @@ async function handleOcr(req, res) {
   }
 }
 
+// ===============================
+// IMGBB (UPLOAD FILE) - sumber: id.imgbb.com
+// Pola upload sama seperti ToURL: multipart/form-data, field "file", maks 4 MB.
+// Field tambahan "expiration" untuk memilih masa simpan gambar (5m ... 6mo / never).
+// Tanpa API key & tanpa package baru: sesi + auth_token diambil dari halaman utama ImgBB.
+// Tempel di api/index.js (bodyParser global sudah false, busboy sudah di-import).
+// ===============================
+const IMGBB_BASE = "https://id.imgbb.com";
+const IMGBB_MAX_BYTES = 4_000_000;
+const IMGBB_SESSION_TIMEOUT_MS = 8000;
+const IMGBB_UPLOAD_TIMEOUT_MS = 20000;
+const IMGBB_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+const IMGBB_EXPIRATION_MAP = {
+  never: "",
+  "0": "",
+  "5m": "PT5M",
+  "5min": "PT5M",
+  "15m": "PT15M",
+  "15min": "PT15M",
+  "30m": "PT30M",
+  "30min": "PT30M",
+  "1h": "PT1H",
+  "3h": "PT3H",
+  "6h": "PT6H",
+  "12h": "PT12H",
+  "1d": "P1D",
+  "2d": "P2D",
+  "3d": "P3D",
+  "4d": "P4D",
+  "5d": "P5D",
+  "6d": "P6D",
+  "1w": "P1W",
+  "2w": "P2W",
+  "3w": "P3W",
+  "1mo": "P1M",
+  "2mo": "P2M",
+  "3mo": "P3M",
+  "4mo": "P4M",
+  "5mo": "P5M",
+  "6mo": "P6M",
+  "1month": "P1M",
+  "2months": "P2M",
+  "3months": "P3M",
+  "4months": "P4M",
+  "5months": "P5M",
+  "6months": "P6M"
+};
+
+// Return kode ISO 8601 untuk ImgBB ("" = permanen), atau null kalau opsi tidak dikenal.
+function imgbbNormalizeExpiration(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const lower = raw.toLowerCase();
+  if (Object.prototype.hasOwnProperty.call(IMGBB_EXPIRATION_MAP, lower)) return IMGBB_EXPIRATION_MAP[lower];
+  const upper = raw.toUpperCase();
+  if (Object.values(IMGBB_EXPIRATION_MAP).includes(upper)) return upper;
+  return null;
+}
+
+// Parse multipart: ambil 1 file + field teks (expiration)
+function imgbbParseMultipart(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    let bb;
+    try {
+      bb = Busboy({
+        headers: req.headers,
+        limits: { files: 1, fileSize: maxBytes, fields: 10, fieldSize: 1024 }
+      });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    let fileResult = null;
+    let tooLarge = false;
+    const fields = {};
+
+    bb.on("field", (name, value) => { fields[name] = value; });
+    bb.on("file", (name, stream, info) => {
+      const chunks = [];
+      stream.on("data", (chunk) => chunks.push(chunk));
+      stream.on("limit", () => { tooLarge = true; });
+      stream.on("end", () => {
+        fileResult = {
+          fieldname: name,
+          buffer: Buffer.concat(chunks),
+          filename: info.filename,
+          mimetype: info.mimeType
+        };
+      });
+    });
+    bb.on("filesLimit", () => { tooLarge = true; });
+    bb.on("error", reject);
+    bb.on("close", () => {
+      if (tooLarge) {
+        reject(Object.assign(new Error("File terlalu besar. Maksimal 4 MB."), { code: "TOO_LARGE" }));
+        return;
+      }
+      resolve({ file: fileResult, fields });
+    });
+    req.pipe(bb);
+  });
+}
+
+// Deteksi tipe gambar dari magic bytes (bukan percaya ekstensi/mime dari klien)
+function imgbbDetectImageType(buf) {
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return { ext: "jpg", mimetype: "image/jpeg" };
+  if (buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return { ext: "png", mimetype: "image/png" };
+  if (buf.length >= 4 && buf.subarray(0, 4).toString("latin1") === "GIF8") return { ext: "gif", mimetype: "image/gif" };
+  if (buf.length >= 2 && buf.subarray(0, 2).toString("latin1") === "BM") return { ext: "bmp", mimetype: "image/bmp" };
+  if (buf.length >= 12 && buf.subarray(0, 4).toString("latin1") === "RIFF" && buf.subarray(8, 12).toString("latin1") === "WEBP") return { ext: "webp", mimetype: "image/webp" };
+  return null;
+}
+
+function imgbbSafeName(name, ext) {
+  let base = String(name || "").split(/[\\/]/).pop().replace(/[^\w.\-]+/g, "_").replace(/^\.+/, "").slice(-80);
+  base = base.replace(/\.[a-z0-9]{1,5}$/i, "");
+  if (!base) base = "image";
+  return `${base}.${ext}`;
+}
+
+// Ambil cookie sesi + auth_token dari halaman utama ImgBB
+async function imgbbGetSession() {
+  const response = await fetch(`${IMGBB_BASE}/`, {
+    headers: {
+      "User-Agent": IMGBB_UA,
+      "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7"
+    },
+    signal: AbortSignal.timeout(IMGBB_SESSION_TIMEOUT_MS)
+  });
+  if (!response.ok) {
+    throw Object.assign(new Error(`ImgBB mengembalikan HTTP ${response.status} saat membuka sesi`), { statusCode: response.status });
+  }
+
+  const setCookies = typeof response.headers.getSetCookie === "function"
+    ? response.headers.getSetCookie()
+    : [response.headers.get("set-cookie") || ""].filter(Boolean);
+  const cookies = setCookies.map((c) => c.split(";")[0]).join("; ");
+
+  const html = await response.text();
+  const match = html.match(/PF\.obj\.config\.auth_token\s*=\s*"([^"]+)"/);
+  if (!match) {
+    throw Object.assign(new Error("Gagal mengambil auth_token dari ImgBB."), { statusCode: 502 });
+  }
+  return { authToken: match[1], cookies };
+}
+
+async function imgbbUpload(file, expCode) {
+  const { authToken, cookies } = await imgbbGetSession();
+
+  const form = new globalThis.FormData(); // jangan pakai FormData dari paket "form-data"
+  form.append("action", "upload");
+  form.append("auth_token", authToken);
+  if (expCode) form.append("expiration", expCode);
+  form.append("type", "file");
+  form.append("source", new Blob([file.buffer], { type: file.mimetype }), file.filename);
+
+  const response = await fetch(`${IMGBB_BASE}/json`, {
+    method: "POST",
+    headers: {
+      "User-Agent": IMGBB_UA,
+      Referer: `${IMGBB_BASE}/`,
+      Accept: "application/json",
+      Cookie: cookies
+    },
+    body: form,
+    signal: AbortSignal.timeout(IMGBB_UPLOAD_TIMEOUT_MS)
+  });
+
+  const text = await response.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch {}
+  if (!json) {
+    throw Object.assign(new Error(`Respons ImgBB tidak valid: ${text.slice(0, 100) || "HTTP " + response.status}`), { statusCode: 502 });
+  }
+  if (json.status_code !== 200 || !json.image) {
+    throw Object.assign(
+      new Error(json.error?.message || json.status_txt || "Gagal mengunggah gambar ke ImgBB."),
+      { statusCode: response.status >= 400 ? response.status : 502, imgbbError: true }
+    );
+  }
+  return json.image;
+}
+
+async function handleImgbb(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST, OPTIONS");
+    return res.status(405).json({
+      status: false,
+      message: "Metode tidak diizinkan. Gunakan POST dengan multipart/form-data.",
+      error: "Method Not Allowed"
+    });
+  }
+
+  try {
+    const declaredLength = Number(req.headers["content-length"] || 0);
+    if (declaredLength > IMGBB_MAX_BYTES + 100_000) {
+      return res.status(413).json({ status: false, message: "File terlalu besar.", error: "Maksimal 4 MB." });
+    }
+
+    if (!/multipart\/form-data/i.test(req.headers["content-type"] || "")) {
+      return res.status(400).json({
+        status: false,
+        message: "Kirim gambar lewat multipart/form-data pada field \"file\".",
+        error: 'example: curl -X POST "/api/imgbb" -F "file=@foto.jpg" -F "expiration=1d"'
+      });
+    }
+
+    const { file, fields } = await imgbbParseMultipart(req, IMGBB_MAX_BYTES);
+
+    const query = new URL(req.url, "http://localhost").searchParams;
+    const expInput = fields.expiration ?? query.get("expiration") ?? "never";
+    const expCode = imgbbNormalizeExpiration(expInput);
+    if (expCode === null) {
+      return res.status(400).json({
+        status: false,
+        message: "Nilai expiration tidak valid.",
+        error: `Pilihan: never, 5m, 15m, 30m, 1h, 3h, 6h, 12h, 1d, 2d, 3d, 4d, 5d, 6d, 1w, 2w, 3w, 1mo, 2mo, 3mo, 4mo, 5mo, 6mo. example: curl -X POST "/api/imgbb" -F "file=@foto.jpg" -F "expiration=1d"`
+      });
+    }
+
+    if (!file || !file.buffer.length) {
+      return res.status(400).json({
+        status: false,
+        message: "Gambar wajib diunggah.",
+        error: 'Pilih file pada field "file". example: curl -X POST "/api/imgbb" -F "file=@foto.jpg" -F "expiration=1d"'
+      });
+    }
+
+    const kind = imgbbDetectImageType(file.buffer);
+    if (!kind) {
+      return res.status(415).json({
+        status: false,
+        message: "Format file tidak didukung.",
+        error: "Gunakan gambar asli: JPG, PNG, GIF, BMP, atau WEBP"
+      });
+    }
+
+    const filename = imgbbSafeName(file.filename, kind.ext);
+    const img = await imgbbUpload({ buffer: file.buffer, filename, mimetype: kind.mimetype }, expCode);
+
+    return res.status(200).json({
+      status: true,
+      source: "ImgBB",
+      data: {
+        url: img.url,
+        viewer_url: img.url_viewer,
+        thumb_url: img.thumb?.url || img.display_url || null,
+        delete_url: img.delete_url,
+        filename: img.filename || filename,
+        mimetype: kind.mimetype,
+        size: file.buffer.length,
+        width: img.width ?? null,
+        height: img.height ?? null,
+        expiration: expCode ? String(expInput).trim().toLowerCase() : "never",
+        expiration_code: expCode || null,
+        expiration_seconds: img.expiration ?? null
+      }
+    });
+  } catch (error) {
+    if (res.headersSent) return res.destroy();
+
+    let code = 500;
+    let message = "Terjadi kesalahan saat mengunggah gambar ke ImgBB.";
+
+    if (error.code === "TOO_LARGE") {
+      code = 413;
+      message = "File terlalu besar. Maksimal 4 MB.";
+    } else if (error.name === "TimeoutError" || error.name === "AbortError") {
+      code = 504;
+      message = "Waktu permintaan ke ImgBB habis, coba lagi.";
+    } else if (error.imgbbError) {
+      code = 502;
+      message = "ImgBB menolak unggahan ini.";
+    } else if (error.statusCode) {
+      code = 502;
+      message = "Server ImgBB sedang bermasalah, coba lagi nanti.";
+    }
+
+    return res.status(code).json({ status: false, message, error: error.message });
+  }
+}
+
 /* ============================================================
  * CHECK HOST  —  POST /api/check-host   (tanpa API key)
  *
@@ -12478,8 +12767,6 @@ const STATS = {
   total: 0,
   errors4xx: 0,
   errors5xx: 0,
-  totalMs: 0,
-  durationCount: 0,
   buckets: new Map(),
   durations: [],
   endpoints: new Map(),
@@ -12490,46 +12777,11 @@ const STATS = {
 const STATS_RATE = { windowMs: 60_000, max: 60 };
 const statsHits = new Map();
 
-// MongoDB opsional: jika URLDATABASE kosong, statistik tetap memakai memori lokal.
-let statsMongoClientPromise = null;
-let statsMongoDbPromise = null;
-
-async function getStatsMongo() {
-  const uri = String(process.env.URLDATABASE || "").trim();
-  if (!uri) return null;
-
-  if (!statsMongoDbPromise) {
-    statsMongoDbPromise = (async () => {
-      const { MongoClient } = await import("mongodb");
-      const client = new MongoClient(uri, {
-        serverSelectionTimeoutMS: 5000,
-        connectTimeoutMS: 5000,
-        maxPoolSize: 5
-      });
-      statsMongoClientPromise = client.connect();
-      await statsMongoClientPromise;
-      const dbName = String(process.env.MONGODB_DB || "").trim();
-      const db = dbName ? client.db(dbName) : client.db();
-      await db.collection("api_stats_minutes").createIndex(
-        { expiresAt: 1 },
-        { expireAfterSeconds: 0 }
-      );
-      return { db, client };
-    })().catch((error) => {
-      statsMongoDbPromise = null;
-      statsMongoClientPromise = null;
-      throw error;
-    });
-  }
-  return statsMongoDbPromise;
-}
-
-function statsLocalRecord(routeKey, status, ms, now = Date.now()) {
+function statsRecord(routeKey, status, ms) {
+  const now = Date.now();
   STATS.total += 1;
   if (status >= 500) STATS.errors5xx += 1;
   else if (status >= 400) STATS.errors4xx += 1;
-  STATS.totalMs += Math.max(0, Number(ms) || 0);
-  STATS.durationCount += 1;
 
   const minute = Math.floor(now / 60000);
   STATS.buckets.set(minute, (STATS.buckets.get(minute) || 0) + 1);
@@ -12543,83 +12795,6 @@ function statsLocalRecord(routeKey, status, ms, now = Date.now()) {
   if (!/^[a-z0-9/_()\- ]{1,40}$/i.test(key)) key = "(lainnya)";
   if (!STATS.endpoints.has(key) && STATS.endpoints.size >= 100) key = "(lainnya)";
   STATS.endpoints.set(key, (STATS.endpoints.get(key) || 0) + 1);
-}
-
-async function statsRecord(routeKey, status, ms) {
-  const now = Date.now();
-  statsLocalRecord(routeKey, status, ms, now);
-
-  // Simpan statistik secara best-effort agar DB bermasalah tidak menggagalkan endpoint.
-  if (!String(process.env.URLDATABASE || "").trim()) return;
-  try {
-    const mongo = await getStatsMongo();
-    if (!mongo) return;
-    const { db } = mongo;
-    const minute = Math.floor(now / 60000);
-    let key = status === 404 ? "(tidak ditemukan)" : String(routeKey || "").slice(0, 40);
-    if (!/^[a-z0-9/_()\- ]{1,40}$/i.test(key)) key = "(lainnya)";
-    const expiresAt = new Date((minute + 60) * 60000);
-
-    await Promise.all([
-      db.collection("api_stats_global").updateOne(
-        { _id: "global" },
-        {
-          $setOnInsert: { startedAt: new Date(now) },
-          $inc: {
-            total: 1,
-            errors4xx: status >= 400 && status < 500 ? 1 : 0,
-            errors5xx: status >= 500 ? 1 : 0,
-            totalMs: Math.max(0, Number(ms) || 0),
-            durationCount: 1
-          }
-        },
-        { upsert: true }
-      ),
-      db.collection("api_stats_minutes").updateOne(
-        { minute },
-        { $inc: { count: 1 }, $set: { expiresAt } },
-        { upsert: true }
-      ),
-      db.collection("api_stats_endpoints").updateOne(
-        { _id: key },
-        { $inc: { count: 1 } },
-        { upsert: true }
-      )
-    ]);
-  } catch (error) {
-    console.error("stats MongoDB write error:", error?.message || error);
-  }
-}
-
-async function statsMongoSnapshot() {
-  const mongo = await getStatsMongo();
-  if (!mongo) return null;
-  const { db } = mongo;
-  const global = await db.collection("api_stats_global").findOne({ _id: "global" });
-  const nowMin = Math.floor(Date.now() / 60000);
-  const [minuteRows, endpointRows] = await Promise.all([
-    db.collection("api_stats_minutes")
-      .find({ minute: { $gte: nowMin - 29, $lte: nowMin } })
-      .project({ _id: 0, minute: 1, count: 1 })
-      .toArray(),
-    db.collection("api_stats_endpoints")
-      .find({})
-      .sort({ count: -1 })
-      .limit(6)
-      .toArray()
-  ]);
-  const bucketMap = new Map(minuteRows.map((row) => [row.minute, row.count]));
-  const perMinute = Array.from({ length: 30 }, (_, i) => bucketMap.get(nowMin - 29 + i) || 0);
-  return {
-    total: global?.total || 0,
-    errors4xx: global?.errors4xx || 0,
-    errors5xx: global?.errors5xx || 0,
-    totalMs: global?.totalMs || 0,
-    durationCount: global?.durationCount || 0,
-    startedAt: global?.startedAt ? new Date(global.startedAt).getTime() : STATS.startedAt,
-    perMinute,
-    top: endpointRows.map((row) => ({ route: row._id, count: row.count || 0 }))
-  };
 }
 
 function statsRateLimit(req) {
@@ -12699,29 +12874,12 @@ async function handleStats(req, res) {
     const used = Math.max(0, total - free);
     const mem = process.memoryUsage();
 
-    let persistent = null;
-    if (String(process.env.URLDATABASE || "").trim()) {
-      try {
-        persistent = await statsMongoSnapshot();
-      } catch (error) {
-        console.error("stats MongoDB read error:", error?.message || error);
-      }
-    }
-
     const nowMin = Math.floor(Date.now() / 60000);
-    const perMinute = persistent?.perMinute ||
-      Array.from({ length: 30 }, (_, i) => STATS.buckets.get(nowMin - 29 + i) || 0);
+    const perMinute = Array.from({ length: 30 }, (_, i) => STATS.buckets.get(nowMin - 29 + i) || 0);
     const sorted = [...STATS.durations].sort((a, b) => a - b);
-    const avgMs = persistent
-      ? (persistent.durationCount ? persistent.totalMs / persistent.durationCount : 0)
-      : (sorted.length ? sorted.reduce((a, b) => a + b, 0) / sorted.length : 0);
+    const avgMs = sorted.length ? sorted.reduce((a, b) => a + b, 0) / sorted.length : 0;
     const p95Ms = sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] : 0;
-    const top = persistent?.top ||
-      [...STATS.endpoints.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([route, count]) => ({ route, count }));
-    const statsTotal = persistent?.total ?? STATS.total;
-    const stats4xx = persistent?.errors4xx ?? STATS.errors4xx;
-    const stats5xx = persistent?.errors5xx ?? STATS.errors5xx;
-    const statsSince = persistent?.startedAt ?? STATS.startedAt;
+    const top = [...STATS.endpoints.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([route, count]) => ({ route, count }));
 
     res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({
@@ -12729,7 +12887,7 @@ async function handleStats(req, res) {
       data: {
         time: Date.now(),
         uptimeSec: Math.round(process.uptime()),
-        since: statsSince,
+        since: STATS.startedAt,
         cpu: {
           pct: Math.round(cpu.pct * 10) / 10,
           processPct: Math.round(cpu.process * 10) / 10,
@@ -12743,12 +12901,12 @@ async function handleStats(req, res) {
           rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal
         },
         requests: {
-          total: statsTotal,
+          total: STATS.total,
           lastMinute: perMinute[29],
           last5Min: perMinute.slice(25).reduce((a, b) => a + b, 0),
           perMinute,
-          errors4xx: stats4xx,
-          errors5xx: stats5xx,
+          errors4xx: STATS.errors4xx,
+          errors5xx: STATS.errors5xx,
           avgMs: Math.round(avgMs),
           p95Ms: Math.round(p95Ms),
           top
@@ -12773,9 +12931,7 @@ export default async function handler(req, res) {
   // hitung statistik untuk halaman /status (endpoint /api/stats sendiri tidak dihitung)
   if (routeKey !== "stats") {
     const startedAt = Date.now();
-    res.on("finish", () => {
-      void statsRecord(routeKey, res.statusCode, Date.now() - startedAt);
-    });
+    res.on("finish", () => statsRecord(routeKey, res.statusCode, Date.now() - startedAt));
   }
 
   switch (routeKey) {
@@ -12897,6 +13053,8 @@ case "video-to-prompt":
   case "web2apk": return handleWeb2apk(req, res);
   case "ocr":
   return handleOcr(req, res);
+  case "imgbb":
+  return handleImgbb(req, res);
   case "ringtone":
   return handleRingtoneEndpoint(req, res);
     default:
