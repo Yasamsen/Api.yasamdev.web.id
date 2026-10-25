@@ -12767,6 +12767,8 @@ const STATS = {
   total: 0,
   errors4xx: 0,
   errors5xx: 0,
+  totalMs: 0,
+  durationCount: 0,
   buckets: new Map(),
   durations: [],
   endpoints: new Map(),
@@ -12777,11 +12779,46 @@ const STATS = {
 const STATS_RATE = { windowMs: 60_000, max: 60 };
 const statsHits = new Map();
 
-function statsRecord(routeKey, status, ms) {
-  const now = Date.now();
+// MongoDB opsional: jika URLDATABASE kosong, statistik tetap memakai memori lokal.
+let statsMongoClientPromise = null;
+let statsMongoDbPromise = null;
+
+async function getStatsMongo() {
+  const uri = String(process.env.URLDATABASE || "").trim();
+  if (!uri) return null;
+
+  if (!statsMongoDbPromise) {
+    statsMongoDbPromise = (async () => {
+      const { MongoClient } = await import("mongodb");
+      const client = new MongoClient(uri, {
+        serverSelectionTimeoutMS: 5000,
+        connectTimeoutMS: 5000,
+        maxPoolSize: 5
+      });
+      statsMongoClientPromise = client.connect();
+      await statsMongoClientPromise;
+      const dbName = String(process.env.MONGODB_DB || "").trim();
+      const db = dbName ? client.db(dbName) : client.db();
+      await db.collection("api_stats_minutes").createIndex(
+        { expiresAt: 1 },
+        { expireAfterSeconds: 0 }
+      );
+      return { db, client };
+    })().catch((error) => {
+      statsMongoDbPromise = null;
+      statsMongoClientPromise = null;
+      throw error;
+    });
+  }
+  return statsMongoDbPromise;
+}
+
+function statsLocalRecord(routeKey, status, ms, now = Date.now()) {
   STATS.total += 1;
   if (status >= 500) STATS.errors5xx += 1;
   else if (status >= 400) STATS.errors4xx += 1;
+  STATS.totalMs += Math.max(0, Number(ms) || 0);
+  STATS.durationCount += 1;
 
   const minute = Math.floor(now / 60000);
   STATS.buckets.set(minute, (STATS.buckets.get(minute) || 0) + 1);
@@ -12795,6 +12832,83 @@ function statsRecord(routeKey, status, ms) {
   if (!/^[a-z0-9/_()\- ]{1,40}$/i.test(key)) key = "(lainnya)";
   if (!STATS.endpoints.has(key) && STATS.endpoints.size >= 100) key = "(lainnya)";
   STATS.endpoints.set(key, (STATS.endpoints.get(key) || 0) + 1);
+}
+
+async function statsRecord(routeKey, status, ms) {
+  const now = Date.now();
+  statsLocalRecord(routeKey, status, ms, now);
+
+  // Simpan statistik secara best-effort agar DB bermasalah tidak menggagalkan endpoint.
+  if (!String(process.env.URLDATABASE || "").trim()) return;
+  try {
+    const mongo = await getStatsMongo();
+    if (!mongo) return;
+    const { db } = mongo;
+    const minute = Math.floor(now / 60000);
+    let key = status === 404 ? "(tidak ditemukan)" : String(routeKey || "").slice(0, 40);
+    if (!/^[a-z0-9/_()\- ]{1,40}$/i.test(key)) key = "(lainnya)";
+    const expiresAt = new Date((minute + 60) * 60000);
+
+    await Promise.all([
+      db.collection("api_stats_global").updateOne(
+        { _id: "global" },
+        {
+          $setOnInsert: { startedAt: new Date(now) },
+          $inc: {
+            total: 1,
+            errors4xx: status >= 400 && status < 500 ? 1 : 0,
+            errors5xx: status >= 500 ? 1 : 0,
+            totalMs: Math.max(0, Number(ms) || 0),
+            durationCount: 1
+          }
+        },
+        { upsert: true }
+      ),
+      db.collection("api_stats_minutes").updateOne(
+        { minute },
+        { $inc: { count: 1 }, $set: { expiresAt } },
+        { upsert: true }
+      ),
+      db.collection("api_stats_endpoints").updateOne(
+        { _id: key },
+        { $inc: { count: 1 } },
+        { upsert: true }
+      )
+    ]);
+  } catch (error) {
+    console.error("stats MongoDB write error:", error?.message || error);
+  }
+}
+
+async function statsMongoSnapshot() {
+  const mongo = await getStatsMongo();
+  if (!mongo) return null;
+  const { db } = mongo;
+  const global = await db.collection("api_stats_global").findOne({ _id: "global" });
+  const nowMin = Math.floor(Date.now() / 60000);
+  const [minuteRows, endpointRows] = await Promise.all([
+    db.collection("api_stats_minutes")
+      .find({ minute: { $gte: nowMin - 29, $lte: nowMin } })
+      .project({ _id: 0, minute: 1, count: 1 })
+      .toArray(),
+    db.collection("api_stats_endpoints")
+      .find({})
+      .sort({ count: -1 })
+      .limit(6)
+      .toArray()
+  ]);
+  const bucketMap = new Map(minuteRows.map((row) => [row.minute, row.count]));
+  const perMinute = Array.from({ length: 30 }, (_, i) => bucketMap.get(nowMin - 29 + i) || 0);
+  return {
+    total: global?.total || 0,
+    errors4xx: global?.errors4xx || 0,
+    errors5xx: global?.errors5xx || 0,
+    totalMs: global?.totalMs || 0,
+    durationCount: global?.durationCount || 0,
+    startedAt: global?.startedAt ? new Date(global.startedAt).getTime() : STATS.startedAt,
+    perMinute,
+    top: endpointRows.map((row) => ({ route: row._id, count: row.count || 0 }))
+  };
 }
 
 function statsRateLimit(req) {
@@ -12874,12 +12988,29 @@ async function handleStats(req, res) {
     const used = Math.max(0, total - free);
     const mem = process.memoryUsage();
 
+    let persistent = null;
+    if (String(process.env.URLDATABASE || "").trim()) {
+      try {
+        persistent = await statsMongoSnapshot();
+      } catch (error) {
+        console.error("stats MongoDB read error:", error?.message || error);
+      }
+    }
+
     const nowMin = Math.floor(Date.now() / 60000);
-    const perMinute = Array.from({ length: 30 }, (_, i) => STATS.buckets.get(nowMin - 29 + i) || 0);
+    const perMinute = persistent?.perMinute ||
+      Array.from({ length: 30 }, (_, i) => STATS.buckets.get(nowMin - 29 + i) || 0);
     const sorted = [...STATS.durations].sort((a, b) => a - b);
-    const avgMs = sorted.length ? sorted.reduce((a, b) => a + b, 0) / sorted.length : 0;
+    const avgMs = persistent
+      ? (persistent.durationCount ? persistent.totalMs / persistent.durationCount : 0)
+      : (sorted.length ? sorted.reduce((a, b) => a + b, 0) / sorted.length : 0);
     const p95Ms = sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] : 0;
-    const top = [...STATS.endpoints.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([route, count]) => ({ route, count }));
+    const top = persistent?.top ||
+      [...STATS.endpoints.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([route, count]) => ({ route, count }));
+    const statsTotal = persistent?.total ?? STATS.total;
+    const stats4xx = persistent?.errors4xx ?? STATS.errors4xx;
+    const stats5xx = persistent?.errors5xx ?? STATS.errors5xx;
+    const statsSince = persistent?.startedAt ?? STATS.startedAt;
 
     res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({
@@ -12887,7 +13018,7 @@ async function handleStats(req, res) {
       data: {
         time: Date.now(),
         uptimeSec: Math.round(process.uptime()),
-        since: STATS.startedAt,
+        since: statsSince,
         cpu: {
           pct: Math.round(cpu.pct * 10) / 10,
           processPct: Math.round(cpu.process * 10) / 10,
@@ -12901,12 +13032,12 @@ async function handleStats(req, res) {
           rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal
         },
         requests: {
-          total: STATS.total,
+          total: statsTotal,
           lastMinute: perMinute[29],
           last5Min: perMinute.slice(25).reduce((a, b) => a + b, 0),
           perMinute,
-          errors4xx: STATS.errors4xx,
-          errors5xx: STATS.errors5xx,
+          errors4xx: stats4xx,
+          errors5xx: stats5xx,
           avgMs: Math.round(avgMs),
           p95Ms: Math.round(p95Ms),
           top
