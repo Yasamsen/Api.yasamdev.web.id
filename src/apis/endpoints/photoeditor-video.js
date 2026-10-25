@@ -1,7 +1,7 @@
 export default {
   slug: "photoeditor-video",
   name: "PhotoEditor Video AI",
-  description: "Mengubah gambar menjadi video dengan AI PhotoEditorAI berdasarkan prompt, rasio, durasi, dan resolusi. Video diproses beberapa menit; jika belum selesai, respons berisi check_url untuk mengambil hasilnya.",
+  description: "Mengubah gambar menjadi video dengan AI PhotoEditorAI berdasarkan prompt, durasi, dan resolusi. Rasio mengikuti gambar. Kodenya sama dengan photoeditor-ai; token akun (env PE_VIDEO_TOKEN) opsional dan hanya perlu jika server meminta captcha. Video diproses beberapa menit; jika belum selesai, respons berisi check_url untuk mengambil hasilnya.",
   category: "AI",
   method: "GET",
   endpoint: "/api/photoeditor-video",
@@ -22,20 +22,6 @@ export default {
       example: "Kamera zoom perlahan, rambut tertiup angin"
     },
     {
-      name: "ratio",
-      type: "select",
-      required: false,
-      description: "Aspect ratio video. Default 16:9.",
-      options: [
-        { label: "16:9", value: "16:9" },
-        { label: "9:16", value: "9:16" },
-        { label: "1:1", value: "1:1" },
-        { label: "4:3", value: "4:3" },
-        { label: "3:4", value: "3:4" }
-      ],
-      example: "9:16"
-    },
-    {
       name: "duration",
       type: "number",
       required: false,
@@ -46,13 +32,13 @@ export default {
       name: "resolution",
       type: "select",
       required: false,
-      description: "Resolusi video. Default 720p.",
+      description: "Resolusi video. Default 480p (hemat kredit).",
       options: [
         { label: "480p", value: "480p" },
         { label: "720p", value: "720p" },
         { label: "1080p", value: "1080p" }
       ],
-      example: "720p"
+      example: "480p"
     }
   ],
   responseExample: {
@@ -72,5 +58,5 @@ export default {
     { name: "data.check_url", type: "string", description: "Link untuk mengecek ulang job yang belum selesai." },
     { name: "data.raw", type: "object", description: "Respons mentah dari PhotoEditorAI." }
   ],
-  exampleRequest: "/api/photoeditor-video?image=https://example.com/image.jpg&prompt=Kamera%20zoom%20perlahan&ratio=9:16&duration=5&resolution=720p"
+  exampleRequest: "/api/photoeditor-video?image=https://example.com/image.jpg&prompt=Kamera%20zoom%20perlahan&duration=5&resolution=480p"
 };

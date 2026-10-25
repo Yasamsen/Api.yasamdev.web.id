@@ -91,16 +91,16 @@ Route lama `music-album-search` dan `music-album-download` diarahkan ke handler 
 
 ## Endpoint `photoeditor-video` (gambar + prompt -> video)
 
-`GET /api/photoeditor-video?image=URL&prompt=...` — opsional `ratio` (16:9, 9:16, 1:1, 4:3, 3:4), `duration` (2–30 detik, default 5), `resolution` (480p/720p/1080p). Logikanya sama dengan `photoeditor-ai`: unduh gambar -> `create-job` -> polling `get-job`.
+`GET /api/photoeditor-video?image=URL&prompt=...` — opsional `duration` (2–30 detik, default 5) dan `resolution` (480p/720p/1080p, default 480p). Rasio video mengikuti gambar.
 
-Video diproses lebih lama dari foto. Endpoint menunggu ±50 detik; jika belum selesai, responsnya HTTP 202 berisi `data.check_url` (`?job_id=...&serial=...`) yang dipanggil ulang sampai `data.video_url` muncul.
+Alurnya: unduh gambar -> `POST /pe/video-generator/image-to-video/create-job` (field `prompt`, `duration`, `image`, `resolution`) -> polling `GET /pe/video-generator/{mode}/get-job/{id}`. Alamat ini diambil dari JavaScript web photoeditorai.io.
 
-**Wajib dicocokkan sekali:** API video PhotoEditorAI tidak dipublikasikan, jadi URL dan nama field-nya di `PE_VIDEO` (`api/index.js`) adalah tebakan yang meniru API foto. Cara memastikan: buka `photoeditorai.io/ai-video-generator`, DevTools -> Network, klik Generate video, lalu lihat request `create-job` (URL, field form, dan nilai `feature`/`model_name`) dan request `get-job`. Nilai berikut bisa diganti lewat environment variable di Vercel tanpa mengedit kode:
+**Token akun (opsional).** Kodenya sama dengan `photoeditor-ai` dan jalan tanpa login. Kalau server menjawab `Captcha verification required` (Turnstile), pakai token akun yang login supaya captcha dilewati.
 
-- `PE_VIDEO_CREATE_URL`: URL create-job video.
-- `PE_VIDEO_STATUS_URL`: URL get-job; tulis `{id}` dan `{feature}` sebagai placeholder.
-- `PE_VIDEO_FEATURE`: nilai `feature`.
-- `PE_VIDEO_MODEL`: nilai `model_name`.
-- `PE_VIDEO_IMAGE_FIELD`: nama field file gambar.
+1. Login di `photoeditorai.io/ai-video-generator/`.
+2. Ambil token: DevTools -> Application -> Local Storage -> `ezremove-userInfo` -> `token`. Di HP, ketik (jangan tempel) di address bar: `javascript:prompt('token',JSON.parse(localStorage.getItem('ezremove-userInfo')).token)`
+3. Isi sebagai environment variable `PE_VIDEO_TOKEN` di Vercel, lalu redeploy.
 
-Nama field lain (`prompt`, `ratio`, `duration`, `resolution`) ada di `PE_VIDEO.fields`. Kredit PhotoEditorAI terpakai per detik video, jadi mulai dengan `duration` kecil saat mencoba.
+Token setara kunci akun: jangan taruh di frontend atau repo. Jika muncul 401/403, token kedaluwarsa dan perlu diambil ulang. Opsional: `PE_VIDEO_BASE` untuk mengganti alamat dasar API.
+
+Video diproses lebih lama dari foto. Endpoint menunggu ±50 detik; jika belum selesai, responsnya HTTP 202 berisi `data.check_url` (`?job_id=...&serial=...`) yang dipanggil ulang sampai `data.video_url` muncul. Kredit akun terpakai per detik video, jadi mulai dengan `duration` kecil.
