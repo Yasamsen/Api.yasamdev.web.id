@@ -88,19 +88,11 @@ Daftar lagu dicari berurutan: **Deezer -> iTunes Search API -> pencarian YouTube
 
 Route lama `music-album-search` dan `music-album-download` diarahkan ke handler ini (`query` = `artist`).
 
+## Halaman admin (`/admin`)
 
-## Endpoint `photoeditor-video` (gambar + prompt -> video)
+Tidak ada tautannya di situs. Buka `https://domain/admin`, masuk dengan password, lalu:
+- **Endpoint:** ubah status jadi Error (isi pesan untuk pengguna; endpoint menjawab HTTP 503 dan docs menampilkan lencana Error) atau centang Kunci.
+- **API key:** buat key untuk semua endpoint terkunci atau endpoint tertentu. Pengguna memakai `?apikey=KEY` atau header `x-api-key`. Key hanya ditampilkan sekali saat dibuat.
+- Admin yang login tetap bisa mengakses semua endpoint.
 
-`GET /api/photoeditor-video?image=URL&prompt=...` — opsional `duration` (2–30 detik, default 5) dan `resolution` (480p/720p/1080p, default 480p). Rasio video mengikuti gambar.
-
-Alurnya: unduh gambar -> `POST /pe/video-generator/image-to-video/create-job` (field `prompt`, `duration`, `image`, `resolution`) -> polling `GET /pe/video-generator/{mode}/get-job/{id}`. Alamat ini diambil dari JavaScript web photoeditorai.io.
-
-**Token akun (opsional).** Kodenya sama dengan `photoeditor-ai` dan jalan tanpa login. Kalau server menjawab `Captcha verification required` (Turnstile), pakai token akun yang login supaya captcha dilewati.
-
-1. Login di `photoeditorai.io/ai-video-generator/`.
-2. Ambil token: DevTools -> Application -> Local Storage -> `ezremove-userInfo` -> `token`. Di HP, ketik (jangan tempel) di address bar: `javascript:prompt('token',JSON.parse(localStorage.getItem('ezremove-userInfo')).token)`
-3. Isi sebagai environment variable `PE_VIDEO_TOKEN` di Vercel, lalu redeploy.
-
-Token setara kunci akun: jangan taruh di frontend atau repo. Jika muncul 401/403, token kedaluwarsa dan perlu diambil ulang. Opsional: `PE_VIDEO_BASE` untuk mengganti alamat dasar API.
-
-Video diproses lebih lama dari foto. Endpoint menunggu ±50 detik; jika belum selesai, responsnya HTTP 202 berisi `data.check_url` (`?job_id=...&serial=...`) yang dipanggil ulang sampai `data.video_url` muncul. Kredit akun terpakai per detik video, jadi mulai dengan `duration` kecil.
+Environment variable di Vercel: `ADMIN_PASSWORD` (wajib), `ADMIN_SECRET` (opsional, penanda tangan sesi), `URLDATABASE` (MongoDB; tanpa ini pengaturan hilang saat server restart). Setelah mengisi variabel, redeploy.

@@ -1647,230 +1647,6 @@ async function handlePhotoEditorAi(req, res) {
 // @category AI
 // @url https://photoeditorai.io/ai-video-generator/
 
-/* ============================================================
- * PHOTOEDITOR VIDEO — gambar + prompt -> video
- *   GET /api/photoeditor-video?image=URL&prompt=...&duration=5&resolution=480p
- *
- * Alur (diverifikasi dari JS web photoeditorai.io):
- *   POST https://api.photoeditorai.io/pe/video-generator/image-to-video/create-job
- *        field: prompt, duration, image, resolution
- *   GET  https://api.photoeditorai.io/pe/video-generator/{mode}/get-job/{id}
- *
- * Kodenya sama dengan photoeditor-ai (tanpa login). PE_VIDEO_TOKEN bersifat OPSIONAL: bila
- * server menjawab "Captcha verification required" (kode 400010), isi token akun login di env
- * tersebut (localStorage "ezremove-userInfo" -> token) agar captcha dilewati.
- * Rasio mengikuti gambar (jalur image-to-video tidak mengirim aspect_ratio).
- * ============================================================ */
-const PE_VIDEO = {
-  base: process.env.PE_VIDEO_BASE || "https://api.photoeditorai.io/pe/video-generator",
-  token: () => String(process.env.PE_VIDEO_TOKEN || "").trim(),
-  fields: { prompt: "prompt", duration: "duration", resolution: "resolution", image: "image" }
-};
-const PE_VIDEO_RESOLUTIONS = ["480p", "720p", "1080p"];
-const PE_VIDEO_BUDGET_MS = 50000;
-const PE_VIDEO_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3";
-
-function peVideoHeaders(serial, extra = {}) {
-  return {
-    "Product-Serial": serial,
-    Origin: "https://photoeditorai.io",
-    Referer: "https://photoeditorai.io/",
-    "User-Agent": PE_VIDEO_UA,
-    ...(PE_VIDEO.token() ? { Authorization: PE_VIDEO.token() } : {}),
-    ...extra
-  };
-}
-
-function peVideoPrivateHost(host) {
-  const h = String(host || "").toLowerCase().replace(/^\[|\]$/g, "");
-  if (!h || h === "localhost" || h.endsWith(".localhost") || h.endsWith(".internal") || h.endsWith(".local")) return true;
-  if (net.isIPv6(h)) return h === "::1" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80") || h.startsWith("::ffff:");
-  if (net.isIPv4(h)) {
-    const [a, b] = h.split(".").map(Number);
-    return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
-  }
-  return false;
-}
-
-// Cari URL video di dalam respons (struktur respons API video belum terverifikasi).
-function peVideoFindUrl(node, depth = 0) {
-  if (!node || depth > 6) return null;
-  if (typeof node === "string") return /^https?:\/\/\S+\.(mp4|webm|mov)(\?\S*)?$/i.test(node) ? node : null;
-  if (Array.isArray(node)) {
-    for (const item of node) {
-      const found = peVideoFindUrl(item, depth + 1);
-      if (found) return found;
-    }
-    return null;
-  }
-  if (typeof node === "object") {
-    for (const key of ["video_url", "videoUrl", "video", "url", "output_url", "result_url"]) {
-      const found = peVideoFindUrl(node[key], depth + 1);
-      if (found) return found;
-    }
-    for (const value of Object.values(node)) {
-      const found = peVideoFindUrl(value, depth + 1);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
-async function peVideoCreateJob(imageUrl, prompt, { duration, resolution }) {
-  const image = await axios.get(imageUrl, {
-    responseType: "arraybuffer",
-    timeout: 20000,
-    maxContentLength: 24 * 1024 * 1024,
-    headers: { "User-Agent": PE_VIDEO_UA }
-  });
-  const type = String(image.headers?.["content-type"] || "").split(";")[0].trim().toLowerCase();
-  if (type && !type.startsWith("image/")) {
-    const err = new Error("URL yang diberikan bukan gambar.");
-    err.badInput = true;
-    throw err;
-  }
-  const ext = type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg";
-
-  const f = PE_VIDEO.fields;
-  const form = new FormData();
-  form.append(f.prompt, prompt);
-  form.append(f.duration, String(duration));
-  form.append(f.resolution, resolution);
-  form.append(f.image, Buffer.from(image.data), { filename: `image-${Date.now()}.${ext}`, contentType: type || "image/jpeg" });
-
-  const serial = photoEditorAiGenerateProductSerial();
-  const created = await axios.post(`${PE_VIDEO.base}/image-to-video/create-job`, form, {
-    headers: peVideoHeaders(serial, form.getHeaders()),
-    timeout: 30000
-  });
-
-  if (created.data?.code !== 100000) {
-    const err = new Error("Gagal membuat job video: " + (created.data?.message || "respons tidak dikenali"));
-    if (created.data?.code === 400010) err.captcha = true;
-    throw err;
-  }
-  const jobId = created.data?.result?.job_id;
-  if (!jobId) throw new Error("Job ID tidak ditemukan dari server.");
-  return { jobId, serial };
-}
-
-// Satu kali cek status. Mengembalikan { state: "done" | "processing", data }.
-async function peVideoCheckJob(jobId, serial) {
-  let res;
-  for (const mode of ["image-to-video", "models"]) {
-    try {
-      res = await axios.get(`${PE_VIDEO.base}/${mode}/get-job/${encodeURIComponent(jobId)}`, { headers: peVideoHeaders(serial), timeout: 30000 });
-      break;
-    } catch (e) {
-      if (e.response?.status !== 404 || mode === "models") throw e;
-    }
-  }
-  const result = res.data?.result;
-  if (!result) return { state: "processing", data: res.data };
-  if (result.status === 2 || peVideoFindUrl(result)) return { state: "done", data: res.data };
-  if (result.status === 3 || result.status === 4 || result.status === -1) {
-    throw new Error(result.message || "Proses pembuatan video gagal.");
-  }
-  return { state: "processing", data: res.data };
-}
-
-function peVideoDone(res, jobId, data) {
-  return res.status(200).json({
-    status: true,
-    source: "PhotoEditorAI",
-    data: { job_id: jobId, video_url: peVideoFindUrl(data?.result) || peVideoFindUrl(data), raw: data }
-  });
-}
-
-async function handlePhotoEditorVideo(req, res) {
-  const startedAt = Date.now();
-  try {
-    if (req.method !== "GET") {
-      return res.status(405).json({ status: false, message: "Method tidak diizinkan. Gunakan GET.", error: "Method Not Allowed" });
-    }
-
-    const q = req.query || {};
-    const base = malbumBase(req);
-    const example = "/api/photoeditor-video?image=https://example.com/foto.jpg&prompt=Kamera%20zoom%20perlahan";
-
-    // ---- cek ulang job yang belum selesai ----
-    const jobParam = String(q.job_id || "").trim();
-    if (jobParam) {
-      const serial = String(q.serial || "").trim();
-      if (!/^[A-Za-z0-9_-]{4,128}$/.test(jobParam) || !/^[a-z0-9]{32}$/.test(serial)) {
-        return res.status(400).json({ status: false, message: "job_id / serial tidak valid. Pakai check_url dari respons sebelumnya." });
-      }
-      const check = await peVideoCheckJob(jobParam, serial);
-      res.setHeader("Cache-Control", "no-store");
-      if (check.state === "done") return peVideoDone(res, jobParam, check.data);
-      return res.status(202).json({
-        status: true,
-        processing: true,
-        message: "Video masih diproses. Cek lagi beberapa detik lagi.",
-        data: { job_id: jobParam, check_url: `${base}/api/photoeditor-video?job_id=${encodeURIComponent(jobParam)}&serial=${serial}` }
-      });
-    }
-
-    // ---- buat video baru ----
-    const imageUrl = String(q.image || "").trim();
-    const prompt = String(q.prompt || "").trim();
-    if (!imageUrl) return res.status(400).json({ status: false, message: "Parameter image wajib diisi.", error: `Example: "${example}"` });
-    if (!prompt) return res.status(400).json({ status: false, message: "Parameter prompt wajib diisi.", error: `Example: "${example}"` });
-    if (prompt.length > 1000) return res.status(400).json({ status: false, message: "Parameter prompt maksimal 1000 karakter." });
-
-    let parsed;
-    try {
-      parsed = new URL(imageUrl);
-    } catch {
-      return res.status(400).json({ status: false, message: "URL gambar tidak valid.", error: "Parameter image harus berupa URL yang valid." });
-    }
-    if (!/^https?:$/.test(parsed.protocol) || peVideoPrivateHost(parsed.hostname)) {
-      return res.status(400).json({ status: false, message: "URL gambar harus http/https publik." });
-    }
-
-    const resolution = String(q.resolution || "480p").toLowerCase();
-    if (!PE_VIDEO_RESOLUTIONS.includes(resolution)) {
-      return res.status(400).json({ status: false, message: "Resolusi tidak didukung.", error: `Gunakan salah satu: ${PE_VIDEO_RESOLUTIONS.join(", ")}` });
-    }
-    const duration = q.duration === undefined || q.duration === "" ? 5 : Number(q.duration);
-    if (!Number.isInteger(duration) || duration < 2 || duration > 30) {
-      return res.status(400).json({ status: false, message: "Durasi harus bilangan bulat 2–30 detik." });
-    }
-
-    const { jobId, serial } = await peVideoCreateJob(imageUrl, prompt, { duration, resolution });
-
-    // Polling sampai batas waktu fungsi serverless.
-    while (Date.now() - startedAt < PE_VIDEO_BUDGET_MS) {
-      await new Promise((resolve) => setTimeout(resolve, 5000));
-      const check = await peVideoCheckJob(jobId, serial);
-      if (check.state === "done") {
-        res.setHeader("Cache-Control", "no-store");
-        return peVideoDone(res, jobId, check.data);
-      }
-    }
-
-    res.setHeader("Cache-Control", "no-store");
-    return res.status(202).json({
-      status: true,
-      processing: true,
-      message: "Video sedang dibuat dan butuh waktu lebih lama. Buka check_url untuk mengambil hasilnya.",
-      data: { job_id: jobId, check_url: `${base}/api/photoeditor-video?job_id=${encodeURIComponent(jobId)}&serial=${serial}` }
-    });
-  } catch (error) {
-    console.error("PhotoEditorVideo Error:", error?.response?.data || error?.message || error);
-    const upstream = error.response?.status;
-    const statusCode = error.badInput ? 400 : upstream >= 400 && upstream < 600 ? upstream : 500;
-    return res.status(statusCode).json({
-      status: false,
-      message: "Gagal membuat video dengan PhotoEditorAI.",
-      error: error.response?.data?.message || error.response?.data?.error || error.message,
-      ...(error.captcha || upstream === 401 || upstream === 403
-        ? { hint: "Server meminta captcha/login. Isi env PE_VIDEO_TOKEN dengan token akun photoeditorai.io (atau ambil token baru jika kedaluwarsa)." }
-        : {})
-    });
-  }
-}
-
 //unblur
 // @description Unblur and enhance image
 // @category Tools
@@ -13813,8 +13589,150 @@ async function handleMusicAlbum(req, res) {
   }
 }
 
+/* ============================================================
+ * ADMIN — kontrol endpoint (error / kunci API). Halaman: /admin
+ * Env: ADMIN_PASSWORD (wajib), ADMIN_SECRET (opsional, penanda tangan sesi),
+ *      URLDATABASE (MongoDB; tanpa ini pengaturan hanya di memori & hilang saat restart).
+ * ============================================================ */
+const ADMIN_TTL_MS = 12 * 60 * 60 * 1000;
+const ADMIN_CACHE_MS = 10_000;
+const ADMIN_OPEN = new Set(["stats", "endpoint-status"]); // tidak pernah dikunci
+let adminMem = { endpoints: {}, keys: [] };
+let adminCache = { at: 0, data: null };
+const adminLoginHits = new Map();
+
+const adminSha = (v) => crypto.createHash("sha256").update(String(v)).digest("hex");
+const adminSafeEq = (a, b) => {
+  const x = Buffer.from(adminSha(a)); const y = Buffer.from(adminSha(b));
+  return crypto.timingSafeEqual(x, y);
+};
+const adminSecret = () => String(process.env.ADMIN_SECRET || process.env.ADMIN_PASSWORD || "");
+
+function adminSign(exp) {
+  return `${exp}.${crypto.createHmac("sha256", adminSecret()).update(String(exp)).digest("hex")}`;
+}
+function adminTokenOk(token) {
+  if (!process.env.ADMIN_PASSWORD || !token) return false;
+  const [exp, sig] = String(token).split(".");
+  if (!/^\d+$/.test(exp || "") || Number(exp) < Date.now()) return false;
+  return !!sig && adminSafeEq(adminSign(exp), `${exp}.${sig}`);
+}
+const adminBearer = (req) => String(req.headers?.authorization || "").replace(/^Bearer\s+/i, "").trim();
+
+async function adminLoad(force = false) {
+  if (!force && adminCache.data && Date.now() - adminCache.at < ADMIN_CACHE_MS) return adminCache.data;
+  let data = adminMem;
+  try {
+    const m = await getStatsMongo();
+    if (m) {
+      const doc = await m.db.collection("admin_config").findOne({ _id: "main" });
+      data = { endpoints: doc?.endpoints || {}, keys: doc?.keys || [] };
+    }
+  } catch (e) { console.error("admin load:", e?.message); }
+  adminCache = { at: Date.now(), data };
+  return data;
+}
+async function adminSave(data) {
+  adminMem = data;
+  adminCache = { at: Date.now(), data };
+  const m = await getStatsMongo();
+  if (m) await m.db.collection("admin_config").updateOne({ _id: "main" }, { $set: { endpoints: data.endpoints, keys: data.keys } }, { upsert: true });
+}
+
+// Dipanggil sebelum endpoint dijalankan. true = request dihentikan.
+async function adminGate(req, res, routeKey) {
+  if (!routeKey || routeKey.startsWith("admin") || ADMIN_OPEN.has(routeKey)) return false;
+  const cfg = await adminLoad();
+  const rule = cfg.endpoints[routeKey];
+  if (!rule || (rule.status !== "error" && !rule.locked)) return false;
+  if (adminTokenOk(adminBearer(req))) return false; // admin: akses penuh
+
+  if (rule.status === "error") {
+    res.status(503).json({ status: false, endpoint: routeKey, error_by_admin: true, message: rule.message || "Endpoint ini sedang bermasalah. Coba lagi nanti." });
+    return true;
+  }
+  const url = new URL(req.url, "http://x");
+  const supplied = String(req.headers["x-api-key"] || url.searchParams.get("apikey") || "").trim();
+  const hash = supplied ? adminSha(supplied) : "";
+  const ok = hash && cfg.keys.some((k) => k.active && k.hash === hash && (k.scopes.includes("*") || k.scopes.includes(routeKey)));
+  if (ok) return false;
+  res.status(401).json({ status: false, endpoint: routeKey, locked: true, message: "Endpoint ini dikunci. Sertakan API key lewat ?apikey=KEY atau header x-api-key." });
+  return true;
+}
+
+async function adminBody(req) {
+  if (req.body && typeof req.body === "object") return req.body;
+  try { return JSON.parse(typeof req.body === "string" ? req.body : "{}"); } catch { return {}; }
+}
+
+async function handleAdmin(req, res, routeKey) {
+  res.setHeader("Cache-Control", "no-store");
+  if (!process.env.ADMIN_PASSWORD) return res.status(503).json({ status: false, message: "ADMIN_PASSWORD belum diatur di environment variable." });
+  const sub = routeKey.replace(/^admin\/?/, "");
+
+  if (sub === "login" && req.method === "POST") {
+    const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "").split(",")[0].trim();
+    const h = (adminLoginHits.get(ip) || []).filter((t) => Date.now() - t < 10 * 60 * 1000);
+    if (h.length >= 5) return res.status(429).json({ status: false, message: "Terlalu banyak percobaan. Coba lagi 10 menit lagi." });
+    const { password } = await adminBody(req);
+    if (!password || !adminSafeEq(password, process.env.ADMIN_PASSWORD)) {
+      h.push(Date.now()); adminLoginHits.set(ip, h);
+      return res.status(401).json({ status: false, message: "Password salah." });
+    }
+    adminLoginHits.delete(ip);
+    return res.status(200).json({ status: true, token: adminSign(Date.now() + ADMIN_TTL_MS), expires_in: ADMIN_TTL_MS / 1000 });
+  }
+
+  if (!adminTokenOk(adminBearer(req))) return res.status(401).json({ status: false, message: "Sesi habis. Login ulang." });
+  const cfg = JSON.parse(JSON.stringify(await adminLoad(true)));
+  const persistent = !!String(process.env.URLDATABASE || "").trim();
+  const view = () => ({ status: true, persistent, endpoints: cfg.endpoints, keys: cfg.keys.map(({ hash, ...k }) => k) });
+
+  if (sub === "state" && req.method === "GET") return res.status(200).json(view());
+  if (req.method !== "POST") return res.status(405).json({ status: false, message: "Method tidak diizinkan." });
+  const b = await adminBody(req);
+
+  if (sub === "endpoint") {
+    const slug = String(b.slug || "").trim();
+    if (!/^[a-z0-9/_-]{1,80}$/i.test(slug)) return res.status(400).json({ status: false, message: "Slug endpoint tidak valid." });
+    const status = b.status === "error" ? "error" : "ok";
+    const message = String(b.message || "").slice(0, 300);
+    if (status === "ok" && !b.locked) delete cfg.endpoints[slug];
+    else cfg.endpoints[slug] = { status, message, locked: !!b.locked, updatedAt: Date.now() };
+  } else if (sub === "key/create") {
+    const name = String(b.name || "").trim().slice(0, 60);
+    if (!name) return res.status(400).json({ status: false, message: "Nama key wajib diisi." });
+    const scopes = Array.isArray(b.scopes) && b.scopes.length ? b.scopes.map(String).slice(0, 200) : ["*"];
+    const raw = "sk_" + crypto.randomBytes(18).toString("hex");
+    cfg.keys.push({ id: crypto.randomBytes(5).toString("hex"), name, hash: adminSha(raw), prefix: raw.slice(0, 7), scopes, active: true, createdAt: Date.now() });
+    await adminSave(cfg);
+    return res.status(200).json({ ...view(), new_key: raw });
+  } else if (sub === "key/toggle" || sub === "key/delete") {
+    const i = cfg.keys.findIndex((k) => k.id === b.id);
+    if (i < 0) return res.status(404).json({ status: false, message: "Key tidak ditemukan." });
+    if (sub === "key/delete") cfg.keys.splice(i, 1); else cfg.keys[i].active = !cfg.keys[i].active;
+  } else {
+    return res.status(404).json({ status: false, message: "Aksi admin tidak dikenal." });
+  }
+  await adminSave(cfg);
+  return res.status(200).json(view());
+}
+
+// Publik: daftar endpoint bermasalah / terkunci untuk ditampilkan di dokumentasi (tanpa rahasia).
+async function handleEndpointStatus(req, res) {
+  const cfg = await adminLoad();
+  const out = {};
+  for (const [slug, r] of Object.entries(cfg.endpoints)) out[slug] = { status: r.status, message: r.status === "error" ? r.message : "", locked: !!r.locked };
+  res.setHeader("Cache-Control", "public, s-maxage=10, stale-while-revalidate=30");
+  return res.status(200).json({ status: true, endpoints: out });
+}
+
 export default async function handler(req, res) {
   const routeKey = getRouteKey(req);
+
+  if (routeKey === "admin" || routeKey.startsWith("admin/")) return handleAdmin(req, res, routeKey);
+  if (routeKey === "endpoint-status") return handleEndpointStatus(req, res);
+  try { if (await adminGate(req, res, routeKey)) return; } catch (e) { console.error("adminGate:", e?.message); }
 
   // hitung statistik untuk halaman /status (endpoint /api/stats sendiri tidak dihitung)
   if (routeKey !== "stats") {
@@ -13928,8 +13846,6 @@ case "upscale-image":
   return handleUpscaleImage(req, res);
   case "photoeditor-ai":
     return handlePhotoEditorAi(req, res);
-  case "photoeditor-video":
-    return handlePhotoEditorVideo(req, res);
     case "unblur-img":
     return handleUnblurImg(req, res);
 case "video-to-prompt":

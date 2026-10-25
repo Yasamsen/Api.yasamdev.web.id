@@ -7,6 +7,7 @@ import { refreshIcons, copyText, icon } from './utils.js';
 import { uiState } from './categories.js';
 import { renderStatus, bindStatus, stopStatus } from './status.js';
 import { initMotion, observeReveals, runBoot } from './motion.js';
+import { applyNotices } from './notice.js';
 
 const TITLES = { docs: 'Documentation — SamApi', '/500': 'Server Error — SamApi', '/404': 'Not Found — SamApi', '/contact': 'Contact YasamDev — SamApi', '/status': 'Status Server — SamApi', home: 'SamApi — Simple, powerful APIs' };
 
@@ -34,6 +35,7 @@ export function renderApp(opts = {}) {
   bindFooter();
   refreshIcons();
   observeReveals();
+  applyNotices(path);
 
   if (opts.silent) {
     window.scrollTo(0, scrollY);

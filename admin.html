@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Admin — SamApi</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='2' width='28' height='28' rx='9' fill='%2314102b'/%3E%3Cpath d='M18 7 10 18h6l-1 8 8-11h-6z' fill='%23ffc83d'/%3E%3C/svg%3E" />
+<style>
+:root{--bg:#fbf1d6;--card:#fffcf3;--ink:#14102b;--muted:#6b6488;--purple:#7c5cfc;--yellow:#ffc83d;--green:#1d9d6b;--red:#e5484d;--line:#14102b;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#1a1530;--card:#28214e;--ink:#f7f0de;--muted:#b9b1d3;--green:#3ddc97;--red:#ff7a85;--line:#f7f0de;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:500 14px/1.5 "Plus Jakarta Sans",system-ui,sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+button,input,select,textarea{font:inherit;color:inherit}
+.wrap{max-width:1040px;margin:0 auto;padding:20px 16px 60px}
+.box{background:var(--card);border:2.5px solid var(--line);border-radius:14px;box-shadow:4px 4px 0 var(--line)}
+.btn{border:2.5px solid var(--line);background:var(--purple);color:#fff;border-radius:10px;padding:8px 14px;font-weight:800;cursor:pointer;box-shadow:2px 2px 0 var(--line)}
+.btn:active{transform:translate(2px,2px);box-shadow:none}
+.btn.alt{background:var(--card);color:var(--ink)}.btn.red{background:var(--red);color:#fff}.btn.sm{padding:4px 10px;font-size:12px}
+input[type=text],input[type=password],input[type=search],select{border:2px solid var(--line);background:var(--card);border-radius:9px;padding:8px 10px;width:100%}
+:focus-visible{outline:3px solid var(--yellow);outline-offset:2px}
+h1,h2{margin:0;font-weight:800}
+.top{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:16px}
+.tabs{display:flex;gap:8px;margin-bottom:14px}.tabs .btn{box-shadow:none}.tabs .on{background:var(--yellow);color:#14102b}
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}.stat{padding:8px 14px}.stat b{font-size:20px;display:block}
+.tools{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}.tools>*{flex:1 1 180px}
+.row{display:grid;grid-template-columns:minmax(0,1.3fr) 150px minmax(0,1.6fr) 84px;gap:10px;align-items:center;padding:10px 12px;border-bottom:1.5px dashed color-mix(in srgb,var(--line) 30%,transparent)}
+.row:last-child{border:0}.row small{color:var(--muted);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,monospace;font-size:11px}
+.tag{display:inline-block;border:2px solid var(--line);border-radius:99px;padding:0 8px;font-size:11px;font-weight:800}
+.err{background:var(--red);color:#fff}.lck{background:var(--yellow);color:#14102b}
+.sw{display:flex;align-items:center;gap:6px;font-weight:700;font-size:12px;white-space:nowrap}.sw input{width:18px;height:18px;accent-color:var(--purple)}
+.keyrow{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px 12px;border-bottom:1.5px dashed color-mix(in srgb,var(--line) 30%,transparent)}
+.notice{padding:10px 14px;margin-bottom:14px;border-radius:10px;border:2px solid var(--line);background:var(--yellow);color:#14102b;font-weight:700}
+.newkey{display:flex;gap:8px;margin-top:10px}.newkey code{flex:1;word-break:break-all;padding:8px 10px;border:2px solid var(--line);border-radius:9px;background:var(--bg)}
+.login{max-width:360px;margin:12vh auto 0;padding:24px}.login form{display:grid;gap:12px;margin-top:14px}
+.msg{color:var(--red);font-weight:700;min-height:20px}
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:99px;font-weight:700;opacity:0;pointer-events:none;transition:opacity .2s}
+#toast.show{opacity:1}
+.scopes{max-height:180px;overflow:auto;border:2px solid var(--line);border-radius:9px;padding:6px 10px;margin-top:8px}.scopes label{display:flex;gap:8px;padding:2px 0}
+@media (max-width:760px){.row{grid-template-columns:1fr 1fr}.row>:nth-child(3){grid-column:1/-1}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script type="module" src="/src/admin.js"></script>
+</body>
+</html>
