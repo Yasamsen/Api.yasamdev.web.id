@@ -78,12 +78,16 @@ Rate limit 10 request/menit per IP. Jika muncul error "cookie/token kedaluwarsa"
 Respons AI bisa memakan waktu >10 detik; jika di Vercel sering timeout, naikkan `maxDuration` fungsi `api/index.js` di `vercel.json`.
 
 
-## Endpoint `music-album-search` & `music-album-download`
+## Endpoint `music-album` (search + download dalam satu endpoint)
 
-Tanpa API key dan tanpa environment variable.
+Tanpa API key dan tanpa environment variable. Metadata dari Deezer, audio penuh dari hasil konversi YouTube (helper yang sama dengan `ytplay`).
 
-- `GET /api/music-album-search?query=Ipank&type=album&limit=5` — cari album/lagu (metadata dari Deezer). Tambah `&tracks=true` untuk menampilkan daftar lagu tiap album.
-- `GET /api/music-album-download?id=<album_id>` — daftar lagu album + `track_endpoint` tiap lagu.
-- `GET /api/music-album-download?id=<album_id>&track=3` atau `&track=1-5` — link MP3 lagu (maksimal 5 lagu per request). Audio dicari di YouTube lalu dikonversi (helper yang sama dengan `ytplay`), jadi link `audio_url` bersifat sementara.
+- `GET /api/music-album?artist=Ipank` — semua album dan **semua lagu** milik artis. Tiap lagu punya `download_url` (klik/buka -> diarahkan ke MP3) dan `json_url` (hasil JSON berisi `audio_url`).
+- `GET /api/music-album?artist=Ipank&resolve=1-5` — sama, tetapi lagu nomor 1-5 langsung berisi `audio_url` (maksimal 5 lagu per request).
+- `GET /api/music-album?album_id=302127` — lagu satu album saja.
+- `GET /api/music-album?track_id=3135553` — JSON `audio_url` satu lagu; tambah `&redirect=1` untuk langsung 302 ke file MP3.
+- Opsional: `max_albums` (default 40, maksimal 100), `dedupe=false` untuk menampilkan semua versi lagu, `artist_id` jika `other_matches` menunjukkan artis lain yang dimaksud.
 
-Deezer hanya menyediakan preview 30 detik (`preview_url`); audio penuh berasal dari hasil konversi YouTube.
+Konversi satu lagu memakan beberapa detik, jadi MP3 tidak dibuat untuk seluruh katalog dalam satu request serverless; daftar lagu muncul semua, MP3 dibuat saat `download_url` dibuka. `audio_url` bersifat sementara. Deezer hanya menyediakan preview 30 detik (`preview_url`).
+
+Route lama `music-album-search` dan `music-album-download` masih diarahkan ke handler ini sebagai alias (`query` = `artist`, `id` = `album_id`).
