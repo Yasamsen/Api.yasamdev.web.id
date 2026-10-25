@@ -82,8 +82,8 @@ Respons AI bisa memakan waktu >10 detik; jika di Vercel sering timeout, naikkan 
 
 Tanpa API key dan tanpa environment variable. Hanya satu parameter:
 
-- `GET /api/music-album?artist=Ipank` — semua lagu/karya artis. Tiap lagu berisi `audio_url` (MP3 penuh, bukan preview 30 detik) dan `download_url` (selalu ada; dibuka -> diarahkan ke MP3 penuh). Tanpa thumbnail.
+- `GET /api/music-album?artist=Ipank` — semua lagu/karya artis, dicari langsung per lagu (bukan lewat album). Tiap lagu berisi `audio_url` (MP3 penuh, bukan preview 30 detik) dan `download_url` (selalu ada; dibuka -> diarahkan ke MP3 penuh). Tanpa thumbnail.
 
-Daftar lagu dari Deezer, audio penuh dari hasil konversi YouTube (helper yang sama dengan `ytplay`). Konversi dikerjakan paralel selama waktu fungsi cukup (±50 detik, `maxDuration` 60 detik di `vercel.json`). Lagu yang belum sempat diproses berisi `audio_url: null`, tetapi `download_url`-nya tetap berfungsi; memanggil endpoint sekali lagi juga melanjutkan sisanya (hasil dicache ±10 menit). `audio_url` bersifat sementara.
+Daftar lagu dicari berurutan: **Deezer -> iTunes Search API -> pencarian YouTube**, berhenti di sumber pertama yang punya hasil (field `source` menunjukkan sumbernya). Audio penuh dari hasil konversi YouTube (helper yang sama dengan `ytplay`). Konversi dikerjakan paralel selama waktu fungsi cukup (±50 detik, `maxDuration` 60 detik di `vercel.json`). Lagu yang belum sempat diproses berisi `audio_url: null`, tetapi `download_url`-nya tetap berfungsi; memanggil endpoint sekali lagi juga melanjutkan sisanya (hasil dicache ±10 menit). `audio_url` bersifat sementara.
 
 Route lama `music-album-search` dan `music-album-download` diarahkan ke handler ini (`query` = `artist`).
