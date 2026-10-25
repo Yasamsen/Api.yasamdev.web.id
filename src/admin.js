@@ -30,6 +30,7 @@ async function call(path, body) {
 }
 function logout() { token = ''; sessionStorage.removeItem('admin_token'); S = null; render(); }
 
+const UNITS = { second: 'detik', minute: 'menit', hour: 'jam', day: 'hari' };
 const tile = (c, fg = '#14102b') => `style="--tile:rgb(var(--${c}));--tile-fg:${fg}"`;
 const logo = `<span class="flex items-center gap-2.5"><span class="logo-mark">${icon('Zap', 'h-3.5 w-3.5 fill-current')}</span><span class="font-display text-[21px] leading-none">Sam<span class="text-gold">Api</span> <span class="text-dim">Admin</span></span></span>`;
 const themeBtn = () => `<button id="th" class="chip !flex items-center justify-center !px-0 w-9" aria-label="Ganti tema">${icon(getTheme() === 'dark' ? 'Sun' : 'Moon', 'h-4 w-4')}</button>`;
@@ -64,13 +65,18 @@ async function load() { try { S = await call('state'); render(); } catch (err) {
 function rowHtml(e) {
   const r = S.endpoints[e.key] || { status: 'ok', message: '', locked: false };
   const err = r.status === 'error';
+  const lim = r.limit;
   return `<div class="grid items-center gap-3 border-b-2 hair px-4 py-3 last:border-0 md:grid-cols-[minmax(0,1.3fr)_9rem_minmax(0,1.5fr)_auto]" data-k="${esc(e.key)}">
     <div class="flex min-w-0 items-center gap-3"><span class="iconbox h-9 w-9 shrink-0" ${tile(err ? 'red' : r.locked ? 'yellow' : 'lilac')}>${icon(e.ic, 'h-4 w-4')}</span>
-      <div class="min-w-0"><div class="flex flex-wrap items-center gap-1.5"><b class="truncate text-sm">${esc(e.name)}</b>${err ? '<span class="badge" style="background:rgb(var(--red))">Error</span>' : ''}${r.locked ? '<span class="badge" style="background:rgb(var(--yellow))">Dikunci</span>' : ''}</div>
+      <div class="min-w-0"><div class="flex flex-wrap items-center gap-1.5"><b class="truncate text-sm">${esc(e.name)}</b>${err ? '<span class="badge" style="background:rgb(var(--red))">Error</span>' : ''}${r.locked ? '<span class="badge" style="background:rgb(var(--yellow))">Dikunci</span>' : ''}${lim ? `<span class="badge" style="background:rgb(var(--lilac))">${lim.max}/${UNITS[lim.per]}</span>` : ''}</div>
       <span class="block truncate font-mono text-[11px] text-dim">${esc(e.path)}</span></div></div>
     <select class="input !h-10 !text-xs" data-f="status" aria-label="Status ${esc(e.name)}"><option value="ok" ${err ? '' : 'selected'}>Normal</option><option value="error" ${err ? 'selected' : ''}>Error</option></select>
     <input class="input !h-10 !text-xs" type="text" data-f="message" maxlength="300" placeholder="${err ? 'Pesan untuk pengguna' : 'Pesan jika error (opsional)'}" value="${esc(r.message)}" aria-label="Pesan ${esc(e.name)}">
-    <button class="chip ${r.locked ? 'is-active' : ''}" data-f="locked" aria-pressed="${r.locked}">${icon(r.locked ? 'Lock' : 'LockOpen', 'h-3.5 w-3.5')}${r.locked ? 'Dikunci' : 'Kunci'}</button></div>`;
+    <button class="chip ${r.locked ? 'is-active' : ''}" data-f="locked" aria-pressed="${r.locked}">${icon(r.locked ? 'Lock' : 'LockOpen', 'h-3.5 w-3.5')}${r.locked ? 'Dikunci' : 'Kunci'}</button>
+    <div class="flex flex-wrap items-center gap-2 md:col-span-full md:pl-12"><span class="text-[11px] font-extrabold text-dim">${icon('Gauge', 'mr-1 inline h-3.5 w-3.5')}Batas per pengguna</span>
+      <input class="input !h-9 !w-24 !text-xs" type="number" min="1" max="1000000" inputmode="numeric" data-f="limit-max" placeholder="Tanpa" value="${lim ? lim.max : ''}" aria-label="Batas permintaan ${esc(e.name)}">
+      <span class="text-xs text-muted">permintaan per</span>
+      <select class="input !h-9 !w-28 !text-xs" data-f="limit-per" aria-label="Satuan waktu ${esc(e.name)}">${Object.entries(UNITS).map(([v, l]) => `<option value="${v}" ${(lim?.per || 'minute') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>`;
 }
 
 function statCard(label, n, ic, c) {
@@ -93,7 +99,7 @@ function render() {
   ${tab === 'endpoint' ? `
   <div class="mb-4 grid gap-3 sm:grid-cols-[1fr_14rem]"><input class="input" type="search" id="q" placeholder="Cari endpoint" value="${esc(q)}" aria-label="Cari endpoint"><select class="input" id="cat" aria-label="Kategori"><option value="">Semua kategori</option>${cats.map((c) => `<option ${c === cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
   <section class="card" id="list">${shown.map(rowHtml).join('') || '<p class="p-6 text-sm text-muted">Tidak ada endpoint yang cocok. Ubah kata kunci atau kategori.</p>'}</section>
-  <p class="mt-3 text-xs leading-5 text-muted">Perubahan tersimpan otomatis. Endpoint berstatus Error menjawab pengguna dengan HTTP 503 dan pesan di atas. Endpoint yang dikunci butuh API key. Admin yang login tetap bisa mengakses semuanya.</p>` : `
+  <p class="mt-3 text-xs leading-5 text-muted">Perubahan tersimpan otomatis. Endpoint berstatus Error menjawab pengguna dengan HTTP 503 dan pesan di atas. Endpoint yang dikunci butuh API key. Batas permintaan dihitung per alamat IP, atau per API key kalau pengguna memakai key; lewat batas, pengguna mendapat HTTP 429. Admin yang login tetap bisa mengakses semuanya.</p>` : `
   <section class="card mb-5 p-5"><h2 class="font-display text-lg">Buat API key</h2>
     <div class="mt-3 grid gap-3 sm:grid-cols-[1fr_16rem_auto]"><input class="input" type="text" id="kn" maxlength="60" placeholder="Nama key, mis. Aplikasi Budi" aria-label="Nama key"><select class="input" id="ks" aria-label="Cakupan"><option value="*">Semua endpoint terkunci</option><option value="pick">Pilih endpoint tertentu</option></select><button class="btn btn-gold" id="kc">${icon('Plus', 'h-4 w-4')}Buat key</button></div>
     <div id="pick" hidden class="mt-3 max-h-48 overflow-auto rounded-2xl border-[2.5px] border-ink p-3">${lockedList.length ? lockedList.map((e) => `<label class="flex items-center gap-2 py-1 text-sm font-bold"><input type="checkbox" class="h-4 w-4 accent-[rgb(var(--gold2))]" value="${esc(e.key)}">${esc(e.name)}</label>`).join('') : '<p class="text-sm text-muted">Belum ada endpoint yang dikunci. Kunci dulu di tab Endpoint.</p>'}</div>
@@ -125,10 +131,14 @@ function bind() {
         const lockBtn = row.querySelector('[data-f=locked]');
         const locked = lockToggle ? lockBtn.getAttribute('aria-pressed') !== 'true' : lockBtn.getAttribute('aria-pressed') === 'true';
         if (status === 'error' && !message) { toast('Isi pesan untuk pengguna dulu.'); row.querySelector('[data-f=message]').focus(); return; }
-        act('endpoint', { slug: row.dataset.k, status, message, locked }, 'Tersimpan');
+        const lm = row.querySelector('[data-f=limit-max]').value.trim();
+        const limit = lm ? { max: Number(lm), per: row.querySelector('[data-f=limit-per]').value } : null;
+        act('endpoint', { slug: row.dataset.k, status, message, locked, limit }, 'Tersimpan');
       };
       row.querySelector('[data-f=status]').onchange = () => save(false);
       row.querySelector('[data-f=message]').onchange = () => save(false);
+      row.querySelector('[data-f=limit-max]').onchange = () => save(false);
+      row.querySelector('[data-f=limit-per]').onchange = () => save(false);
       row.querySelector('[data-f=locked]').onclick = () => save(true);
     });
   } else {

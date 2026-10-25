@@ -92,6 +92,7 @@ Route lama `music-album-search` dan `music-album-download` diarahkan ke handler 
 
 Tidak ada tautannya di situs. Buka `https://domain/admin`, masuk dengan password, lalu:
 - **Endpoint:** ubah status jadi Error (isi pesan untuk pengguna; endpoint menjawab HTTP 503 dan docs menampilkan lencana Error) atau centang Kunci.
+- **Batas permintaan:** isi angka dan satuan (detik, menit, jam, hari), mis. 5 per menit. Dihitung per alamat IP, atau per API key kalau pengguna memakai key. Lewat batas, pengguna mendapat HTTP 429 dengan header `Retry-After`. Kosongkan angka untuk menghapus batas.
 - **API key:** buat key untuk semua endpoint terkunci atau endpoint tertentu. Pengguna memakai `?apikey=KEY` atau header `x-api-key`. Key hanya ditampilkan sekali saat dibuat.
 - Admin yang login tetap bisa mengakses semua endpoint.
 

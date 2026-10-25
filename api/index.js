@@ -13639,12 +13639,39 @@ async function adminSave(data) {
   if (m) await m.db.collection("admin_config").updateOne({ _id: "main" }, { $set: { endpoints: data.endpoints, keys: data.keys } }, { upsert: true });
 }
 
+const RL_UNITS = { second: 1000, minute: 60_000, hour: 3_600_000, day: 86_400_000 };
+const RL_LABEL = { second: "detik", minute: "menit", hour: "jam", day: "hari" };
+const rlMem = new Map();
+let rlIndexed = false;
+
+// Hitung satu permintaan pada jendela waktu tetap. MongoDB dipakai bila ada (akurat lintas instance).
+async function adminRateHit(id, windowMs) {
+  const now = Date.now();
+  const win = Math.floor(now / windowMs);
+  const reset = (win + 1) * windowMs;
+  const _id = `${id}|${win}`;
+  try {
+    const m = await getStatsMongo();
+    if (m) {
+      const col = m.db.collection("admin_ratelimit");
+      if (!rlIndexed) { rlIndexed = true; col.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }).catch(() => { rlIndexed = false; }); }
+      const doc = await col.findOneAndUpdate({ _id }, { $inc: { n: 1 }, $setOnInsert: { expiresAt: new Date(reset + 60_000) } }, { upsert: true, returnDocument: "after" });
+      const n = (doc?.value ?? doc)?.n;
+      if (n) return { n, reset };
+    }
+  } catch (e) { console.error("admin ratelimit:", e?.message); }
+  const cur = rlMem.get(_id) || { n: 0, reset };
+  cur.n += 1; rlMem.set(_id, cur);
+  if (rlMem.size > 5000) for (const [k, v] of rlMem) if (v.reset < now) rlMem.delete(k);
+  return { n: cur.n, reset };
+}
+
 // Dipanggil sebelum endpoint dijalankan. true = request dihentikan.
 async function adminGate(req, res, routeKey) {
   if (!routeKey || routeKey.startsWith("admin") || ADMIN_OPEN.has(routeKey)) return false;
   const cfg = await adminLoad();
   const rule = cfg.endpoints[routeKey];
-  if (!rule || (rule.status !== "error" && !rule.locked)) return false;
+  if (!rule || (rule.status !== "error" && !rule.locked && !rule.limit)) return false;
   if (adminTokenOk(adminBearer(req))) return false; // admin: akses penuh
 
   if (rule.status === "error") {
@@ -13654,10 +13681,26 @@ async function adminGate(req, res, routeKey) {
   const url = new URL(req.url, "http://x");
   const supplied = String(req.headers["x-api-key"] || url.searchParams.get("apikey") || "").trim();
   const hash = supplied ? adminSha(supplied) : "";
-  const ok = hash && cfg.keys.some((k) => k.active && k.hash === hash && (k.scopes.includes("*") || k.scopes.includes(routeKey)));
-  if (ok) return false;
-  res.status(401).json({ status: false, endpoint: routeKey, locked: true, message: "Endpoint ini dikunci. Sertakan API key lewat ?apikey=KEY atau header x-api-key." });
-  return true;
+  const keyOk = !!hash && cfg.keys.some((k) => k.active && k.hash === hash && (k.scopes.includes("*") || k.scopes.includes(routeKey)));
+  if (rule.locked && !keyOk) {
+    res.status(401).json({ status: false, endpoint: routeKey, locked: true, message: "Endpoint ini dikunci. Sertakan API key lewat ?apikey=KEY atau header x-api-key." });
+    return true;
+  }
+  const lim = rule.limit;
+  if (lim && RL_UNITS[lim.per]) {
+    const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "").split(",")[0].trim();
+    const { n, reset } = await adminRateHit(`${routeKey}|${keyOk ? "k:" + hash.slice(0, 12) : "ip:" + ip}`, RL_UNITS[lim.per]);
+    const secs = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
+    res.setHeader("X-RateLimit-Limit", String(lim.max));
+    res.setHeader("X-RateLimit-Remaining", String(Math.max(0, lim.max - n)));
+    res.setHeader("X-RateLimit-Reset", String(secs));
+    if (n > lim.max) {
+      res.setHeader("Retry-After", String(secs));
+      res.status(429).json({ status: false, endpoint: routeKey, rate_limited: true, retry_after: secs, message: `Batas ${lim.max} permintaan per ${RL_LABEL[lim.per]} tercapai. Coba lagi dalam ${secs} detik.` });
+      return true;
+    }
+  }
+  return false;
 }
 
 async function adminBody(req) {
@@ -13697,8 +13740,14 @@ async function handleAdmin(req, res, routeKey) {
     if (!/^[a-z0-9/_-]{1,80}$/i.test(slug)) return res.status(400).json({ status: false, message: "Slug endpoint tidak valid." });
     const status = b.status === "error" ? "error" : "ok";
     const message = String(b.message || "").slice(0, 300);
-    if (status === "ok" && !b.locked) delete cfg.endpoints[slug];
-    else cfg.endpoints[slug] = { status, message, locked: !!b.locked, updatedAt: Date.now() };
+    const max = Math.floor(Number(b.limit?.max));
+    const per = String(b.limit?.per || "");
+    if (b.limit?.max !== undefined && b.limit?.max !== "" && b.limit?.max !== null && Number(b.limit.max) !== 0) {
+      if (!Number.isFinite(max) || max < 1 || max > 1_000_000 || !RL_UNITS[per]) return res.status(400).json({ status: false, message: "Limit tidak valid. Isi angka 1–1.000.000 dan pilih satuan waktu." });
+    }
+    const limit = max >= 1 && RL_UNITS[per] ? { max, per } : null;
+    if (status === "ok" && !b.locked && !limit) delete cfg.endpoints[slug];
+    else cfg.endpoints[slug] = { status, message, locked: !!b.locked, ...(limit ? { limit } : {}), updatedAt: Date.now() };
   } else if (sub === "key/create") {
     const name = String(b.name || "").trim().slice(0, 60);
     if (!name) return res.status(400).json({ status: false, message: "Nama key wajib diisi." });
@@ -13722,7 +13771,7 @@ async function handleAdmin(req, res, routeKey) {
 async function handleEndpointStatus(req, res) {
   const cfg = await adminLoad();
   const out = {};
-  for (const [slug, r] of Object.entries(cfg.endpoints)) out[slug] = { status: r.status, message: r.status === "error" ? r.message : "", locked: !!r.locked };
+  for (const [slug, r] of Object.entries(cfg.endpoints)) out[slug] = { status: r.status, message: r.status === "error" ? r.message : "", locked: !!r.locked, limit: r.limit || null };
   res.setHeader("Cache-Control", "public, s-maxage=10, stale-while-revalidate=30");
   return res.status(200).json({ status: true, endpoints: out });
 }
