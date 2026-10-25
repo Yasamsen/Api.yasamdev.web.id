@@ -3,7 +3,7 @@ const c = (name) => `rgb(var(--${name}) / <alpha-value>)`;
 export default {
   // utility Tailwind (hidden, md:hidden, dst) harus selalu menang atas class komponen di index.css
   important: true,
-  content: ['./index.html', './src/**/*.{js,html}'],
+  content: ['./index.html', './admin.html', './src/**/*.{js,html}'],
   theme: {
     extend: {
       colors: {

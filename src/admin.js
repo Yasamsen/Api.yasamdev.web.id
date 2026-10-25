@@ -1,17 +1,21 @@
+import './index.css';
 import { apiDefinitions } from './apis/registry.js';
+import { toggleTheme, getTheme } from './theme.js';
+import { esc, icon, refreshIcons } from './utils.js';
 
 const $app = document.getElementById('app');
 const $toast = document.getElementById('toast');
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const slugOf = (a) => a.endpoint.replace(/^\/api\//, '');
-const LIST = apiDefinitions.map((a) => ({ key: slugOf(a), name: a.name, category: a.category, path: a.endpoint }));
+const LIST = apiDefinitions.map((a) => ({ key: a.endpoint.replace(/^\/api\//, ''), name: a.name, category: a.category, path: a.endpoint, ic: a.icon }));
 
 let token = sessionStorage.getItem('admin_token') || '';
-let S = null;             // state dari server
-let tab = 'endpoint';
-let q = ''; let cat = ''; let newKey = '';
+let S = null; let tab = 'endpoint'; let q = ''; let cat = ''; let newKey = '';
 
-function toast(t) { $toast.textContent = t; $toast.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => $toast.classList.remove('show'), 1800); }
+function toast(t) {
+  $toast.textContent = t;
+  $toast.classList.remove('opacity-0', 'translate-y-4');
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => $toast.classList.add('opacity-0', 'translate-y-4'), 1800);
+}
 
 async function call(path, body) {
   const r = await fetch('/api/admin/' + path, {
@@ -20,15 +24,28 @@ async function call(path, body) {
     body: body ? JSON.stringify(body) : undefined
   });
   const d = await r.json().catch(() => ({}));
-  if (r.status === 401 && token) { logout(); }
+  if (r.status === 401 && token) logout();
   if (!r.ok) throw new Error(d.message || 'Permintaan gagal (' + r.status + ')');
   return d;
 }
 function logout() { token = ''; sessionStorage.removeItem('admin_token'); S = null; render(); }
 
+const tile = (c, fg = '#14102b') => `style="--tile:rgb(var(--${c}));--tile-fg:${fg}"`;
+const logo = `<span class="flex items-center gap-2.5"><span class="logo-mark">${icon('Zap', 'h-3.5 w-3.5 fill-current')}</span><span class="font-display text-[21px] leading-none">Sam<span class="text-gold">Api</span> <span class="text-dim">Admin</span></span></span>`;
+const themeBtn = () => `<button id="th" class="chip !flex items-center justify-center !px-0 w-9" aria-label="Ganti tema">${icon(getTheme() === 'dark' ? 'Sun' : 'Moon', 'h-4 w-4')}</button>`;
+
 function renderLogin(msg = '') {
-  $app.innerHTML = `<div class="box login"><h1>Admin SamApi</h1><p style="color:var(--muted);margin:4px 0 0">Masukkan password untuk melanjutkan.</p>
-  <form id="f"><input type="password" id="pw" placeholder="Password" autocomplete="current-password" required autofocus><button class="btn">Masuk</button><div class="msg" id="m">${esc(msg)}</div></form></div>`;
+  $app.innerHTML = `<main class="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4 py-10">
+    <div class="mb-5 flex items-center justify-between">${logo}${themeBtn()}</div>
+    <form id="f" class="card page-enter p-6">
+      <div class="flex items-center gap-3"><span class="iconbox h-11 w-11" ${tile('yellow')}>${icon('Lock', 'h-5 w-5')}</span>
+        <div><h1 class="font-display text-2xl leading-tight">Masuk admin</h1><p class="text-xs text-muted">Hanya untuk pengelola API.</p></div></div>
+      <label class="mt-5 block text-xs font-extrabold" for="pw">Password</label>
+      <input class="input mt-1.5" type="password" id="pw" autocomplete="current-password" required autofocus>
+      <p id="m" class="mt-2 min-h-[1.25rem] text-xs font-bold text-red" role="alert">${esc(msg)}</p>
+      <button class="btn btn-gold mt-2 w-full">Masuk</button>
+    </form></main>`;
+  bindTheme(); refreshIcons();
   document.getElementById('f').onsubmit = async (e) => {
     e.preventDefault();
     const m = document.getElementById('m'); m.textContent = '';
@@ -42,17 +59,22 @@ function renderLogin(msg = '') {
   };
 }
 
-async function load() {
-  try { S = await call('state'); render(); } catch (err) { renderLogin(err.message); }
-}
+async function load() { try { S = await call('state'); render(); } catch (err) { renderLogin(err.message); } }
 
 function rowHtml(e) {
   const r = S.endpoints[e.key] || { status: 'ok', message: '', locked: false };
-  return `<div class="row" data-k="${esc(e.key)}">
-    <div style="min-width:0"><b>${esc(e.name)}</b> ${r.status === 'error' ? '<span class="tag err">Error</span>' : ''}${r.locked ? ' <span class="tag lck">Dikunci</span>' : ''}<small>${esc(e.path)}</small></div>
-    <select data-f="status" aria-label="Status ${esc(e.name)}"><option value="ok" ${r.status !== 'error' ? 'selected' : ''}>Normal</option><option value="error" ${r.status === 'error' ? 'selected' : ''}>Error</option></select>
-    <input type="text" data-f="message" maxlength="300" placeholder="${r.status === 'error' ? 'Pesan untuk pengguna' : 'Pesan error (opsional)'}" value="${esc(r.message)}" aria-label="Pesan ${esc(e.name)}">
-    <label class="sw"><input type="checkbox" data-f="locked" ${r.locked ? 'checked' : ''}>Kunci</label></div>`;
+  const err = r.status === 'error';
+  return `<div class="grid items-center gap-3 border-b-2 hair px-4 py-3 last:border-0 md:grid-cols-[minmax(0,1.3fr)_9rem_minmax(0,1.5fr)_auto]" data-k="${esc(e.key)}">
+    <div class="flex min-w-0 items-center gap-3"><span class="iconbox h-9 w-9 shrink-0" ${tile(err ? 'red' : r.locked ? 'yellow' : 'lilac')}>${icon(e.ic, 'h-4 w-4')}</span>
+      <div class="min-w-0"><div class="flex flex-wrap items-center gap-1.5"><b class="truncate text-sm">${esc(e.name)}</b>${err ? '<span class="badge" style="background:rgb(var(--red))">Error</span>' : ''}${r.locked ? '<span class="badge" style="background:rgb(var(--yellow))">Dikunci</span>' : ''}</div>
+      <span class="block truncate font-mono text-[11px] text-dim">${esc(e.path)}</span></div></div>
+    <select class="input !h-10 !text-xs" data-f="status" aria-label="Status ${esc(e.name)}"><option value="ok" ${err ? '' : 'selected'}>Normal</option><option value="error" ${err ? 'selected' : ''}>Error</option></select>
+    <input class="input !h-10 !text-xs" type="text" data-f="message" maxlength="300" placeholder="${err ? 'Pesan untuk pengguna' : 'Pesan jika error (opsional)'}" value="${esc(r.message)}" aria-label="Pesan ${esc(e.name)}">
+    <button class="chip ${r.locked ? 'is-active' : ''}" data-f="locked" aria-pressed="${r.locked}">${icon(r.locked ? 'Lock' : 'LockOpen', 'h-3.5 w-3.5')}${r.locked ? 'Dikunci' : 'Kunci'}</button></div>`;
+}
+
+function statCard(label, n, ic, c) {
+  return `<article class="card flex items-center gap-3 p-4"><span class="iconbox h-11 w-11 shrink-0" ${tile(c)}>${icon(ic, 'h-5 w-5')}</span><div><div class="font-display text-3xl leading-none">${n}</div><div class="mt-1 text-xs font-bold text-muted">${label}</div></div></article>`;
 }
 
 function render() {
@@ -62,24 +84,28 @@ function render() {
   const nLck = Object.values(S.endpoints).filter((r) => r.locked).length;
   const shown = LIST.filter((e) => (!cat || e.category === cat) && (!q || (e.name + e.path).toLowerCase().includes(q.toLowerCase())));
   const lockedList = LIST.filter((e) => S.endpoints[e.key]?.locked);
-  $app.innerHTML = `
-  <div class="top"><h1>Admin SamApi</h1><div style="display:flex;gap:8px"><a class="btn alt" href="/" style="text-decoration:none">Lihat situs</a><button class="btn alt" id="out">Keluar</button></div></div>
-  ${S.persistent ? '' : '<div class="notice">URLDATABASE belum diatur, jadi pengaturan hanya tersimpan di memori dan bisa hilang saat server restart. Isi URLDATABASE (MongoDB) di Vercel agar permanen.</div>'}
-  <div class="stats"><div class="box stat"><b>${LIST.length}</b>endpoint</div><div class="box stat"><b>${nErr}</b>error</div><div class="box stat"><b>${nLck}</b>dikunci</div><div class="box stat"><b>${S.keys.length}</b>API key</div></div>
-  <div class="tabs"><button class="btn ${tab === 'endpoint' ? 'on' : 'alt'}" data-tab="endpoint">Endpoint</button><button class="btn ${tab === 'keys' ? 'on' : 'alt'}" data-tab="keys">API key</button></div>
+  $app.innerHTML = `<main class="mx-auto max-w-5xl px-4 pb-20 pt-5 sm:px-6">
+  <header class="mb-6 flex flex-wrap items-center justify-between gap-3">${logo}
+    <div class="flex items-center gap-2">${themeBtn()}<a class="chip !inline-flex items-center" href="/">${icon('ExternalLink', 'h-3.5 w-3.5')}Lihat situs</a><button class="chip" id="out">${icon('LogOut', 'h-3.5 w-3.5')}Keluar</button></div></header>
+  ${S.persistent ? '' : `<div class="card page-enter mb-5 flex items-start gap-3 p-4" style="background:rgb(var(--yellow));color:rgb(var(--on-light))">${icon('TriangleAlert', 'mt-0.5 h-5 w-5 shrink-0')}<p class="text-sm font-bold">URLDATABASE belum diatur, jadi pengaturan hanya tersimpan di memori dan bisa hilang saat server restart. Isi URLDATABASE (MongoDB) di Vercel agar permanen.</p></div>`}
+  <section class="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">${statCard('Total endpoint', LIST.length, 'Layers', 'gold2')}${statCard('Sedang error', nErr, 'ShieldAlert', 'red')}${statCard('Dikunci', nLck, 'Lock', 'yellow')}${statCard('API key', S.keys.length, 'KeyRound', 'green')}</section>
+  <nav class="mb-4 flex gap-2" aria-label="Bagian admin"><button class="chip ${tab === 'endpoint' ? 'is-active' : ''}" data-tab="endpoint">Endpoint</button><button class="chip ${tab === 'keys' ? 'is-active' : ''}" data-tab="keys">API key</button></nav>
   ${tab === 'endpoint' ? `
-  <div class="tools"><input type="search" id="q" placeholder="Cari endpoint" value="${esc(q)}" aria-label="Cari endpoint"><select id="cat" aria-label="Kategori"><option value="">Semua kategori</option>${cats.map((c) => `<option ${c === cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
-  <div class="box" id="list">${shown.map(rowHtml).join('') || '<p style="padding:16px;margin:0">Tidak ada endpoint yang cocok.</p>'}</div>
-  <p style="color:var(--muted);font-size:12px">Perubahan tersimpan otomatis. Endpoint berstatus Error menjawab pengguna dengan HTTP 503 dan pesan di atas. Endpoint yang dikunci butuh API key. Admin yang login tetap bisa mengakses semuanya.</p>` : `
-  <div class="box" style="padding:16px;margin-bottom:14px"><h2 style="font-size:16px">Buat API key</h2>
-    <div class="tools" style="margin-top:10px"><input type="text" id="kn" maxlength="60" placeholder="Nama key, mis. Aplikasi Budi"><select id="ks"><option value="*">Semua endpoint yang dikunci</option><option value="pick">Pilih endpoint tertentu</option></select><button class="btn" id="kc" style="flex:0 0 auto">Buat key</button></div>
-    <div id="pick" class="scopes" hidden>${lockedList.length ? lockedList.map((e) => `<label><input type="checkbox" value="${esc(e.key)}">${esc(e.name)}</label>`).join('') : 'Belum ada endpoint yang dikunci. Kunci dulu di tab Endpoint.'}</div>
-    ${newKey ? `<div class="notice" style="margin:12px 0 0">Salin key ini sekarang, tidak akan ditampilkan lagi.<div class="newkey"><code>${esc(newKey)}</code><button class="btn sm" id="cp">Salin</button></div></div>` : ''}</div>
-  <div class="box">${S.keys.map((k) => `<div class="keyrow"><div><b>${esc(k.name)}</b> ${k.active ? '' : '<span class="tag err">Nonaktif</span>'}<small style="color:var(--muted);font-family:ui-monospace,monospace">${esc(k.prefix)}… · ${k.scopes.includes('*') ? 'semua endpoint terkunci' : esc(k.scopes.join(', '))}</small></div>
-    <div style="display:flex;gap:6px"><button class="btn alt sm" data-kt="${k.id}">${k.active ? 'Nonaktifkan' : 'Aktifkan'}</button><button class="btn red sm" data-kd="${k.id}">Hapus</button></div></div>`).join('') || '<p style="padding:16px;margin:0">Belum ada API key.</p>'}</div>
-  <p style="color:var(--muted);font-size:12px">Pengguna memakai key lewat <code>?apikey=KEY</code> atau header <code>x-api-key</code>.</p>`}`;
-  bind();
+  <div class="mb-4 grid gap-3 sm:grid-cols-[1fr_14rem]"><input class="input" type="search" id="q" placeholder="Cari endpoint" value="${esc(q)}" aria-label="Cari endpoint"><select class="input" id="cat" aria-label="Kategori"><option value="">Semua kategori</option>${cats.map((c) => `<option ${c === cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+  <section class="card" id="list">${shown.map(rowHtml).join('') || '<p class="p-6 text-sm text-muted">Tidak ada endpoint yang cocok. Ubah kata kunci atau kategori.</p>'}</section>
+  <p class="mt-3 text-xs leading-5 text-muted">Perubahan tersimpan otomatis. Endpoint berstatus Error menjawab pengguna dengan HTTP 503 dan pesan di atas. Endpoint yang dikunci butuh API key. Admin yang login tetap bisa mengakses semuanya.</p>` : `
+  <section class="card mb-5 p-5"><h2 class="font-display text-lg">Buat API key</h2>
+    <div class="mt-3 grid gap-3 sm:grid-cols-[1fr_16rem_auto]"><input class="input" type="text" id="kn" maxlength="60" placeholder="Nama key, mis. Aplikasi Budi" aria-label="Nama key"><select class="input" id="ks" aria-label="Cakupan"><option value="*">Semua endpoint terkunci</option><option value="pick">Pilih endpoint tertentu</option></select><button class="btn btn-gold" id="kc">${icon('Plus', 'h-4 w-4')}Buat key</button></div>
+    <div id="pick" hidden class="mt-3 max-h-48 overflow-auto rounded-2xl border-[2.5px] border-ink p-3">${lockedList.length ? lockedList.map((e) => `<label class="flex items-center gap-2 py-1 text-sm font-bold"><input type="checkbox" class="h-4 w-4 accent-[rgb(var(--gold2))]" value="${esc(e.key)}">${esc(e.name)}</label>`).join('') : '<p class="text-sm text-muted">Belum ada endpoint yang dikunci. Kunci dulu di tab Endpoint.</p>'}</div>
+    ${newKey ? `<div class="mt-4 rounded-2xl border-[2.5px] border-ink p-3" style="background:rgb(var(--lilac));color:rgb(var(--on-light))"><p class="text-xs font-extrabold">Salin key ini sekarang. Tidak akan ditampilkan lagi.</p><div class="mt-2 flex items-center gap-2"><code class="min-w-0 flex-1 break-all rounded-xl border-2 border-ink bg-white px-3 py-2 font-mono text-xs">${esc(newKey)}</code><button class="btn btn-gold btn-sm" id="cp">${icon('Copy', 'h-4 w-4')}Salin</button></div></div>` : ''}</section>
+  <section class="card">${S.keys.map((k) => `<div class="flex flex-wrap items-center justify-between gap-3 border-b-2 hair px-4 py-3 last:border-0"><div class="flex min-w-0 items-center gap-3"><span class="iconbox h-9 w-9 shrink-0" ${tile(k.active ? 'green' : 'lilac')}>${icon('KeyRound', 'h-4 w-4')}</span><div class="min-w-0"><div class="flex items-center gap-1.5"><b class="truncate text-sm">${esc(k.name)}</b>${k.active ? '' : '<span class="badge" style="background:rgb(var(--red))">Nonaktif</span>'}</div><span class="block truncate font-mono text-[11px] text-dim">${esc(k.prefix)}… · ${k.scopes.includes('*') ? 'semua endpoint terkunci' : esc(k.scopes.join(', '))}</span></div></div>
+    <div class="flex gap-2"><button class="chip" data-kt="${k.id}">${k.active ? 'Nonaktifkan' : 'Aktifkan'}</button><button class="chip" style="background:rgb(var(--red));color:#fff" data-kd="${k.id}" aria-label="Hapus ${esc(k.name)}">${icon('Trash2', 'h-3.5 w-3.5')}Hapus</button></div></div>`).join('') || '<p class="p-6 text-sm text-muted">Belum ada API key. Buat key di atas untuk mengizinkan aplikasi memakai endpoint yang dikunci.</p>'}</section>
+  <p class="mt-3 text-xs text-muted">Pengguna memakai key lewat <code class="font-mono">?apikey=KEY</code> atau header <code class="font-mono">x-api-key</code>.</p>`}
+  </main>`;
+  bind(); bindTheme(); refreshIcons();
 }
+
+function bindTheme() { document.getElementById('th').onclick = () => { toggleTheme(); S && token ? render() : renderLogin(); }; }
 
 async function act(path, body, ok) {
   try { S = await call(path, body); if (S.new_key) newKey = S.new_key; render(); if (ok) toast(ok); } catch (err) { toast(err.message); }
@@ -92,17 +118,18 @@ function bind() {
     const qi = document.getElementById('q');
     qi.oninput = () => { q = qi.value; const pos = qi.selectionStart; render(); const n = document.getElementById('q'); n.focus(); n.setSelectionRange(pos, pos); };
     document.getElementById('cat').onchange = (e) => { cat = e.target.value; render(); };
-    document.querySelectorAll('#list .row').forEach((row) => {
-      const save = () => {
+    document.querySelectorAll('#list [data-k]').forEach((row) => {
+      const save = (lockToggle) => {
         const status = row.querySelector('[data-f=status]').value;
         const message = row.querySelector('[data-f=message]').value.trim();
-        const locked = row.querySelector('[data-f=locked]').checked;
+        const lockBtn = row.querySelector('[data-f=locked]');
+        const locked = lockToggle ? lockBtn.getAttribute('aria-pressed') !== 'true' : lockBtn.getAttribute('aria-pressed') === 'true';
         if (status === 'error' && !message) { toast('Isi pesan untuk pengguna dulu.'); row.querySelector('[data-f=message]').focus(); return; }
-        const keep = document.activeElement?.dataset?.f;
-        act('endpoint', { slug: row.dataset.k, status, message, locked }, 'Tersimpan').then(() => { if (keep === 'message') document.querySelector(`[data-k="${CSS.escape(row.dataset.k)}"] [data-f=message]`)?.focus(); });
+        act('endpoint', { slug: row.dataset.k, status, message, locked }, 'Tersimpan');
       };
-      row.querySelectorAll('[data-f=status],[data-f=locked]').forEach((el) => (el.onchange = save));
-      row.querySelector('[data-f=message]').onchange = save;
+      row.querySelector('[data-f=status]').onchange = () => save(false);
+      row.querySelector('[data-f=message]').onchange = () => save(false);
+      row.querySelector('[data-f=locked]').onclick = () => save(true);
     });
   } else {
     document.getElementById('ks').onchange = (e) => { document.getElementById('pick').hidden = e.target.value !== 'pick'; };
