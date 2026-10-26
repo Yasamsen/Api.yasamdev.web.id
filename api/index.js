@@ -13781,7 +13781,8 @@ async function handleEndpointStatus(req, res) {
  *   POST /api/to-anime  (multipart/form-data, field "file" maks 4 MB; opsional: style, ratio, format)
  *   format=image  -> balas langsung berupa gambar (default: JSON berisi URL hasil)
  * Penyedia dicoba berurutan (fallback otomatis bila gagal / kena limit):
- *   PhotoEditorAI -> Unwatermark AI -> MagicEraser.
+ *   PhotoEditorAI -> Unwatermark AI -> MagicEraser -> AnimeGANv2 (Hugging Face, gratis tanpa key;
+ *   khusus style anime & paling bagus untuk foto wajah).
  * Batas waktu total 55 detik supaya aman di bawah maxDuration Vercel (60 detik).
  * ============================================================ */
 const TOANIME_MAX_BYTES = 4_000_000;
@@ -13942,14 +13943,98 @@ async function toAnimeMagicEraser(file, prompt, ratio, deadlineAt) {
   throw last || new Error("waktu habis.");
 }
 
+// Penyedia 4 — AnimeGANv2 di Hugging Face Space (gratis, tanpa key).
+// Hanya untuk style "anime" dan paling bagus untuk foto wajah/potret.
+// Host bisa diganti ke Space milikmu sendiri lewat env TOANIME_HF_HOST (opsional, bukan key).
+const TOANIME_HF_HOST = String(process.env.TOANIME_HF_HOST || "https://akhaliq-animeganv2.hf.space").replace(/\/+$/, "");
+
+// Baca respons SSE Gradio ("event: complete" / "event: error").
+function toAnimeParseSse(text) {
+  let event = null;
+  for (const line of String(text || "").split(/\r?\n/)) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) {
+      const raw = line.slice(5).trim();
+      if (event === "complete") {
+        try { return { ok: true, data: JSON.parse(raw) }; } catch { return { ok: false, data: raw }; }
+      }
+      if (event === "error") return { ok: false, data: raw };
+    }
+  }
+  return null;
+}
+
+async function toAnimeHfAnimeGan(file, prompt, ratio, deadlineAt) {
+  const left = () => Math.max(1000, deadlineAt - Date.now());
+  const host = TOANIME_HF_HOST;
+  const headers = { "User-Agent": TOANIME_UA };
+
+  let prefix = "/gradio_api";
+  try {
+    const cfg = await axios.get(`${host}/config`, { headers, timeout: Math.min(8000, left()), validateStatus: () => true });
+    if (cfg.status === 200 && typeof cfg.data?.api_prefix === "string") prefix = cfg.data.api_prefix;
+  } catch { /* pakai prefix default */ }
+
+  // 1) unggah gambar ke Space
+  const form = new FormData();
+  form.append("files", file.buffer, { filename: `image.${file.ext}`, contentType: file.mime });
+  const up = await axios.post(`${host}${prefix}/upload`, form, {
+    headers: { ...form.getHeaders(), ...headers }, timeout: Math.min(15000, left())
+  });
+  const uploaded = Array.isArray(up.data) ? up.data[0] : null;
+  if (!uploaded) throw new Error("Space tidak menerima unggahan (mungkin sedang tidur atau tidak aktif).");
+
+  // 2) panggil fungsi "generate"
+  const call = await axios.post(`${host}${prefix}/call/generate`,
+    { data: [{ path: uploaded, meta: { _type: "gradio.FileData" } }, "Version 2"] },
+    { headers: { ...headers, "Content-Type": "application/json" }, timeout: Math.min(15000, left()) });
+  const eventId = call.data?.event_id;
+  if (!eventId) throw new Error("Space tidak memberi event_id.");
+
+  // 3) tunggu hasil (stream SSE)
+  const stream = await axios.get(`${host}${prefix}/call/generate/${encodeURIComponent(eventId)}`, {
+    headers, responseType: "text", transformResponse: [(d) => d], timeout: left()
+  });
+  const parsed = toAnimeParseSse(stream.data);
+  if (!parsed) throw new Error("Space tidak mengembalikan hasil (waktu habis).");
+  if (!parsed.ok) throw new Error("Space mengembalikan error (kemungkinan kuota GPU anonim habis atau gambar tidak cocok).");
+
+  const out = Array.isArray(parsed.data) ? parsed.data[0] : null;
+  const viaPath = out?.path ? `${host}${prefix}/file=${out.path}` : null;
+  let outUrl = typeof out?.url === "string" ? out.url : viaPath;
+  try { if (outUrl && new URL(outUrl).host !== new URL(host).host) outUrl = viaPath; } catch { outUrl = viaPath; }
+  if (!outUrl) throw new Error("URL hasil tidak ditemukan.");
+
+  // 4) file sementara di Space bisa hilang: salin ke hosting ToURL bila sempat
+  let finalUrl = outUrl;
+  try {
+    const img = await axios.get(outUrl, {
+      responseType: "arraybuffer", timeout: Math.min(15000, left()), maxContentLength: 4_200_000, headers
+    });
+    const buf = Buffer.from(img.data);
+    const t = toAnimeImageType(buf);
+    if (t) {
+      for (const p of TOURL_PROVIDERS) {
+        if (deadlineAt - Date.now() < 8000) break;
+        try { finalUrl = await p.upload({ buffer: buf, mimetype: t.mime, filename: `anime.${t.ext}` }); break; } catch { /* coba berikutnya */ }
+      }
+    }
+  } catch { /* tetap pakai URL Space */ }
+
+  return { jobId: eventId, urls: [finalUrl] };
+}
+
 const TOANIME_PROVIDERS = [
   { name: "PhotoEditorAI", run: toAnimePhotoEditorAi },
   { name: "Unwatermark AI", run: toAnimeUnwatermark },
-  { name: "MagicEraser", run: toAnimeMagicEraser }
+  { name: "MagicEraser", run: toAnimeMagicEraser },
+  { name: "AnimeGANv2 (Hugging Face)", run: toAnimeHfAnimeGan, styles: ["anime"] }
 ];
 
 // Coba penyedia satu per satu; kalau gagal / kena limit, lanjut ke berikutnya.
-async function toAnimeGenerate(file, prompt, ratio, deadlineAt, providers = TOANIME_PROVIDERS) {
+async function toAnimeGenerate(file, prompt, ratio, deadlineAt, allProviders = TOANIME_PROVIDERS, style = "anime") {
+  // penyedia yang hanya mendukung style tertentu dilewati bila style tidak cocok
+  const providers = allProviders.filter((p) => !p.styles || p.styles.includes(style));
   const tried = [];
   for (let i = 0; i < providers.length; i++) {
     const p = providers[i];
@@ -14020,7 +14105,7 @@ async function handleToAnime(req, res) {
 
     const startedAt = Date.now();
     const deadlineAt = startedAt + TOANIME_DEADLINE_MS;
-    const { jobId, urls, provider, tried } = await toAnimeGenerate(file, TOANIME_STYLES[style], ratio, deadlineAt);
+    const { jobId, urls, provider, tried } = await toAnimeGenerate(file, TOANIME_STYLES[style], ratio, deadlineAt, TOANIME_PROVIDERS, style);
     const resultUrl = urls[0];
 
     if (asImage) {

@@ -2,7 +2,7 @@ export default {
   slug: "to-anime",
   name: "To Anime",
   description:
-    "Unggah foto dari perangkat kamu (maksimal 4 MB) dan ubah menjadi gambar bergaya anime, ghibli, manga, chibi, atau cyberpunk memakai AI. Jika satu penyedia AI sedang error atau kena limit, otomatis dicoba penyedia cadangan.",
+    "Unggah foto dari perangkat kamu (maksimal 4 MB) dan ubah menjadi gambar bergaya anime, ghibli, manga, chibi, atau cyberpunk memakai AI. Jika satu penyedia AI sedang error atau kena limit, otomatis dicoba penyedia cadangan. Cadangan terakhir (AnimeGANv2, gratis) hanya berlaku untuk style anime dan paling bagus untuk foto wajah.",
   category: "Image",
   method: "POST",
   endpoint: "/api/to-anime",
