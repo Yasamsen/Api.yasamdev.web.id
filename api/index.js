@@ -2037,15 +2037,8 @@ async function handleNsfwRandomEndpoint(req, res) {
     });
   }
 }
-//Upscale (UPLOAD FILE)
-// Pola upload sama seperti ToURL: multipart/form-data, field "file", maks 4 MB.
-// Tidak lagi memakai parameter url, jadi tidak ada lagi langkah download gambar
-// dari situs lain (sumber umum error 403 karena hotlink protection).
-const UPSCALE_MAX_BYTES = 4_000_000;
-const UPSCALE_API_URL = "https://picupscaler.com/api/generate/handle";
-const UPSCALE_UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-
+//Image tools (upscale / crop / compress) + TTS + AI chat + Spotify
+// Parser multipart bersama untuk semua endpoint upload gambar (field "file", maks 4 MB).
 function upscaleParseMultipart(req, maxBytes) {
   return new Promise((resolve, reject) => {
     let bb;
@@ -2097,15 +2090,343 @@ function upscaleParseMultipart(req, maxBytes) {
   });
 }
 
-// Deteksi tipe gambar asli dari magic bytes (bukan percaya ekstensi/mime dari klien)
-function upscaleDetectImage(buf) {
-  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return { mimetype: "image/jpeg", ext: "jpg" };
-  if (buf.length >= 8 && buf.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return { mimetype: "image/png", ext: "png" };
-  if (buf.length >= 12 && buf.slice(0, 4).toString() === "RIFF" && buf.slice(8, 12).toString() === "WEBP") return { mimetype: "image/webp", ext: "webp" };
-  return null;
+// =====================================================================
+// IMAGE TOOLS: UPSCALE / CROP / COMPRESS (UPLOAD FILE)
+// Pola upload sama seperti ToURL: multipart/form-data, field "file", maks 4 MB.
+// Gambar diproses langsung di server memakai paket "sharp" (tanpa API pihak ketiga,
+// jadi tidak ada lagi error 403 dari layanan luar). Hasilnya diunggah ke hosting
+// sementara/permanen (catbox -> uguu -> tmpfiles) dan dikembalikan sebagai URL.
+// =====================================================================
+const IMGTOOLS_MAX_BYTES = 4_000_000;
+const IMGTOOLS_MAX_INPUT_PIXELS = 50_000_000;
+const IMGTOOLS_MAX_OUTPUT_PIXELS = 40_000_000;
+const IMGTOOLS_MAX_SIDE = 10000;
+const IMGTOOLS_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+// @@PURE_START
+const IMGTOOLS_FORMATS = {
+  jpeg: { mimetype: "image/jpeg", ext: "jpg" },
+  png: { mimetype: "image/png", ext: "png" },
+  webp: { mimetype: "image/webp", ext: "webp" },
+  gif: { mimetype: "image/gif", ext: "gif" },
+  avif: { mimetype: "image/avif", ext: "avif" }
+};
+
+function imgtoolsError(httpStatus, message) {
+  return Object.assign(new Error(message), { httpStatus });
 }
 
-async function handleUpscaleImage(req, res) {
+// Deteksi tipe gambar asli dari magic bytes (bukan percaya ekstensi/mime dari klien)
+function imgtoolsDetect(buf) {
+  let format = null;
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) format = "jpeg";
+  else if (buf.length >= 8 && buf.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) format = "png";
+  else if (buf.length >= 12 && buf.slice(0, 4).toString() === "RIFF" && buf.slice(8, 12).toString() === "WEBP") format = "webp";
+  else if (buf.length >= 6 && buf.slice(0, 4).toString() === "GIF8") format = "gif";
+  else if (buf.length >= 12 && buf.slice(4, 8).toString() === "ftyp" && /^avi[fs]$/.test(buf.slice(8, 12).toString())) format = "avif";
+  return format ? { format, ...IMGTOOLS_FORMATS[format] } : null;
+}
+
+function imgtoolsFormat(value, kind) {
+  const v = String(value || "original").trim().toLowerCase();
+  if (v === "original" || v === "") return kind.format;
+  if (v === "jpg" || v === "jpeg") return "jpeg";
+  if (IMGTOOLS_FORMATS[v] && v !== "gif") return v;
+  throw imgtoolsError(400, "Format output tidak valid. Pilih: original, png, jpg, webp, atau avif.");
+}
+
+function imgtoolsInt(value, name, min, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < min || n > max) {
+    throw imgtoolsError(400, `Parameter ${name} harus berupa angka ${min}–${max}.`);
+  }
+  return Math.round(n);
+}
+
+// Ukuran gambar setelah EXIF orientation diterapkan
+async function imgtoolsDims(sharp, buffer) {
+  const meta = await sharp(buffer, { limitInputPixels: IMGTOOLS_MAX_INPUT_PIXELS }).metadata();
+  const swap = meta.orientation >= 5;
+  return { width: swap ? meta.height : meta.width, height: swap ? meta.width : meta.height, hasAlpha: !!meta.hasAlpha };
+}
+
+// Encoder bersama untuk crop & compress
+function imgtoolsEncode(pipe, fmt, mode, quality, hasAlpha) {
+  const q = Math.max(1, Math.min(100, quality));
+  const lossless = mode === "lossless";
+  const smallest = mode === "smallest";
+  switch (fmt) {
+    case "png":
+      return lossless
+        ? pipe.png({ compressionLevel: 9, effort: 7 })
+        : pipe.png({ palette: true, quality: smallest ? Math.min(q, 60) : q, colours: smallest ? 128 : 256, effort: 7, compressionLevel: 9 });
+    case "jpeg": {
+      const p = hasAlpha ? pipe.flatten({ background: "#ffffff" }) : pipe;
+      return p.jpeg({
+        quality: lossless ? 100 : smallest ? Math.min(q, 70) : q,
+        mozjpeg: true,
+        chromaSubsampling: lossless ? "4:4:4" : "4:2:0"
+      });
+    }
+    case "webp":
+      return lossless
+        ? pipe.webp({ lossless: true, effort: 5 })
+        : pipe.webp({ quality: smallest ? Math.min(q, 65) : q, effort: 5 });
+    case "avif":
+      return lossless
+        ? pipe.avif({ lossless: true, effort: 4 })
+        : pipe.avif({ quality: smallest ? Math.min(q, 55) : q, effort: 4 });
+    case "gif":
+      return pipe.gif({ effort: 7 });
+    default:
+      throw imgtoolsError(400, "Format output tidak didukung.");
+  }
+}
+
+async function imgtoolsFinish(pipe) {
+  const { data, info } = await pipe.toBuffer({ resolveWithObject: true });
+  return { buffer: data, width: info.width, height: info.height, format: info.format };
+}
+
+// ---------- UPSCALE ----------
+async function imgtoolsUpscale({ sharp, buffer, kind, opt }) {
+  const scale = Number(opt("scale") || 2);
+  if (![2, 4].includes(scale)) throw imgtoolsError(400, "Parameter scale harus 2 atau 4.");
+
+  const { width: w0, height: h0, hasAlpha } = await imgtoolsDims(sharp, buffer);
+  let w = w0 * scale;
+  let h = h0 * scale;
+  const k = Math.min(1, IMGTOOLS_MAX_SIDE / Math.max(w, h), Math.sqrt(IMGTOOLS_MAX_OUTPUT_PIXELS / (w * h)));
+  if (k < 1) {
+    w = Math.floor(w * k);
+    h = Math.floor(h * k);
+  }
+  if (w <= w0 || h <= h0) {
+    throw imgtoolsError(400, "Gambar sudah terlalu besar untuk diperbesar lagi.");
+  }
+
+  // GIF/AVIF tidak ideal sebagai hasil upscale -> keluarkan PNG; JPEG/PNG/WEBP tetap formatnya
+  const fmt = ["jpeg", "png", "webp"].includes(kind.format) ? kind.format : "png";
+  let pipe = sharp(buffer, { limitInputPixels: IMGTOOLS_MAX_INPUT_PIXELS })
+    .rotate()
+    .resize({ width: w, height: h, fit: "fill", kernel: "lanczos3" })
+    .sharpen({ sigma: 0.7, m1: 0.8, m2: 2 });
+  if (fmt === "png") pipe = pipe.png({ compressionLevel: 6 });
+  else if (fmt === "jpeg") pipe = (hasAlpha ? pipe.flatten({ background: "#ffffff" }) : pipe).jpeg({ quality: 92 });
+  else pipe = pipe.webp({ quality: 92 });
+
+  const out = await imgtoolsFinish(pipe);
+  return {
+    ...out,
+    ...IMGTOOLS_FORMATS[fmt],
+    meta: {
+      scale,
+      original_width: w0,
+      original_height: h0,
+      width: out.width,
+      height: out.height,
+      capped: k < 1,
+      method: "lanczos3 + sharpen"
+    }
+  };
+}
+
+// ---------- CROP ----------
+function imgtoolsParseRatio(value) {
+  const m = String(value || "1:1").trim().match(/^(\d+(?:\.\d+)?)\s*[:x/]\s*(\d+(?:\.\d+)?)$/i);
+  if (!m || Number(m[1]) <= 0 || Number(m[2]) <= 0) {
+    throw imgtoolsError(400, 'Parameter ratio tidak valid. Contoh: "1:1", "16:9", "4:3", "9:16".');
+  }
+  return Number(m[1]) / Number(m[2]);
+}
+
+async function imgtoolsCrop({ sharp, buffer, kind, opt }) {
+  const { width: W, height: H, hasAlpha } = await imgtoolsDims(sharp, buffer);
+  const fmt = imgtoolsFormat(opt("format"), kind);
+  const quality = opt("quality") ? imgtoolsInt(opt("quality"), "quality", 1, 100) : 92;
+
+  let left, top, width, height, how;
+  const rawW = opt("width");
+  const rawH = opt("height");
+
+  if (rawW && rawH) {
+    // Mode manual: koordinat piksel pada gambar asli
+    left = opt("x") ? imgtoolsInt(opt("x"), "x", 0, W - 1) : 0;
+    top = opt("y") ? imgtoolsInt(opt("y"), "y", 0, H - 1) : 0;
+    width = Math.min(imgtoolsInt(rawW, "width", 1, 20000), W - left);
+    height = Math.min(imgtoolsInt(rawH, "height", 1, 20000), H - top);
+    how = "manual";
+  } else {
+    // Mode rasio: potong ke rasio tertentu, posisi bisa dipilih
+    const r = imgtoolsParseRatio(opt("ratio"));
+    if (W / H > r) {
+      height = H;
+      width = Math.max(1, Math.round(H * r));
+    } else {
+      width = W;
+      height = Math.max(1, Math.round(W / r));
+    }
+    const pos = String(opt("position") || "center").toLowerCase();
+    if (!["center", "top", "bottom", "left", "right"].includes(pos)) {
+      throw imgtoolsError(400, "Parameter position harus center, top, bottom, left, atau right.");
+    }
+    left = pos === "left" ? 0 : pos === "right" ? W - width : Math.round((W - width) / 2);
+    top = pos === "top" ? 0 : pos === "bottom" ? H - height : Math.round((H - height) / 2);
+    how = "ratio";
+  }
+
+  if (width === W && height === H) {
+    throw imgtoolsError(400, "Area crop sama dengan ukuran gambar asli. Ubah ratio atau width/height.");
+  }
+
+  let pipe = sharp(buffer, { limitInputPixels: IMGTOOLS_MAX_INPUT_PIXELS })
+    .rotate()
+    .extract({ left, top, width, height });
+  pipe = imgtoolsEncode(pipe, fmt, "balanced", quality, hasAlpha);
+
+  const out = await imgtoolsFinish(pipe);
+  return {
+    ...out,
+    ...IMGTOOLS_FORMATS[fmt],
+    meta: {
+      mode: how,
+      original_width: W,
+      original_height: H,
+      crop: { x: left, y: top, width, height },
+      width: out.width,
+      height: out.height
+    }
+  };
+}
+
+// ---------- COMPRESS ----------
+async function imgtoolsCompress({ sharp, buffer, kind, opt }) {
+  const fmt = imgtoolsFormat(opt("format"), kind);
+  const mode = String(opt("mode") || "balanced").toLowerCase();
+  if (!["balanced", "smallest", "lossless"].includes(mode)) {
+    throw imgtoolsError(400, "Parameter mode harus balanced, smallest, atau lossless.");
+  }
+  const quality = opt("quality") ? imgtoolsInt(opt("quality"), "quality", 1, 100) : 80;
+
+  const { width: W, height: H, hasAlpha } = await imgtoolsDims(sharp, buffer);
+  let pipe = sharp(buffer, { limitInputPixels: IMGTOOLS_MAX_INPUT_PIXELS, animated: kind.format === "gif" }).rotate();
+  pipe = imgtoolsEncode(pipe, fmt, mode, quality, hasAlpha);
+
+  let out = await imgtoolsFinish(pipe);
+  let note = null;
+  // Kalau hasil malah lebih besar dan formatnya tidak diubah, pakai file asli apa adanya
+  if (fmt === kind.format && out.buffer.length >= buffer.length) {
+    out = { buffer, width: W, height: H, format: kind.format };
+    note = "Gambar sudah optimal, ukuran tidak bisa diperkecil lagi tanpa mengubah format atau kualitas.";
+  }
+
+  const originalSize = buffer.length;
+  const compressedSize = out.buffer.length;
+  return {
+    ...out,
+    ...IMGTOOLS_FORMATS[fmt],
+    meta: {
+      originalSize,
+      compressedSize,
+      savingsPercent: Math.round(((originalSize - compressedSize) / originalSize) * 1000) / 10,
+      format: fmt,
+      mode,
+      quality,
+      width: out.width,
+      height: out.height,
+      ...(note ? { note } : {})
+    }
+  };
+}
+// @@PURE_END
+
+let imgtoolsSharpPromise = null;
+function imgtoolsGetSharp() {
+  if (!imgtoolsSharpPromise) {
+    imgtoolsSharpPromise = import("sharp")
+      .then((m) => m.default || m)
+      .catch((error) => {
+        imgtoolsSharpPromise = null;
+        throw Object.assign(new Error("Modul sharp belum terpasang di server. Jalankan npm install lalu deploy ulang."), {
+          httpStatus: 500,
+          cause: error
+        });
+      });
+  }
+  return imgtoolsSharpPromise;
+}
+
+async function imgtoolsPostForm(url, form, timeout) {
+  const response = await fetch(url, {
+    method: "POST",
+    body: form,
+    headers: { "User-Agent": IMGTOOLS_UA },
+    signal: AbortSignal.timeout(timeout)
+  });
+  const text = (await response.text()).trim();
+  if (!response.ok) throw new Error(`HTTP ${response.status} ${text.slice(0, 100)}`.trim());
+  return text;
+}
+
+const IMGTOOLS_HOSTS = [
+  {
+    name: "catbox.moe",
+    expires: "permanen",
+    async upload(buf, filename, mime, timeout) {
+      const form = new globalThis.FormData();
+      form.append("reqtype", "fileupload");
+      form.append("fileToUpload", new Blob([buf], { type: mime }), filename);
+      const text = await imgtoolsPostForm("https://catbox.moe/user/api.php", form, timeout);
+      if (!/^https?:\/\//i.test(text)) throw new Error(text.slice(0, 120) || "respons tidak valid");
+      return text;
+    }
+  },
+  {
+    name: "uguu.se",
+    expires: "sementara (sekitar 3 jam)",
+    async upload(buf, filename, mime, timeout) {
+      const form = new globalThis.FormData();
+      form.append("files[]", new Blob([buf], { type: mime }), filename);
+      const text = await imgtoolsPostForm("https://uguu.se/upload?output=json", form, timeout);
+      if (/^https?:\/\//i.test(text)) return text.split(/\s+/)[0];
+      const link = JSON.parse(text)?.files?.[0]?.url;
+      if (!link) throw new Error("respons tidak valid");
+      return link;
+    }
+  },
+  {
+    name: "tmpfiles.org",
+    expires: "sementara (sekitar 1 jam)",
+    async upload(buf, filename, mime, timeout) {
+      const form = new globalThis.FormData();
+      form.append("file", new Blob([buf], { type: mime }), filename);
+      const text = await imgtoolsPostForm("https://tmpfiles.org/api/v1/upload", form, timeout);
+      const link = JSON.parse(text)?.data?.url;
+      if (!link) throw new Error("respons tidak valid");
+      return link.replace(/^http:\/\//, "https://").replace("tmpfiles.org/", "tmpfiles.org/dl/");
+    }
+  }
+];
+
+// Unggah hasil ke hosting; dicoba berurutan dengan batas waktu total
+async function imgtoolsHost(buffer, filename, mimetype, deadlineMs = 40000) {
+  const startedAt = Date.now();
+  const errors = [];
+  for (const host of IMGTOOLS_HOSTS) {
+    const remaining = deadlineMs - (Date.now() - startedAt);
+    if (remaining < 3000) break;
+    try {
+      const url = await host.upload(buffer, filename, mimetype, Math.min(25000, remaining));
+      return { url, host: host.name, expires: host.expires };
+    } catch (error) {
+      errors.push(`${host.name}: ${error.message}`);
+    }
+  }
+  throw Object.assign(new Error(errors.join(" | ") || "Semua server penyimpanan tidak merespons."), { hostErrors: errors });
+}
+
+async function imgtoolsHandle(req, res, tool) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept, x-api-key");
@@ -2115,110 +2436,445 @@ async function handleUpscaleImage(req, res) {
     return res.status(405).json({
       status: false,
       message: "Metode tidak diizinkan. Gunakan POST dengan multipart/form-data.",
-      error: 'example: curl -X POST "/api/upscale-image" -F "file=@foto.jpg"'
+      error: `example: curl -X POST "/api/${tool.slug}" -F "file=@foto.jpg"`
     });
   }
 
   try {
-    const declaredLength = Number(req.headers["content-length"] || 0);
-    if (declaredLength > UPSCALE_MAX_BYTES + 100_000) {
+    const declared = Number(req.headers["content-length"] || 0);
+    if (declared > IMGTOOLS_MAX_BYTES + 100_000) {
       return res.status(413).json({ status: false, message: "File terlalu besar.", error: "Maksimal 4 MB." });
     }
-
     if (!/multipart\/form-data/i.test(req.headers["content-type"] || "")) {
       return res.status(400).json({
         status: false,
         message: 'Kirim gambar lewat multipart/form-data pada field "file".',
-        error: 'example: curl -X POST "/api/upscale-image" -F "file=@foto.jpg"'
+        error: `example: curl -X POST "/api/${tool.slug}" -F "file=@foto.jpg"`
       });
     }
 
-    const { file } = await upscaleParseMultipart(req, UPSCALE_MAX_BYTES);
+    const { file, fields } = await upscaleParseMultipart(req, IMGTOOLS_MAX_BYTES);
     if (!file || !file.buffer.length) {
       return res.status(400).json({
         status: false,
         message: "Gambar wajib diunggah.",
-        error: 'Pilih file pada field "file". example: curl -X POST "/api/upscale-image" -F "file=@foto.jpg"'
+        error: `Pilih file pada field "file". example: curl -X POST "/api/${tool.slug}" -F "file=@foto.jpg"`
       });
     }
 
-    const kind = upscaleDetectImage(file.buffer);
+    const kind = imgtoolsDetect(file.buffer);
     if (!kind) {
       return res.status(415).json({
         status: false,
         message: "Format file tidak didukung.",
-        error: "Gunakan gambar asli: JPG, PNG, atau WEBP"
+        error: "Gunakan gambar asli: JPG, PNG, WEBP, GIF, atau AVIF"
       });
+    }
+
+    const startedAt = Date.now();
+    const sharp = await imgtoolsGetSharp();
+    const opt = (name) => {
+      const v = fields[name] ?? req.query?.[name];
+      return v === undefined || v === null || String(v).trim() === "" ? undefined : String(v).trim();
+    };
+
+    let out;
+    try {
+      out = await tool.run({ sharp, buffer: file.buffer, kind, opt });
+    } catch (error) {
+      if (error.httpStatus) throw error;
+      throw Object.assign(new Error(error.message || "Gambar tidak dapat diproses."), { httpStatus: 422, unreadable: true });
     }
 
     const baseName =
       String(file.filename || "image").split(/[\\/]/).pop().replace(/\.[^.]+$/, "").replace(/[^\w\-]+/g, "_").slice(0, 60) || "image";
+    const filename = `${baseName}-${tool.suffix}.${out.ext}`;
+    const processingMs = Date.now() - startedAt;
 
-    const upscaleForm = new FormData();
-    upscaleForm.append("image", file.buffer, {
-      filename: `${baseName}.${kind.ext}`,
-      contentType: kind.mimetype
-    });
-    upscaleForm.append("user_id", "");
-    upscaleForm.append("is_public", "true");
-    upscaleForm.append("scale", "2");
-
-    const upscaleResponse = await axios.post(UPSCALE_API_URL, upscaleForm, {
-      headers: {
-        ...upscaleForm.getHeaders(),
-        accept: "application/json, text/plain, */*",
-        "accept-language": "en-US,en;q=0.9",
-        referer: "https://picupscaler.com/",
-        origin: "https://picupscaler.com",
-        "user-agent": UPSCALE_UA,
-        "sec-ch-ua": '"Chromium";v="131", "Not_A Brand";v="24"',
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": '"Windows"',
-        "sec-fetch-dest": "empty",
-        "sec-fetch-mode": "cors",
-        "sec-fetch-site": "same-origin"
-      },
-      timeout: 55000,
-      maxContentLength: 50 * 1024 * 1024,
-      maxBodyLength: 50 * 1024 * 1024
-    });
-
-    return res.status(200).json({
-      status: true,
-      source: "PicUpscaler",
-      data: upscaleResponse.data
-    });
-  } catch (error) {
-    if (res.headersSent) return res.destroy();
-    console.error("handleUpscaleImage:", error?.response?.status, error?.message);
-
-    if (error.code === "TOO_LARGE") {
-      return res.status(413).json({ status: false, message: "File terlalu besar. Maksimal 4 MB.", error: error.message });
-    }
-
-    const upstream = error.response?.status;
-    if (upstream === 403 || upstream === 429) {
+    let hosted;
+    try {
+      hosted = await imgtoolsHost(out.buffer, filename, out.mimetype);
+    } catch (error) {
+      // Cadangan: kalau semua hosting gagal tapi hasilnya kecil, kirim langsung sebagai data URL
+      if (out.buffer.length <= 2_500_000) {
+        return res.status(200).json({
+          status: true,
+          source: tool.source,
+          data: {
+            url: null,
+            data_url: `data:${out.mimetype};base64,${out.buffer.toString("base64")}`,
+            filename,
+            mimetype: out.mimetype,
+            size: out.buffer.length,
+            ...out.meta,
+            processing_ms: processingMs,
+            note: "Server penyimpanan sedang tidak tersedia, hasil dikirim sebagai data URL."
+          }
+        });
+      }
       return res.status(502).json({
         status: false,
-        message: "Server PicUpscaler menolak permintaan (anti-bot / batas penggunaan). Coba lagi beberapa saat.",
-        error: `Upstream status ${upstream}`
-      });
-    }
-    if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") {
-      return res.status(504).json({
-        status: false,
-        message: "Waktu permintaan ke server upscale habis, coba lagi.",
+        message: "Gambar berhasil diproses, tetapi gagal diunggah ke server penyimpanan.",
         error: error.message
       });
     }
 
-    return res.status(upstream >= 400 && upstream < 600 ? 502 : 500).json({
+    return res.status(200).json({
+      status: true,
+      source: tool.source,
+      data: {
+        url: hosted.url,
+        host: hosted.host,
+        expires: hosted.expires,
+        filename,
+        mimetype: out.mimetype,
+        size: out.buffer.length,
+        ...out.meta,
+        processing_ms: processingMs
+      }
+    });
+  } catch (error) {
+    if (res.headersSent) return res.destroy();
+    console.error(`${tool.slug} error:`, error?.message || error);
+    if (error.code === "TOO_LARGE") {
+      return res.status(413).json({ status: false, message: "File terlalu besar. Maksimal 4 MB.", error: error.message });
+    }
+    return res.status(error.httpStatus || 500).json({
       status: false,
-      message: "Gagal melakukan upscale gambar.",
+      message: error.unreadable ? "Gambar tidak dapat dibaca atau rusak." : error.httpStatus ? error.message : tool.errorMessage,
       error: error.message
     });
   }
 }
+
+async function handleUpscaleImage(req, res) {
+  return imgtoolsHandle(req, res, {
+    slug: "upscale-image",
+    suffix: "upscaled",
+    source: "Image Upscaler (sharp, lanczos3)",
+    errorMessage: "Gagal melakukan upscale gambar.",
+    run: imgtoolsUpscale
+  });
+}
+
+async function handleCropImage(req, res) {
+  return imgtoolsHandle(req, res, {
+    slug: "crop-image",
+    suffix: "cropped",
+    source: "Image Cropper (sharp)",
+    errorMessage: "Gagal memotong gambar.",
+    run: imgtoolsCrop
+  });
+}
+
+async function handleCompressImage(req, res) {
+  return imgtoolsHandle(req, res, {
+    slug: "compress-image",
+    suffix: "compressed",
+    source: "Image Compressor (sharp)",
+    errorMessage: "Gagal mengompres gambar.",
+    run: imgtoolsCompress
+  });
+}
+
+// =====================================================================
+// TEXT TO SPEECH (/api/tts) - sumber: Google Translate TTS, tanpa API key
+// Teks panjang dipecah per ~180 karakter lalu digabung jadi 1 file MP3.
+// =====================================================================
+const TTS_MAX_CHARS = 1000;
+const TTS_CHUNK_CHARS = 180;
+
+// @@TTS_PURE_START
+function ttsSplit(text, max = 180) {
+  const words = String(text).split(/\s+/).filter(Boolean);
+  const chunks = [];
+  let cur = "";
+  for (let word of words) {
+    while (word.length > max) {
+      if (cur) { chunks.push(cur); cur = ""; }
+      chunks.push(word.slice(0, max));
+      word = word.slice(max);
+    }
+    if (!cur) cur = word;
+    else if ((cur + " " + word).length > max) { chunks.push(cur); cur = word; }
+    else cur += " " + word;
+    if (/[.!?。！？]$/.test(word) && cur.length > 80) { chunks.push(cur); cur = ""; }
+  }
+  if (cur) chunks.push(cur);
+  return chunks;
+}
+// @@TTS_PURE_END
+
+async function ttsFetchChunk(text, lang, idx, total) {
+  const url =
+    "https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob" +
+    `&tl=${encodeURIComponent(lang)}&q=${encodeURIComponent(text)}&total=${total}&idx=${idx}&textlen=${text.length}`;
+  const response = await axios.get(url, {
+    responseType: "arraybuffer",
+    timeout: 15000,
+    headers: { "User-Agent": IMGTOOLS_UA, Referer: "https://translate.google.com/" }
+  });
+  const type = String(response.headers["content-type"] || "");
+  if (!/audio|octet-stream/i.test(type) || !response.data?.byteLength) {
+    throw new Error("Respons audio tidak valid dari server TTS");
+  }
+  return Buffer.from(response.data);
+}
+
+async function handleTts(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept, x-api-key");
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "GET" && req.method !== "POST") {
+    res.setHeader("Allow", "GET, POST, OPTIONS");
+    return res.status(405).json({ status: false, message: "Gunakan method GET atau POST." });
+  }
+
+  try {
+    let input = { ...(req.query || {}) };
+    if (req.method === "POST") {
+      await ensureJsonBody(req);
+      input = { ...input, ...(req.body || {}) };
+    }
+
+    const text = String(input.text ?? input.q ?? "").replace(/\s+/g, " ").trim();
+    if (!text) {
+      return res.status(400).json({
+        status: false,
+        message: "Parameter text wajib diisi.",
+        error: 'example: POST /api/tts {"text":"Halo, selamat datang","lang":"id"}'
+      });
+    }
+    if (text.length > TTS_MAX_CHARS) {
+      return res.status(400).json({
+        status: false,
+        message: `Teks terlalu panjang (maksimal ${TTS_MAX_CHARS} karakter).`,
+        error: `Panjang teks: ${text.length} karakter`
+      });
+    }
+
+    const lang = String(input.lang || "id").trim();
+    if (!/^[a-z]{2,3}(-[A-Za-z]{2,4})?$/.test(lang)) {
+      return res.status(400).json({
+        status: false,
+        message: "Kode bahasa tidak valid.",
+        error: "Contoh: id, en, ja, ar, es, fr, ko, zh-CN"
+      });
+    }
+
+    const startedAt = Date.now();
+    const chunks = ttsSplit(text, TTS_CHUNK_CHARS);
+    const parts = await Promise.all(chunks.map((chunk, i) => ttsFetchChunk(chunk, lang, i, chunks.length)));
+    const audio = Buffer.concat(parts);
+
+    if (String(input.output || "").toLowerCase() === "audio") {
+      res.setHeader("Content-Type", "audio/mpeg");
+      res.setHeader("Content-Length", String(audio.length));
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      return res.status(200).send(audio);
+    }
+
+    const filename = `tts-${Date.now()}.mp3`;
+    const base = { text, lang, characters: text.length, chunks: chunks.length, filename, mimetype: "audio/mpeg", size: audio.length };
+    try {
+      const hosted = await imgtoolsHost(audio, filename, "audio/mpeg");
+      return res.status(200).json({
+        status: true,
+        source: "Google Translate TTS",
+        data: { url: hosted.url, host: hosted.host, expires: hosted.expires, ...base, processing_ms: Date.now() - startedAt }
+      });
+    } catch {
+      return res.status(200).json({
+        status: true,
+        source: "Google Translate TTS",
+        data: {
+          url: null,
+          audio_base64: audio.toString("base64"),
+          ...base,
+          processing_ms: Date.now() - startedAt,
+          note: "Server penyimpanan sedang tidak tersedia, audio dikirim sebagai base64 (MP3). Tambahkan ?output=audio untuk mengunduh langsung."
+        }
+      });
+    }
+  } catch (error) {
+    if (res.headersSent) return res.destroy();
+    console.error("tts error:", error?.message || error);
+    const upstream = error.response?.status;
+    return res.status(upstream ? 502 : 500).json({
+      status: false,
+      message: "Gagal mengubah teks menjadi suara.",
+      error: upstream ? `Server TTS membalas status ${upstream}` : error.message
+    });
+  }
+}
+
+// =====================================================================
+// AI CHAT (/api/ai-chat)
+// Memakai Rudder kalau kredensialnya sudah diisi di env Vercel,
+// kalau belum otomatis memakai AutoAI (NeoSoft Gemini).
+// =====================================================================
+async function handleAiChat(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept, x-api-key");
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "GET" && req.method !== "POST") {
+    res.setHeader("Allow", "GET, POST, OPTIONS");
+    return res.status(405).json({ status: false, message: "Gunakan method GET atau POST." });
+  }
+
+  try {
+    let input = { ...(req.query || {}) };
+    if (req.method === "POST") {
+      await ensureJsonBody(req);
+      input = { ...input, ...(req.body || {}) };
+    }
+
+    const message = String(input.message ?? input.text ?? input.prompt ?? input.q ?? "").trim();
+    if (!message) {
+      return res.status(400).json({
+        status: false,
+        success: false,
+        message: "Parameter message wajib diisi.",
+        error: 'example: POST /api/ai-chat {"message":"Apa ibu kota Indonesia?"}'
+      });
+    }
+
+    const query = { message, text: message, prompt: message };
+    if (input.sessionId) query.sessionId = String(input.sessionId).trim();
+
+    // Teruskan ke handler AI yang ada sebagai request GET dengan query yang sudah dinormalisasi
+    const proxied = Object.create(req, { method: { value: "GET" }, query: { value: query } });
+    if (rudderConfig()) return handleRudderChat(proxied, res);
+    return handleAutoAI(proxied, res);
+  } catch (error) {
+    if (res.headersSent) return res.destroy();
+    return res.status(500).json({ status: false, message: "Gagal memproses AI Chat.", error: error.message });
+  }
+}
+
+// =====================================================================
+// SPOTIFY DOWNLOADER (/api/spotify) - memakai mesin OmDown untuk link Spotify
+// =====================================================================
+async function handleSpotifyDownload(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ status: false, message: "Gunakan metode GET." });
+  }
+  const raw = String(req.query?.url || "").trim();
+  if (!raw) {
+    return res.status(400).json({
+      status: false,
+      message: "Parameter url wajib diisi.",
+      error: 'example: "/api/spotify?url=https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"'
+    });
+  }
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return res.status(400).json({ status: false, message: "Format URL tidak valid.", error: "Invalid URL" });
+  }
+  if (!/(^|\.)spotify\.com$/i.test(parsed.hostname)) {
+    return res.status(400).json({
+      status: false,
+      message: "URL harus berasal dari spotify.com.",
+      error: 'example: "/api/spotify?url=https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"'
+    });
+  }
+  return handleOmdown(req, res);
+}
+
+// =====================================================================
+// SPOTIFY SEARCH (/api/spotify-search) - sumber katalog: Deezer (tanpa API key)
+// Pencarian resmi Spotify butuh token, jadi daftar album/lagu diambil dari Deezer
+// dengan format respons yang sama.
+// =====================================================================
+async function handleSpotifySearch(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ status: false, message: "Gunakan metode GET." });
+  }
+
+  const query = String(req.query?.query ?? req.query?.q ?? "").trim();
+  if (!query) {
+    return res.status(400).json({
+      status: false,
+      message: "Parameter query wajib diisi.",
+      error: 'example: "/api/spotify-search?query=Ipank&type=album&limit=5"'
+    });
+  }
+  const type = String(req.query?.type || "album").toLowerCase();
+  if (!["album", "track", "all"].includes(type)) {
+    return res.status(400).json({ status: false, message: "Parameter type harus album, track, atau all." });
+  }
+  const limit = Math.max(1, Math.min(10, parseInt(req.query?.limit, 10) || 10));
+
+  const deezer = async (path) => {
+    const { data } = await axios.get(`https://api.deezer.com${path}`, {
+      timeout: 12000,
+      headers: { "User-Agent": IMGTOOLS_UA }
+    });
+    if (data?.error) throw new Error(data.error.message || "Deezer error");
+    return data;
+  };
+  const q = encodeURIComponent(query);
+  const mapTrack = (t, fallbackArtist) => ({
+    title: t.title,
+    artist: t.artist?.name || fallbackArtist || null,
+    album: t.album?.title || undefined,
+    duration_ms: (Number(t.duration) || 0) * 1000,
+    track_id: String(t.id),
+    track_url: t.link,
+    preview_url: t.preview || null,
+    cover_url: t.album?.cover_xl || t.album?.cover_big || undefined
+  });
+
+  try {
+    const data = { query, type, source: "deezer.com", generated_at: new Date().toISOString() };
+
+    if (type === "album" || type === "all") {
+      const found = await deezer(`/search/album?q=${q}&limit=${limit}`);
+      const items = Array.isArray(found.data) ? found.data : [];
+      const details = await Promise.allSettled(items.map((a) => deezer(`/album/${a.id}`)));
+      data.albums = items.map((a, i) => {
+        const d = details[i].status === "fulfilled" ? details[i].value : null;
+        const tracks = (d?.tracks?.data || []).map((t) => mapTrack(t, a.artist?.name));
+        return {
+          album_name: a.title,
+          album_id: String(a.id),
+          album_type: a.record_type || "album",
+          album_url: a.link,
+          cover_url: a.cover_xl || a.cover_big || a.cover_medium || null,
+          release_date: d?.release_date || null,
+          artist: a.artist?.name || null,
+          total_tracks: d?.nb_tracks ?? a.nb_tracks ?? tracks.length,
+          tracks
+        };
+      });
+    }
+
+    if (type === "track" || type === "all") {
+      const found = await deezer(`/search/track?q=${q}&limit=${limit}`);
+      data.tracks = (Array.isArray(found.data) ? found.data : []).map((t) => mapTrack(t));
+    }
+
+    const total = (data.albums?.length || 0) + (data.tracks?.length || 0);
+    if (!total) {
+      return res.status(404).json({ status: false, message: "Tidak ada hasil yang cocok.", error: `Query: ${query}` });
+    }
+    return res.status(200).json({ status: true, source: "Deezer", data });
+  } catch (error) {
+    console.error("spotify-search error:", error?.message || error);
+    return res.status(502).json({
+      status: false,
+      message: "Gagal mencari album/lagu. Coba lagi nanti.",
+      error: error.message
+    });
+  }
+}
+
 // =====================================================================
 // TEMPEL KE api/index.js
 // =====================================================================
@@ -4688,13 +5344,13 @@ async function handleNpmStalk(req, res) {
 // ===============================
 async function handleFfStalk(req, res) {
   try {
-    const userId = req.query.userId || req.query.id;
+    const userId = String(req.query.uid || req.query.userId || req.query.id || "").trim();
 
     if (!userId) {
       return res.status(400).json({
         status: false,
-        message: "Parameter userId wajib diisi.",
-        error: 'example: "/api/ffstalk?userId=123456789"'
+        message: "Parameter uid wajib diisi.",
+        error: 'example: "/api/ff-stalk?uid=123456789"'
       });
     }
 
@@ -14287,6 +14943,7 @@ export default async function handler(req, res) {
     case "unwatermark-nano-banana":
     return handleUnwatermarkNanoBanana(req, res);
     case "iplookup":
+    case "ip-lookup":
       return handleIplookup(req, res);
     case "weather":
       return handleWeather(req, res);
@@ -14349,6 +15006,7 @@ case "ai-image":
 case "npmstalk":
   return handleNpmStalk(req, res);
 case "ffstalk":
+case "ff-stalk":
   return handleFfStalk(req, res);
 case "mlstalk":
   return handleMlstalkEndpoint(req, res);
@@ -14367,6 +15025,19 @@ case "quotes-anime":
   case "nsfw-random1": return handleHentaiRandom(req, res);
 case "upscale-image":
   return handleUpscaleImage(req, res);
+  case "crop-image":
+  return handleCropImage(req, res);
+  case "compress-image":
+  return handleCompressImage(req, res);
+  case "tts":
+  case "text-to-speech":
+  return handleTts(req, res);
+  case "ai-chat":
+  return handleAiChat(req, res);
+  case "spotify":
+  return handleSpotifyDownload(req, res);
+  case "spotify-search":
+  return handleSpotifySearch(req, res);
   case "photoeditor-ai":
     return handlePhotoEditorAi(req, res);
     case "unblur-img":

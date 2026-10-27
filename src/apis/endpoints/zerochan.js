@@ -4,7 +4,7 @@ export default {
   description: "Mencari gambar anime dan karakter dari Zerochan.",
   category: "Anime",
   method: "GET",
-  endpoint: "/api/zerochan?query={query}",
+  endpoint: "/api/zerochan",
   icon: "Image",
 
   parameters: [

@@ -1,7 +1,7 @@
 export default {
   "slug": "spotify-search",
-  "name": "Spotify Album & Track Search",
-  "description": "Cari album dan lagu di Spotify berdasarkan kata kunci atau nama artis, serta tampilkan daftar lagu pada setiap album.",
+  "name": "Album & Track Search",
+  "description": "Cari album dan lagu berdasarkan kata kunci atau nama artis, lengkap dengan daftar lagu pada setiap album. Katalog diambil dari Deezer (tanpa API key).",
   "category": "Music",
   "method": "GET",
   "endpoint": "/api/spotify-search",
@@ -45,18 +45,18 @@ export default {
   ],
   "responseExample": {
     "status": true,
-    "source": "Spotify",
+    "source": "Deezer",
     "data": {
       "query": "Ipank",
       "type": "album",
-      "source": "open.spotify.com",
+      "source": "deezer.com",
       "generated_at": "2026-10-24T00:00:00.000Z",
       "albums": [
         {
           "album_name": "Contoh Album Ipank",
           "album_id": "contohAlbumId",
           "album_type": "album",
-          "album_url": "https://open.spotify.com/album/contohAlbumId",
+          "album_url": "https://www.deezer.com/album/123456",
           "cover_url": "https://example.com/cover.jpg",
           "release_date": "2020-01-01",
           "artist": "Ipank",
@@ -67,14 +67,14 @@ export default {
               "artist": "Ipank",
               "duration_ms": 240000,
               "track_id": "contohTrackId1",
-              "track_url": "https://open.spotify.com/track/contohTrackId1"
+              "track_url": "https://www.deezer.com/track/111111"
             },
             {
               "title": "Contoh Lagu Kedua",
               "artist": "Ipank",
               "duration_ms": 215000,
               "track_id": "contohTrackId2",
-              "track_url": "https://open.spotify.com/track/contohTrackId2"
+              "track_url": "https://www.deezer.com/track/222222"
             }
           ]
         }

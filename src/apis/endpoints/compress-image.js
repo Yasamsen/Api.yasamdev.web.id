@@ -1,14 +1,15 @@
 export default {
   slug: "compress-image",
-  name: "Compress Imagee",
-  description: "Unggah gambar lalu kompres ukuran file melalui CleanPNG Image Compressor.",
+  name: "Compress Image",
+  description:
+    "Unggah gambar (maksimal 4MB) lalu kecilkan ukuran filenya. Pilih format hasil, mode kompresi, dan kualitas. Hasilnya berupa link gambar beserta persentase penghematan.",
   category: "Tools",
   method: "POST",
   endpoint: "/api/compress-image",
   icon: "FileImage",
   parameters: [
     {
-      name: "image",
+      name: "file",
       type: "file",
       required: true,
       description: "Pilih gambar PNG, JPG, WEBP, GIF, atau AVIF (maksimal 4 MB).",
@@ -18,7 +19,7 @@ export default {
     {
       name: "format",
       type: "select",
-      required: true,
+      required: false,
       description: "Format hasil kompresi.",
       options: [
         { value: "original", label: "Original — format asli" },
@@ -32,8 +33,8 @@ export default {
     {
       name: "mode",
       type: "select",
-      required: true,
-      description: "Mode kompresi.",
+      required: false,
+      description: "Mode kompresi. Lossless memakai kualitas maksimal (JPG tidak bisa benar-benar lossless).",
       options: [
         { value: "balanced", label: "Balanced" },
         { value: "smallest", label: "Smallest file" },
@@ -44,28 +45,41 @@ export default {
     {
       name: "quality",
       type: "number",
-      required: true,
-      description: "Kualitas output 1–100. Angka lebih tinggi biasanya menghasilkan file lebih besar.",
+      required: false,
+      description: "Kualitas output 1–100 (default 80). Angka lebih tinggi biasanya menghasilkan file lebih besar.",
       example: "80"
     }
   ],
   responseExample: {
     status: true,
-    source: "CleanPNG Image Compressor",
+    source: "Image Compressor (sharp)",
     data: {
-      resultUrl: "https://tools.cleanpng.com/image-compressor/...",
-      originalSize: 204800,
-      compressedSize: 102400,
-      savingsPercent: 50
+      url: "https://files.catbox.moe/abc123.jpg",
+      host: "catbox.moe",
+      expires: "permanen",
+      filename: "foto-compressed.jpg",
+      mimetype: "image/jpeg",
+      size: 25507,
+      originalSize: 128638,
+      compressedSize: 25507,
+      savingsPercent: 80.2,
+      format: "jpeg",
+      mode: "balanced",
+      quality: 70,
+      width: 800,
+      height: 500,
+      processing_ms: 410
     }
   },
   responseFields: [
     { name: "status", type: "boolean", description: "true jika proses berhasil" },
-    { name: "source", type: "string", description: "Layanan kompresi gambar" },
-    { name: "data.resultUrl", type: "string", description: "URL gambar hasil kompresi" },
-    { name: "data.originalSize", type: "number", description: "Ukuran file awal dalam byte jika tersedia" },
-    { name: "data.compressedSize", type: "number", description: "Ukuran file hasil dalam byte jika tersedia" },
-    { name: "data.savingsPercent", type: "number", description: "Persentase penghematan ukuran jika tersedia" }
+    { name: "source", type: "string", description: "Mesin kompresi yang dipakai" },
+    { name: "data.url", type: "string", description: "Link gambar hasil kompresi" },
+    { name: "data.originalSize", type: "number", description: "Ukuran file awal dalam byte" },
+    { name: "data.compressedSize", type: "number", description: "Ukuran file hasil dalam byte" },
+    { name: "data.savingsPercent", type: "number", description: "Persentase penghematan ukuran (bisa negatif jika format baru lebih besar)" },
+    { name: "data.note", type: "string", description: "Muncul jika gambar sudah optimal dan file asli dikembalikan" }
   ],
-  exampleRequest: "POST https://samapi.example.com/api/compress-image (multipart/form-data: image, format, mode, quality)"
+  exampleRequest:
+    'curl -X POST "https://samapi.example.com/api/compress-image" -F "file=@foto.jpg" -F "format=webp" -F "mode=balanced" -F "quality=80"'
 };
