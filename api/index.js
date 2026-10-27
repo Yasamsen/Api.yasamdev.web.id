@@ -2037,77 +2037,151 @@ async function handleNsfwRandomEndpoint(req, res) {
     });
   }
 }
-//Upscale omg
-async function handleUpscaleImage(req, res) {
-  try {
-    const { url } = req.query;
+//Upscale (UPLOAD FILE)
+// Pola upload sama seperti ToURL: multipart/form-data, field "file", maks 4 MB.
+// Tidak lagi memakai parameter url, jadi tidak ada lagi langkah download gambar
+// dari situs lain (sumber umum error 403 karena hotlink protection).
+const UPSCALE_MAX_BYTES = 4_000_000;
+const UPSCALE_API_URL = "https://picupscaler.com/api/generate/handle";
+const UPSCALE_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-    if (!url) {
-      return res.status(400).json({
-        status: false,
-        message: "Parameter URL gambar wajib diisi.",
-        error: 'example: "/api/upscale-image?url=https://example.com/image.jpg"'
-      });
-    }
-
-    // Validasi URL
-    let imageUrl;
-
+function upscaleParseMultipart(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    let bb;
     try {
-      imageUrl = new URL(url).href;
-    } catch {
+      bb = Busboy({
+        headers: req.headers,
+        limits: { files: 1, fileSize: maxBytes, fields: 10, fieldSize: 1024 }
+      });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    let fileResult = null;
+    const fields = {};
+    let tooLarge = false;
+
+    bb.on("field", (name, value) => {
+      fields[name] = value;
+    });
+    bb.on("file", (name, stream, info) => {
+      const chunks = [];
+      let size = 0;
+      stream.on("data", (chunk) => {
+        size += chunk.length;
+        chunks.push(chunk);
+      });
+      stream.on("limit", () => { tooLarge = true; });
+      stream.on("end", () => {
+        fileResult = {
+          fieldname: name,
+          buffer: Buffer.concat(chunks),
+          filename: info.filename,
+          mimetype: info.mimeType,
+          size
+        };
+      });
+    });
+    bb.on("filesLimit", () => { tooLarge = true; });
+    bb.on("error", reject);
+    bb.on("close", () => {
+      if (tooLarge) {
+        reject(Object.assign(new Error("File terlalu besar. Maksimal 4 MB."), { code: "TOO_LARGE" }));
+        return;
+      }
+      resolve({ file: fileResult, fields });
+    });
+    req.pipe(bb);
+  });
+}
+
+// Deteksi tipe gambar asli dari magic bytes (bukan percaya ekstensi/mime dari klien)
+function upscaleDetectImage(buf) {
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return { mimetype: "image/jpeg", ext: "jpg" };
+  if (buf.length >= 8 && buf.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return { mimetype: "image/png", ext: "png" };
+  if (buf.length >= 12 && buf.slice(0, 4).toString() === "RIFF" && buf.slice(8, 12).toString() === "WEBP") return { mimetype: "image/webp", ext: "webp" };
+  return null;
+}
+
+async function handleUpscaleImage(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept, x-api-key");
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST, OPTIONS");
+    return res.status(405).json({
+      status: false,
+      message: "Metode tidak diizinkan. Gunakan POST dengan multipart/form-data.",
+      error: 'example: curl -X POST "/api/upscale-image" -F "file=@foto.jpg"'
+    });
+  }
+
+  try {
+    const declaredLength = Number(req.headers["content-length"] || 0);
+    if (declaredLength > UPSCALE_MAX_BYTES + 100_000) {
+      return res.status(413).json({ status: false, message: "File terlalu besar.", error: "Maksimal 4 MB." });
+    }
+
+    if (!/multipart\/form-data/i.test(req.headers["content-type"] || "")) {
       return res.status(400).json({
         status: false,
-        message: "URL gambar tidak valid.",
-        error: 'example: "/api/upscale-image?url=https://example.com/image.jpg"'
+        message: 'Kirim gambar lewat multipart/form-data pada field "file".',
+        error: 'example: curl -X POST "/api/upscale-image" -F "file=@foto.jpg"'
       });
     }
 
-    // Download gambar
-    const imageResponse = await axios.get(imageUrl, {
-      responseType: "arraybuffer",
-      timeout: 30000,
-      maxContentLength: 20 * 1024 * 1024,
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/91.0.4472.124 Safari/537.36"
-      }
-    });
+    const { file } = await upscaleParseMultipart(req, UPSCALE_MAX_BYTES);
+    if (!file || !file.buffer.length) {
+      return res.status(400).json({
+        status: false,
+        message: "Gambar wajib diunggah.",
+        error: 'Pilih file pada field "file". example: curl -X POST "/api/upscale-image" -F "file=@foto.jpg"'
+      });
+    }
 
-    const buffer = Buffer.from(imageResponse.data);
+    const kind = upscaleDetectImage(file.buffer);
+    if (!kind) {
+      return res.status(415).json({
+        status: false,
+        message: "Format file tidak didukung.",
+        error: "Gunakan gambar asli: JPG, PNG, atau WEBP"
+      });
+    }
 
-    // Buat multipart form
+    const baseName =
+      String(file.filename || "image").split(/[\\/]/).pop().replace(/\.[^.]+$/, "").replace(/[^\w\-]+/g, "_").slice(0, 60) || "image";
+
     const upscaleForm = new FormData();
-
-    upscaleForm.append("image", buffer, {
-      filename: "image.jpg",
-      contentType:
-        imageResponse.headers["content-type"] || "image/jpeg"
+    upscaleForm.append("image", file.buffer, {
+      filename: `${baseName}.${kind.ext}`,
+      contentType: kind.mimetype
     });
-
     upscaleForm.append("user_id", "");
     upscaleForm.append("is_public", "true");
     upscaleForm.append("scale", "2");
 
-    // Request ke PicUpscaler
-    const upscaleResponse = await axios.post(
-      "https://picupscaler.com/api/generate/handle",
-      upscaleForm,
-      {
-        headers: {
-          ...upscaleForm.getHeaders(),
-          accept: "application/json",
-          referer:
-            "https://picupscaler.com/blog/free-image-upscaler-no-watermark",
-          origin: "https://picupscaler.com",
-          "user-agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/91.0.4472.124 Safari/537.36"
-        },
-        timeout: 120000,
-        maxContentLength: 50 * 1024 * 1024,
-        maxBodyLength: 50 * 1024 * 1024
-      }
-    );
+    const upscaleResponse = await axios.post(UPSCALE_API_URL, upscaleForm, {
+      headers: {
+        ...upscaleForm.getHeaders(),
+        accept: "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9",
+        referer: "https://picupscaler.com/",
+        origin: "https://picupscaler.com",
+        "user-agent": UPSCALE_UA,
+        "sec-ch-ua": '"Chromium";v="131", "Not_A Brand";v="24"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin"
+      },
+      timeout: 55000,
+      maxContentLength: 50 * 1024 * 1024,
+      maxBodyLength: 50 * 1024 * 1024
+    });
 
     return res.status(200).json({
       status: true,
@@ -2115,14 +2189,30 @@ async function handleUpscaleImage(req, res) {
       data: upscaleResponse.data
     });
   } catch (error) {
-    console.error("handleUpscaleImage:", error);
+    if (res.headersSent) return res.destroy();
+    console.error("handleUpscaleImage:", error?.response?.status, error?.message);
 
-    const statusCode =
-      error.response?.status >= 400 && error.response?.status < 600
-        ? error.response.status
-        : 500;
+    if (error.code === "TOO_LARGE") {
+      return res.status(413).json({ status: false, message: "File terlalu besar. Maksimal 4 MB.", error: error.message });
+    }
 
-    return res.status(statusCode).json({
+    const upstream = error.response?.status;
+    if (upstream === 403 || upstream === 429) {
+      return res.status(502).json({
+        status: false,
+        message: "Server PicUpscaler menolak permintaan (anti-bot / batas penggunaan). Coba lagi beberapa saat.",
+        error: `Upstream status ${upstream}`
+      });
+    }
+    if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") {
+      return res.status(504).json({
+        status: false,
+        message: "Waktu permintaan ke server upscale habis, coba lagi.",
+        error: error.message
+      });
+    }
+
+    return res.status(upstream >= 400 && upstream < 600 ? 502 : 500).json({
       status: false,
       message: "Gagal melakukan upscale gambar.",
       error: error.message

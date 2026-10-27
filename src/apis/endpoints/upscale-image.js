@@ -1,20 +1,21 @@
 export default {
   slug: "upscale-image",
   name: "Upscale Image",
-  description: "Meningkatkan resolusi gambar hingga skala 2x menggunakan PicUpscaler.",
+  description:
+    "Unggah gambar dari perangkat kamu (maksimal 4MB) dan tingkatkan resolusinya hingga 2x menggunakan PicUpscaler.",
   category: "Tools",
-  method: "GET",
+  method: "POST",
   endpoint: "/api/upscale-image",
   icon: "ImagePlus",
 
   parameters: [
     {
-      name: "url",
-      type: "string",
+      name: "file",
+      type: "file",
       required: true,
-      description: "URL gambar yang ingin ditingkatkan resolusinya.",
-      example:
-        "https://i.pinimg.com/736x/75/b6/f8/75b6f821e0604668b3fafeee10497e76.jpg"
+      description: "Pilih gambar JPG, PNG, atau WEBP. Ukuran maksimal 4 MB.",
+      maxSizeLabel: "Maksimal 4 MB",
+      example: ""
     }
   ],
 
@@ -45,5 +46,5 @@ export default {
   ],
 
   exampleRequest:
-    "https://samapi.example.com/api/upscale-image?url=https://example.com/image.jpg"
+    'curl -X POST "https://samapi.example.com/api/upscale-image" -F "file=@foto.jpg"'
 };

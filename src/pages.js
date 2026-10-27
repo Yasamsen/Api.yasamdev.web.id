@@ -287,7 +287,7 @@ function tryPanel(api) {
       return `<label class="block"><span class="mb-2 block text-xs font-bold">${label}</span><select data-param="${esc(p.name)}" class="input font-mono !text-xs">${options}</select></label>`;
     }
     if (p.type === 'file') {
-      const uploadLabel = api.slug === 'tourl' || api.slug === 'freeconvert-video-to-mp3' || api.slug === 'bgremover' || api.slug === 'ocr' || api.slug === 'imgbb' || api.slug === 'to-anime';
+      const uploadLabel = api.slug === 'tourl' || api.slug === 'freeconvert-video-to-mp3' || api.slug === 'bgremover' || api.slug === 'ocr' || api.slug === 'imgbb' || api.slug === 'to-anime' || api.slug === 'upscale-image';
       if (uploadLabel) return `<div class="sm:col-span-2">
         <span class="mb-2 block text-xs font-bold">Pilih file ${p.required ? '<span class="text-red-400">*</span>' : ''}</span>
         <label class="group relative flex cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border border-dashed border-[rgb(var(--gold)/.42)] bg-[rgb(var(--gold)/.04)] px-5 py-8 text-center transition-all hover:border-[rgb(var(--gold)/.8)] hover:bg-[rgb(var(--gold)/.08)] sm:py-10">
