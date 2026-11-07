@@ -255,7 +255,7 @@ function detailHtml(c, rel) {
   const stat = (ic, v, l) => `<span class="inline-flex items-center gap-1.5">${icon(ic, 'h-4 w-4 text-gold')}<b class="text-fg" ${l === 'dilihat' ? 'id="sn-v"' : l === 'disalin' ? 'id="sn-c"' : ''}>${v}</b> ${l}</span>`;
   const relHtml = rel.length ? `<section class="mt-14"><h2 class="mb-4 text-2xl">Snippet lain di ${esc(c.category)}</h2><div class="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2 lg:grid-cols-3">${rel.map((r) => `<button data-nav="/snippet/${encodeURIComponent(keyOf(r))}" class="card flex h-full w-full flex-col gap-2 p-4 text-left"><span class="flex flex-wrap gap-1.5">${badge(r.language)}</span><span class="text-sm font-extrabold">${esc(r.title)}</span><span class="line-clamp-2 text-xs leading-5 text-muted">${esc(r.description)}</span></button>`).join('')}</div></section>` : '';
 
-  return `<div class="page-enter">
+  return `<div class="page-enter min-w-0">
     <div class="mb-6">
       <div class="mb-4 flex flex-wrap items-center gap-2">${badge(c.category)}${badge(c.language)}</div>
       <h1 class="text-balance text-[clamp(1.9rem,6vw,3.25rem)] leading-[1.05]">${esc(c.title)}</h1>
@@ -263,7 +263,7 @@ function detailHtml(c, rel) {
       <div class="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs font-bold text-muted">${stat('Eye', fmtNum(c.views), 'dilihat')}${stat('Copy', fmtNum(c.copies), 'disalin')}<span>${lines.length} baris</span>${c.updatedAt ? `<span>Diperbarui ${fmtDate(c.updatedAt)}</span>` : ''}</div>
     </div>
 
-    <div class="mb-6 grid gap-2.5">${cmdRow(curlCmd(c), 'Salin perintah curl')}${c.install ? cmdRow(c.install, 'Salin perintah install') : ''}</div>
+    <div class="mb-6 grid grid-cols-[minmax(0,1fr)] gap-2.5">${cmdRow(curlCmd(c), 'Salin perintah curl')}${c.install ? cmdRow(c.install, 'Salin perintah install') : ''}</div>
 
     <div class="code">
       <div class="code-head flex-wrap gap-2">
