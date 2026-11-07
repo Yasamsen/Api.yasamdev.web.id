@@ -2,6 +2,7 @@ import './index.css';
 import { apiDefinitions } from './apis/registry.js';
 import { toggleTheme, getTheme } from './theme.js';
 import { esc, icon, refreshIcons } from './utils.js';
+import { resetSnippetCache } from './snippet.js';
 
 const $app = document.getElementById('app');
 const $toast = document.getElementById('toast');
@@ -28,7 +29,7 @@ async function call(path, body) {
   if (!r.ok) throw new Error(d.message || 'Permintaan gagal (' + r.status + ')');
   return d;
 }
-function logout() { token = ''; sessionStorage.removeItem('admin_token'); S = null; render(); }
+function logout() { token = ''; sessionStorage.removeItem('admin_token'); S = null; SN = null; editing = null; render(); }
 
 const UNITS = { second: 'detik', minute: 'menit', hour: 'jam', day: 'hari' };
 const tile = (c, fg = '#14102b') => `style="--tile:rgb(var(--${c}));--tile-fg:${fg}"`;
@@ -95,11 +96,11 @@ function render() {
     <div class="flex items-center gap-2">${themeBtn()}<a class="chip !inline-flex items-center" href="/">${icon('ExternalLink', 'h-3.5 w-3.5')}Lihat situs</a><button class="chip" id="out">${icon('LogOut', 'h-3.5 w-3.5')}Keluar</button></div></header>
   ${S.persistent ? '' : `<div class="card page-enter mb-5 flex items-start gap-3 p-4" style="background:rgb(var(--yellow));color:rgb(var(--on-light))">${icon('TriangleAlert', 'mt-0.5 h-5 w-5 shrink-0')}<p class="text-sm font-bold">URLDATABASE belum diatur, jadi pengaturan hanya tersimpan di memori dan bisa hilang saat server restart. Isi URLDATABASE (MongoDB) di Vercel agar permanen.</p></div>`}
   <section class="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">${statCard('Total endpoint', LIST.length, 'Layers', 'gold2')}${statCard('Sedang error', nErr, 'ShieldAlert', 'red')}${statCard('Dikunci', nLck, 'Lock', 'yellow')}${statCard('API key', S.keys.length, 'KeyRound', 'green')}</section>
-  <nav class="mb-4 flex gap-2" aria-label="Bagian admin"><button class="chip ${tab === 'endpoint' ? 'is-active' : ''}" data-tab="endpoint">Endpoint</button><button class="chip ${tab === 'keys' ? 'is-active' : ''}" data-tab="keys">API key</button></nav>
+  <nav class="mb-4 flex gap-2" aria-label="Bagian admin"><button class="chip ${tab === 'endpoint' ? 'is-active' : ''}" data-tab="endpoint">Endpoint</button><button class="chip ${tab === 'keys' ? 'is-active' : ''}" data-tab="keys">API key</button><button class="chip ${tab === 'snippet' ? 'is-active' : ''}" data-tab="snippet">Snippet</button></nav>
   ${tab === 'endpoint' ? `
   <div class="mb-4 grid gap-3 sm:grid-cols-[1fr_14rem]"><input class="input" type="search" id="q" placeholder="Cari endpoint" value="${esc(q)}" aria-label="Cari endpoint"><select class="input" id="cat" aria-label="Kategori"><option value="">Semua kategori</option>${cats.map((c) => `<option ${c === cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
   <section class="card" id="list">${shown.map(rowHtml).join('') || '<p class="p-6 text-sm text-muted">Tidak ada endpoint yang cocok. Ubah kata kunci atau kategori.</p>'}</section>
-  <p class="mt-3 text-xs leading-5 text-muted">Perubahan tersimpan otomatis. Endpoint berstatus Error menjawab pengguna dengan HTTP 503 dan pesan di atas. Endpoint yang dikunci butuh API key. Batas permintaan dihitung per alamat IP, atau per API key kalau pengguna memakai key; lewat batas, pengguna mendapat HTTP 429. Admin yang login tetap bisa mengakses semuanya.</p>` : `
+  <p class="mt-3 text-xs leading-5 text-muted">Perubahan tersimpan otomatis. Endpoint berstatus Error menjawab pengguna dengan HTTP 503 dan pesan di atas. Endpoint yang dikunci butuh API key. Batas permintaan dihitung per alamat IP, atau per API key kalau pengguna memakai key; lewat batas, pengguna mendapat HTTP 429. Admin yang login tetap bisa mengakses semuanya.</p>` : tab === 'snippet' ? snippetTab() : `
   <section class="card mb-5 p-5"><h2 class="font-display text-lg">Buat API key</h2>
     <div class="mt-3 grid gap-3 sm:grid-cols-[1fr_16rem_auto]"><input class="input" type="text" id="kn" maxlength="60" placeholder="Nama key, mis. Aplikasi Budi" aria-label="Nama key"><select class="input" id="ks" aria-label="Cakupan"><option value="*">Semua endpoint terkunci</option><option value="pick">Pilih endpoint tertentu</option></select><button class="btn btn-gold" id="kc">${icon('Plus', 'h-4 w-4')}Buat key</button></div>
     <div id="pick" hidden class="mt-3 max-h-48 overflow-auto rounded-2xl border-[2.5px] border-ink p-3">${lockedList.length ? lockedList.map((e) => `<label class="flex items-center gap-2 py-1 text-sm font-bold"><input type="checkbox" class="h-4 w-4 accent-[rgb(var(--gold2))]" value="${esc(e.key)}">${esc(e.name)}</label>`).join('') : '<p class="text-sm text-muted">Belum ada endpoint yang dikunci. Kunci dulu di tab Endpoint.</p>'}</div>
@@ -109,6 +110,7 @@ function render() {
   <p class="mt-3 text-xs text-muted">Pengguna memakai key lewat <code class="font-mono">?apikey=KEY</code> atau header <code class="font-mono">x-api-key</code>.</p>`}
   </main>`;
   bind(); bindTheme(); refreshIcons();
+  if (tab === 'snippet' && SN === null && !snBusy) loadSnippets();
 }
 
 function bindTheme() { document.getElementById('th').onclick = () => { toggleTheme(); S && token ? render() : renderLogin(); }; }
@@ -141,6 +143,8 @@ function bind() {
       row.querySelector('[data-f=limit-per]').onchange = () => save(false);
       row.querySelector('[data-f=locked]').onclick = () => save(true);
     });
+  } else if (tab === 'snippet') {
+    bindSnippet();
   } else {
     document.getElementById('ks').onchange = (e) => { document.getElementById('pick').hidden = e.target.value !== 'pick'; };
     document.getElementById('kc').onclick = () => {
@@ -155,6 +159,112 @@ function bind() {
     document.querySelectorAll('[data-kt]').forEach((b) => (b.onclick = () => act('key/toggle', { id: b.dataset.kt }, 'Diperbarui')));
     document.querySelectorAll('[data-kd]').forEach((b) => (b.onclick = () => { if (confirm('Hapus key ini? Aplikasi yang memakainya akan ditolak.')) act('key/delete', { id: b.dataset.kd }, 'Key dihapus'); }));
   }
+}
+
+
+/* =========================================================
+   TAB SNIPPET — tambah / ubah / hapus (token admin yang sama)
+   ========================================================= */
+let SN = null; let snBusy = false; let snErr = ''; let snQ = ''; let editing = null; let snSaving = false;
+const SN_CATS = ['Downloader', 'Scraper', 'Bot WhatsApp', 'AI & ML', 'Canvas', 'REST API', 'Utility', 'Tools'];
+const SN_LANGS = ['javascript', 'typescript', 'python', 'bash', 'html', 'css', 'json', 'php'];
+
+async function snCall(path, { method = 'GET', body } = {}) {
+  const r = await fetch('/api/snippet/' + path, {
+    method,
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401 && token) logout();
+  if (!r.ok || d.status === false) throw new Error(d.message || 'Permintaan gagal (' + r.status + ')');
+  return d;
+}
+
+async function loadSnippets() {
+  snBusy = true; snErr = '';
+  try { SN = (await snCall('list')).data || []; } catch (e) { SN = []; snErr = e.message; }
+  snBusy = false;
+  if (tab === 'snippet' && S) render();
+}
+
+const snDate = (v) => (v ? new Date(v).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+
+function snippetTab() {
+  const list = (SN || []).filter((c) => !snQ || `${c.title} ${c.category} ${c.language}`.toLowerCase().includes(snQ.toLowerCase()));
+  const rows = list.map((c) => `<div class="grid items-center gap-3 border-b-2 hair px-4 py-3 last:border-0 sm:grid-cols-[minmax(0,1fr)_auto]" data-sid="${esc(c.id)}">
+      <div class="flex min-w-0 items-center gap-3"><span class="iconbox h-9 w-9 shrink-0" ${tile('lilac')}>${icon('Code', 'h-4 w-4')}</span>
+        <div class="min-w-0"><b class="block truncate text-sm">${esc(c.title)}</b>
+        <span class="block truncate text-[11px] text-dim">${esc(c.category || 'Lainnya')} · ${esc(c.language || 'text')} · ${c.views || 0} dilihat · ${c.copies || 0} disalin${c.updatedAt ? ' · ' + snDate(c.updatedAt) : ''}</span></div></div>
+      <div class="flex gap-2"><a class="chip !inline-flex items-center" href="/#/snippet/${encodeURIComponent(c.slug || c.id)}" target="_blank" rel="noopener" aria-label="Buka ${esc(c.title)}">${icon('ExternalLink', 'h-3.5 w-3.5')}</a><button class="chip" data-sedit="${esc(c.id)}">${icon('Pencil', 'h-3.5 w-3.5')}Edit</button><button class="chip" style="background:rgb(var(--red));color:#fff" data-sdel="${esc(c.id)}" aria-label="Hapus ${esc(c.title)}">${icon('Trash2', 'h-3.5 w-3.5')}</button></div></div>`).join('');
+  const empty = SN === null || snBusy ? '<p class="p-6 text-sm text-muted">Memuat snippet…</p>'
+    : snErr ? `<p class="p-6 text-sm font-bold text-red">${esc(snErr)}</p>`
+    : `<p class="p-6 text-sm text-muted">${SN.length ? 'Tidak ada snippet yang cocok.' : 'Belum ada snippet. Klik “Snippet baru” untuk menambahkan yang pertama.'}</p>`;
+  return `<div class="mb-4 grid gap-3 sm:grid-cols-[1fr_auto]"><input class="input" type="search" id="sq" placeholder="Cari judul, kategori, bahasa" value="${esc(snQ)}" aria-label="Cari snippet"><button class="btn btn-gold" id="snew">${icon('Plus', 'h-4 w-4')}Snippet baru</button></div>
+  <section class="card" id="slist">${rows || empty}</section>
+  <p class="mt-3 text-xs leading-5 text-muted">Snippet tampil di halaman publik <a class="font-bold text-gold underline" href="/#/snippet" target="_blank" rel="noopener">/#/snippet</a>. Ambil kode mentah lewat <code class="font-mono">curl -sL ${esc(location.origin)}/raw/&lt;slug&gt;</code>.</p>
+  ${editing ? snippetForm() : ''}`;
+}
+
+function snippetForm() {
+  const e = editing; const isNew = !e.id;
+  const f = (id, label, val, attrs = '', list = '') => `<div><label class="block text-xs font-extrabold" for="${id}">${label}</label><input class="input mt-1.5" id="${id}" value="${esc(val)}" ${attrs} ${list ? `list="${list}"` : ''}></div>`;
+  return `<div class="fixed inset-0 z-[70] flex items-end justify-center sm:items-center sm:p-6" role="dialog" aria-modal="true" aria-labelledby="sft">
+    <div class="absolute inset-0 bg-ink/60" data-sclose></div>
+    <form id="sform" class="card page-enter relative flex max-h-[94vh] w-full max-w-2xl flex-col !rounded-b-none sm:!rounded-3xl">
+      <div class="flex items-center justify-between gap-3 border-b-2 hair px-5 py-4"><h2 id="sft" class="font-display text-xl">${isNew ? 'Snippet baru' : 'Edit snippet'}</h2><button type="button" class="iconbtn" data-sclose aria-label="Tutup">${icon('X', 'h-4 w-4')}</button></div>
+      <div class="grid flex-1 gap-3.5 overflow-y-auto px-5 py-4">
+        ${f('s-title', 'Judul', e.title, 'maxlength="120" required placeholder="Contoh: YouTube Music Downloader"')}
+        <div class="grid gap-3.5 sm:grid-cols-2">${f('s-category', 'Kategori', e.category, 'maxlength="40" placeholder="Scraper"', 'dc')}${f('s-language', 'Bahasa', e.language, 'maxlength="40" placeholder="javascript"', 'dl')}</div>
+        <datalist id="dc">${SN_CATS.map((c) => `<option value="${c}">`).join('')}</datalist><datalist id="dl">${SN_LANGS.map((c) => `<option value="${c}">`).join('')}</datalist>
+        ${f('s-install', 'Perintah install (opsional)', e.install, 'maxlength="200" placeholder="npm i axios cheerio"')}
+        ${f('s-description', 'Deskripsi (opsional)', e.description, 'maxlength="500" placeholder="Satu atau dua kalimat tentang fungsinya"')}
+        <div><label class="block text-xs font-extrabold" for="s-code">Isi kode</label><textarea id="s-code" required spellcheck="false" placeholder="Tempel source code di sini…" class="input mt-1.5 !h-56 !rounded-2xl !py-3 font-mono !text-xs" style="resize:vertical;line-height:1.6;white-space:pre;overflow:auto">${esc(e.code)}</textarea><span class="mt-1 block text-[11px] text-dim" id="s-cnt"></span></div>
+      </div>
+      <div class="flex flex-col-reverse gap-2.5 border-t-2 hair px-5 py-4 sm:flex-row sm:justify-end"><button type="button" class="btn btn-ghost btn-sm" data-sclose>Batal</button><button class="btn btn-gold btn-sm" id="s-save" ${snSaving ? 'disabled' : ''}>${snSaving ? 'Menyimpan…' : isNew ? 'Simpan' : 'Simpan perubahan'}</button></div>
+    </form></div>`;
+}
+
+function bindSnippet() {
+  const $ = (id) => document.getElementById(id);
+  const qi = $('sq');
+  if (qi) qi.oninput = () => { snQ = qi.value; const pos = qi.selectionStart; render(); const n = $('sq'); n.focus(); n.setSelectionRange(pos, pos); };
+  const blank = { id: '', title: '', category: '', language: '', install: '', description: '', code: '' };
+  $('snew')?.addEventListener('click', () => { editing = { ...blank }; render(); $('s-title')?.focus(); });
+
+  document.querySelectorAll('[data-sedit]').forEach((b) => (b.onclick = async () => {
+    b.disabled = true;
+    try {
+      const { data } = await snCall('item?id=' + encodeURIComponent(b.dataset.sedit));
+      editing = { id: data.id, title: data.title || '', category: data.category || '', language: data.language || '', install: data.install || '', description: data.description || '', code: data.code || '' };
+      render();
+    } catch (err) { toast(err.message); b.disabled = false; }
+  }));
+
+  document.querySelectorAll('[data-sdel]').forEach((b) => (b.onclick = async () => {
+    const c = SN.find((x) => x.id === b.dataset.sdel);
+    if (!confirm(`Hapus “${c?.title || 'snippet'}”? Tindakan ini tidak bisa dibatalkan.`)) return;
+    try { await snCall('delete', { method: 'POST', body: { id: b.dataset.sdel } }); SN = SN.filter((x) => x.id !== b.dataset.sdel); resetSnippetCache(); render(); toast('Snippet dihapus'); }
+    catch (err) { toast(err.message); }
+  }));
+
+  if (!editing) return;
+  const map = { 's-title': 'title', 's-category': 'category', 's-language': 'language', 's-install': 'install', 's-description': 'description', 's-code': 'code' };
+  const count = () => { const v = $('s-code').value; $('s-cnt').textContent = `${v ? v.split('\n').length : 0} baris · ${v.length.toLocaleString('id-ID')} karakter`; };
+  for (const [id, key] of Object.entries(map)) $(id).oninput = () => { editing[key] = $(id).value; if (id === 's-code') count(); };
+  count();
+  const close = () => { if (snSaving) return; editing = null; render(); };
+  document.querySelectorAll('[data-sclose]').forEach((el) => (el.onclick = close));
+  $('sform').onkeydown = (ev) => { if (ev.key === 'Escape') close(); if ((ev.ctrlKey || ev.metaKey) && ev.key === 's') { ev.preventDefault(); $('sform').requestSubmit(); } };
+  $('sform').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const e = editing; snSaving = true; $('s-save').disabled = true; $('s-save').textContent = 'Menyimpan…';
+    try {
+      await snCall('save', { method: 'POST', body: { id: e.id || undefined, title: e.title, category: e.category, language: e.language, install: e.install, description: e.description, code: e.code } });
+      toast(e.id ? 'Perubahan disimpan' : 'Snippet ditambahkan');
+      editing = null; snSaving = false; resetSnippetCache(); SN = null; await loadSnippets();
+    } catch (err) { snSaving = false; toast(err.message); render(); }
+  };
 }
 
 if (token) load(); else renderLogin();

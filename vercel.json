@@ -3,6 +3,7 @@
     "api/index.js": { "maxDuration": 60 }
   },
   "rewrites": [
+    { "source": "/raw/:id", "destination": "/api/index" },
     { "source": "/api/:path*", "destination": "/api/index" },
     { "source": "/admin", "destination": "/admin.html" },
     { "source": "/admin/", "destination": "/admin.html" }

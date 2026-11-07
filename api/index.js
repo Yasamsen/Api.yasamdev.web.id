@@ -14904,11 +14904,134 @@ async function handleToAnime(req, res) {
   }
 }
 
+
+// ===============================
+// SNIPPET (CodeVault) — perpustakaan kode di /#/snippet
+// Data di koleksi MongoDB "snippets" (URLDATABASE). Admin memakai token yang sama dengan /admin.
+//   GET  /api/snippet/list            -> daftar publik (tanpa isi kode)
+//   GET  /api/snippet/item?id=        -> detail publik (id atau slug)
+//   POST /api/snippet/event?id=&event=view|copy -> hitung statistik
+//   GET  /api/snippet/raw?id=         -> kode mentah (text/plain), dipakai lewat /raw/<slug>
+//   POST /api/snippet/save            -> tambah / ubah (admin)
+//   POST /api/snippet/delete          -> hapus (admin)
+// ===============================
+let snippetIndexed = false;
+async function snippetCol() {
+  const m = await getStatsMongo();
+  if (!m) return null;
+  const col = m.db.collection("snippets");
+  if (!snippetIndexed) {
+    snippetIndexed = true;
+    col.createIndex({ slug: 1 }, { unique: true, sparse: true }).catch(() => { snippetIndexed = false; });
+  }
+  return col;
+}
+const snClean = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+const snSlug = (v) => String(v).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 55) || "code";
+async function snFilter(id) {
+  const { ObjectId } = await import("mongodb");
+  const or = [{ slug: id }];
+  if (ObjectId.isValid(id) && String(new ObjectId(id)) === id) or.unshift({ _id: new ObjectId(id) });
+  return { $or: or };
+}
+const snPublic = ({ _id, ...d }) => ({ ...d, id: String(_id) });
+function snFields(b) {
+  return {
+    title: snClean(b.title, 120),
+    code: typeof b.code === "string" ? b.code.slice(0, 500000) : "",
+    language: snClean(b.language, 40).toLowerCase() || "text",
+    category: snClean(b.category, 40) || "Lainnya",
+    install: snClean(b.install, 200),
+    description: snClean(b.description, 500)
+  };
+}
+
+async function handleSnippet(req, res, routeKey, idOverride = "") {
+  const sub = routeKey.replace(/^snippet\/?/, "");
+  const isRaw = sub === "raw";
+  const fail = (code, message) => isRaw
+    ? (res.setHeader("Content-Type", "text/plain; charset=utf-8"), res.status(code).send(message + "\n"))
+    : res.status(code).json({ status: false, message });
+  try {
+    res.setHeader("Cache-Control", "no-store");
+    const col = await snippetCol();
+    if (!col) return fail(503, "URLDATABASE (MongoDB) belum diatur di Vercel, jadi Snippet belum bisa dipakai.");
+    const q = new URL(req.url, "http://x").searchParams;
+    const id = String(idOverride || q.get("id") || "").trim();
+
+    if (sub === "list" && req.method === "GET") {
+      const docs = await col.find({}, { projection: { code: 0 } }).sort({ updatedAt: -1 }).limit(300).toArray();
+      return res.status(200).json({ status: true, data: docs.map(snPublic) });
+    }
+
+    if (sub === "item" && req.method === "GET") {
+      if (!id) return fail(400, "ID snippet tidak diberikan.");
+      const d = await col.findOne(await snFilter(id));
+      if (!d) return fail(404, "Snippet tidak ditemukan.");
+      return res.status(200).json({ status: true, data: snPublic(d) });
+    }
+
+    if (sub === "event" && req.method === "POST") {
+      const ev = q.get("event");
+      if (!id || (ev !== "view" && ev !== "copy")) return fail(400, "Permintaan tidak valid.");
+      await col.updateOne(await snFilter(id), { $inc: { [ev === "view" ? "views" : "copies"]: 1 } });
+      return res.status(200).json({ status: true });
+    }
+
+    if (isRaw && req.method === "GET") {
+      const d = id && await col.findOne(await snFilter(id), { projection: { code: 1 } });
+      if (!d) return fail(404, "Snippet tidak ditemukan.");
+      if (/curl|wget|httpie/i.test(req.headers["user-agent"] || "")) col.updateOne({ _id: d._id }, { $inc: { copies: 1 } }).catch(() => {});
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      return res.status(200).send(d.code || "");
+    }
+
+    // ---- khusus admin ----
+    if (sub === "save" || sub === "delete") {
+      if (req.method !== "POST") return fail(405, "Gunakan metode POST.");
+      if (!adminTokenOk(adminBearer(req))) return fail(401, "Sesi admin habis. Login ulang.");
+      const b = await adminBody(req);
+
+      if (sub === "delete") {
+        const target = String(b.id || "").trim();
+        if (!target) return fail(400, "ID snippet tidak diberikan.");
+        const r = await col.deleteOne(await snFilter(target));
+        return r.deletedCount ? res.status(200).json({ status: true }) : fail(404, "Snippet tidak ditemukan.");
+      }
+
+      const f = snFields(b);
+      if (!f.title || !f.code) return fail(400, "Judul dan kode wajib diisi.");
+      const now = new Date();
+      const target = String(b.id || "").trim();
+      if (target) {
+        const r = await col.updateOne(await snFilter(target), { $set: { ...f, updatedAt: now } });
+        return r.matchedCount ? res.status(200).json({ status: true }) : fail(404, "Snippet tidak ditemukan.");
+      }
+      const doc = { ...f, slug: snSlug(f.title) + "-" + crypto.randomBytes(3).toString("hex"), views: 0, copies: 0, createdAt: now, updatedAt: now };
+      const r = await col.insertOne(doc);
+      return res.status(201).json({ status: true, id: String(r.insertedId), slug: doc.slug });
+    }
+
+    res.setHeader("Allow", "GET, POST");
+    return fail(404, "Endpoint snippet tidak ditemukan.");
+  } catch (e) {
+    console.error("snippet:", e?.message || e);
+    return fail(500, "Terjadi kesalahan server.");
+  }
+}
+
 export default async function handler(req, res) {
   const routeKey = getRouteKey(req);
 
   if (routeKey === "admin" || routeKey.startsWith("admin/")) return handleAdmin(req, res, routeKey);
   if (routeKey === "endpoint-status") return handleEndpointStatus(req, res);
+  if (routeKey === "snippet" || routeKey.startsWith("snippet/")) return handleSnippet(req, res, routeKey);
+  if (routeKey.startsWith("raw/")) { // /raw/<slug> (rewrite di vercel.json) -> curl -sL https://domain/raw/<slug>
+    let rawId = routeKey.slice(4).split("/")[0];
+    try { rawId = decodeURIComponent(rawId); } catch { /* pakai apa adanya */ }
+    return handleSnippet(req, res, "snippet/raw", rawId);
+  }
   try { if (await adminGate(req, res, routeKey)) return; } catch (e) { console.error("adminGate:", e?.message); }
 
   // hitung statistik untuk halaman /status (endpoint /api/stats sendiri tidak dihitung)

@@ -17,6 +17,7 @@ document.addEventListener('click', (e) => {
 
 export function renderNavbar(path) {
   const isDocs = path === '/docs' || path.startsWith('/docs/');
+  const isSnippet = path === '/snippet' || path.startsWith('/snippet/');
   const animate = firstNav; firstNav = false;
   const themeIcon = getTheme() === 'dark' ? 'Sun' : 'Moon';
 
@@ -41,6 +42,7 @@ export function renderNavbar(path) {
             </div>
           </div>
           <button data-nav="/docs" class="navlink ${isDocs ? 'is-active' : ''}">Documentation</button>
+          <button data-nav="/snippet" class="navlink inline-flex items-center gap-1.5 ${isSnippet ? 'is-active' : ''}">${icon('Code', 'h-3.5 w-3.5')}Snippet</button>
           <button data-nav="/status" class="navlink inline-flex items-center gap-1.5 ${path === '/status' ? 'is-active' : ''}"><i class="live-dot !h-[7px] !w-[7px] !border-[1.5px]"></i>Status</button>
           <button data-nav="/contact" class="navlink ${path === '/contact' ? 'is-active' : ''}">Contact</button>
         </nav>
@@ -56,19 +58,19 @@ export function renderNavbar(path) {
 
     <div id="mobile-menu" class="md:hidden" aria-hidden="true">
       <div class="mx-auto flex max-w-md flex-col gap-2.5">
-        ${[['/', 'Home', 'House', 'rgb(var(--gold2))', '#fff', '', ''], ['/docs', 'Documentation', 'BookOpen', 'rgb(var(--yellow))', '#14102b', '', ''], ['/status', 'Status Server', 'Activity', '#5bc0ff', '#14102b', 'live', 'CPU, RAM & request secara live'], ['/contact', 'Contact', 'MessageCircle', '#ff7eb6', '#14102b', '', '']]
+        ${[['/', 'Home', 'House', 'rgb(var(--gold2))', '#fff', '', ''], ['/docs', 'Documentation', 'BookOpen', 'rgb(var(--yellow))', '#14102b', '', ''], ['/snippet', 'Snippet', 'Code', 'rgb(var(--green))', '#14102b', '', 'Script siap pakai, tinggal salin'], ['/status', 'Status Server', 'Activity', '#5bc0ff', '#14102b', 'live', 'CPU, RAM & request secara live'], ['/contact', 'Contact', 'MessageCircle', '#ff7eb6', '#14102b', '', '']]
           .map(([to, label, ic, tile, fg, badge, caption], i) => `<button data-nav="${to}" style="--i:${i}" class="m-item mrow ${badge ? 'mrow-live' : ''}"><span class="iconbox h-10 w-10 shrink-0" style="--tile:${tile};--tile-fg:${fg}">${icon(ic, 'h-5 w-5')}</span><span class="min-w-0 flex-1 text-left"><span class="block text-[15px] font-extrabold leading-5">${label}</span>${caption ? `<span class="mt-0.5 block text-[11px] font-semibold leading-4 text-muted">${caption}</span>` : ''}</span>${badge ? '<span class="livepill"><i class="live-dot"></i>LIVE</span>' : ''}${icon('ChevronRight', 'h-4 w-4 shrink-0 text-dim')}</button>`).join('')}
 
-        <p style="--i:4" class="m-item mt-5 px-1 text-[11px] font-extrabold uppercase tracking-wider text-dim">Pilih kategori</p>
+        <p style="--i:5" class="m-item mt-5 px-1 text-[11px] font-extrabold uppercase tracking-wider text-dim">Pilih kategori</p>
         <div class="grid grid-cols-2 gap-2.5">
-          ${getCategories().map((c, i) => `<button data-nav="/docs" data-docs-cat="${c.id}" style="--i:${5 + Math.min(i, 8)}" class="m-item mcat">${catTile(c, 'h-8 w-8 !rounded-[10px]', 'h-4 w-4')}<span class="min-w-0 flex-1 text-left text-[12px] font-extrabold leading-4">${esc(c.label)}</span><span class="text-[11px] font-bold text-dim">${c.count}</span></button>`).join('')}
+          ${getCategories().map((c, i) => `<button data-nav="/docs" data-docs-cat="${c.id}" style="--i:${6 + Math.min(i, 8)}" class="m-item mcat">${catTile(c, 'h-8 w-8 !rounded-[10px]', 'h-4 w-4')}<span class="min-w-0 flex-1 text-left text-[12px] font-extrabold leading-4">${esc(c.label)}</span><span class="text-[11px] font-bold text-dim">${c.count}</span></button>`).join('')}
         </div>
 
-        <div style="--i:14" class="m-item mt-5 flex items-center justify-between gap-3 rounded-2xl border-2 border-ink bg-surface px-4 py-3">
+        <div style="--i:15" class="m-item mt-5 flex items-center justify-between gap-3 rounded-2xl border-2 border-ink bg-surface px-4 py-3">
           <div class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-ok"></span><span class="text-xs font-bold text-muted">API online</span></div>
           <button id="mobile-theme-btn" class="inline-flex items-center gap-2 rounded-full border-2 border-ink bg-yellow px-3.5 py-1.5 text-xs font-extrabold text-[rgb(20_16_43)]">${icon(themeIcon, 'h-3.5 w-3.5')} ${getTheme() === 'dark' ? 'Mode terang' : 'Mode gelap'}</button>
         </div>
-        <button data-nav="/docs" data-docs-cat="" style="--i:15" class="m-item btn btn-gold mt-1 w-full">Get started</button>
+        <button data-nav="/docs" data-docs-cat="" style="--i:16" class="m-item btn btn-gold mt-1 w-full">Get started</button>
       </div>
     </div>
   </header>`;
@@ -114,7 +116,7 @@ export function renderFooter() {
           <div class="mt-5 flex items-center gap-1">${creatorLinks().map((l) => `<a href="${esc(l.href)}" target="_blank" rel="noopener noreferrer" class="iconbtn" aria-label="${esc(l.label)}" title="${esc(l.label)}">${brandIcon(l.key, 'h-4 w-4')}</a>`).join('')}</div>
         </div>
         <div class="grid grid-cols-2 gap-x-14 gap-y-10 sm:grid-cols-3">
-          ${col('Product', [['Documentation', '/docs'], ['Changelog'], ['Status', '/status']])}
+          ${col('Product', [['Documentation', '/docs'], ['Snippet', '/snippet'], ['Changelog'], ['Status', '/status']])}
           ${col('Resources', [['Examples'], ['SDKs'], ['Community']])}
           ${col('Company', [['About'], ['Contact', '/contact'], ['Privacy']])}
         </div>

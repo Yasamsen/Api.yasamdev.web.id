@@ -362,3 +362,15 @@ pre, code { overflow-wrap: normal; }
 .livepill { display: inline-flex; flex-shrink: 0; align-items: center; gap: 0.4rem; padding: 0.15rem 0.55rem; border-radius: 999px; border: 2px solid rgb(var(--ink)); background: rgb(var(--green)); color: #14102b; font-size: 0.65rem; font-weight: 800; letter-spacing: 0.04em; }
 .livepill .live-dot { width: 7px; height: 7px; border-width: 1.5px; background: #fff; }
 .mrow-live { background: rgb(var(--lilac)); }
+
+/* ============ SNIPPET ============ */
+.snip-code { counter-reset: ln; }
+.snip-code code { display: block; width: max-content; min-width: 100%; }
+.snip-code .l { position: relative; display: block; min-height: 1.5em; padding-left: 3.2rem; white-space: pre; }
+.snip-code .l::before { content: counter(ln); counter-increment: ln; position: absolute; left: 0; width: 2.4rem; text-align: right; color: #6f679a; user-select: none; }
+.sn-act { display: inline-flex; align-items: center; gap: 0.4rem; height: 32px; padding: 0 0.8rem; border-radius: 10px; font-size: 0.72rem; font-weight: 800; color: #e6e1f5; background: rgb(255 255 255 / 0.08); border: 2px solid rgb(255 255 255 / 0.18); transition: background 0.2s, color 0.2s, border-color 0.2s, transform 0.2s var(--pop); }
+.sn-act:hover { background: rgb(255 255 255 / 0.18); transform: translateY(-1px); }
+.sn-act-pri { color: rgb(20 16 43); background: rgb(var(--yellow)); border-color: rgb(var(--yellow)); }
+.sn-act-pri:hover { background: #ffd86b; }
+.code-url code { display: block; }
+@media (max-width: 479px) { .code-head .sn-act { height: 36px; } }

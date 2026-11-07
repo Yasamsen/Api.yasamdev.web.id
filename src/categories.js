@@ -138,6 +138,7 @@ export const adultNotice = '<div class="mb-4 flex items-start gap-2.5 rounded-2x
 export const uiState = {
   home: { q: '', cat: '' },
   docs: { q: '', cat: '' },
+  snippet: { q: '', cat: '', lang: '', sort: 'new' },
 };
 
 export { esc };

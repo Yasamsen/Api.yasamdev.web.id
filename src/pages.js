@@ -131,6 +131,7 @@ export function renderHome() {
         <div class="seq mt-9 flex flex-col gap-3 sm:flex-row" style="--d:.75s">
           <button data-scroll="cats" class="btn btn-gold">Explore the APIs ${icon('ArrowRight', 'arr h-4 w-4')}</button>
           <button data-nav="/docs" class="btn btn-ghost">Read documentation</button>
+          <button data-nav="/snippet" class="btn btn-ghost">${icon('Code', 'h-4 w-4')} Snippet</button>
         </div>
       </div>
 
@@ -206,7 +207,7 @@ console.log(data.media[<span class="tk-n">0</span>].url);</code></pre>
     <div class="mx-auto max-w-3xl px-4 py-24 text-center sm:px-8 sm:py-32">
       ${reveal(`<h2 class="text-balance text-[2.3rem] leading-[1.05] sm:text-5xl">Your next project starts here.</h2>
       <p class="mx-auto mt-6 max-w-md text-sm leading-7 text-muted">Explore our APIs and bring your ideas to life with just a few lines of code.</p>
-      <button data-nav="/docs" class="btn btn-gold mt-9">Start building ${icon('ArrowRight', 'arr h-4 w-4')}</button>`)}
+      <div class="mt-9 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center"><button data-nav="/docs" class="btn btn-gold">Start building ${icon('ArrowRight', 'arr h-4 w-4')}</button><button data-nav="/snippet" class="btn btn-ghost">${icon('Code', 'h-4 w-4')} Lihat Snippet</button></div>`)}
     </div>
   </section>
 </main>`;
@@ -340,7 +341,7 @@ export function renderDocs(path) {
           const open = selected ? c.id === selected.categoryId : c.id === uiState.docs.cat;
           return `<div class="mb-1.5" data-category="${esc(c.id)}" data-init-collapsed="${open ? '0' : '1'}" ${open ? '' : 'data-collapsed'}><button data-category-toggle class="catrow" aria-label="Buka atau tutup ${esc(c.label)}">${catTile(c, 'h-7 w-7 !rounded-lg', 'h-3.5 w-3.5')}<span class="flex-1 truncate text-left text-[13px] font-extrabold">${esc(c.label)}</span><span class="text-[11px] font-bold text-dim">${c.count}</span>${icon('ChevronDown', 'chev h-3.5 w-3.5 text-dim')}</button><div class="fold"><div data-category-items class="pb-1 pl-2">${c.apis.map((api) => docNavItem(api, selected)).join('')}</div></div></div>`;
         }).join('')}<p id="docs-nav-empty" class="hidden px-3 py-6 text-center text-xs text-dim">Tidak ada endpoint yang cocok.</p></nav>
-        <div class="border-t hair p-4"><div class="flex items-center gap-2.5 px-1 py-1"><span class="h-1.5 w-1.5 rounded-full bg-ok"></span><div><div class="text-xs font-bold">All systems operational</div><div class="text-[10px] text-dim">Last checked just now</div></div></div></div>
+        <div class="border-t hair p-4"><button data-nav="/snippet" class="btn btn-ghost btn-sm mb-3 w-full">${icon('Code', 'h-4 w-4')} Snippet kode</button><div class="flex items-center gap-2.5 px-1 py-1"><span class="h-1.5 w-1.5 rounded-full bg-ok"></span><div><div class="text-xs font-bold">All systems operational</div><div class="text-[10px] text-dim">Last checked just now</div></div></div></div>
       </div>
     </aside>
     <div id="fab" class="fab pointer-events-none fixed inset-x-0 bottom-5 z-30 flex justify-center lg:hidden" style="padding-bottom:env(safe-area-inset-bottom,0px)"><button id="open-sidebar" class="btn btn-gold btn-sm pointer-events-auto shadow-2xl">${icon('Menu', 'h-4 w-4')} API menu</button></div>
@@ -385,6 +386,7 @@ function renderDocsIndex() {
       <p class="seq text-sm font-semibold text-gold" style="--d:.05s">Documentation</p>
       <h1 class="mt-3 text-[clamp(2.2rem,7vw,3.75rem)] leading-[1.05]"><span class="hl"><span style="--d:.12s">API Reference</span></span></h1>
       <p class="seq mt-6 max-w-xl text-[15px] leading-8 text-muted" style="--d:.35s">Semua endpoint dikelompokkan per kategori. Pilih kategori di bawah, atau cari langsung dengan kata kunci.</p>
+      <div class="seq mt-6" style="--d:.5s"><button data-nav="/snippet" class="btn btn-ghost btn-sm w-full sm:w-auto">${icon('Code', 'h-4 w-4')} Buka halaman Snippet ${icon('ArrowRight', 'arr h-3.5 w-3.5')}</button></div>
     </div>
     <div class="mb-8">
       <div class="relative mb-4">${icon('Search', 'pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-dim')}<input id="docs-main-search" value="${esc(uiState.docs.q)}" placeholder="Cari endpoint: instagram, cuaca, hapus background…" aria-label="Cari endpoint" autocomplete="off" class="input !rounded-full !pl-11"></div>
