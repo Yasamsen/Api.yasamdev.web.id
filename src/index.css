@@ -259,9 +259,9 @@ a.card:active { transform: translate(3px, 3px); box-shadow: 1px 1px 0 rgb(var(--
   .sidebar { position: sticky; top: calc(var(--nav-h) + 14px); z-index: 1; width: 290px; flex-shrink: 0; height: calc(100vh - var(--nav-h) - 32px); padding-top: 0; transform: none; border: var(--bw) solid rgb(var(--ink)); border-radius: 22px; background: rgb(var(--surface)); box-shadow: 4px 4px 0 rgb(var(--shadow)); }
   .scrim { display: none; }
 }
-.fold { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 0.4s var(--ease); }
-.fold > div { overflow: hidden; }
-[data-collapsed] .fold { grid-template-rows: 0fr; }
+.fold { display: block; }
+.fold > div { overflow: hidden; max-height: 4000px; transition: max-height 0.4s var(--ease), visibility 0s; }
+[data-collapsed] .fold > div { max-height: 0; padding-bottom: 0; visibility: hidden; transition: max-height 0.3s var(--ease), visibility 0s linear 0.3s; }
 .chev { transition: transform 0.3s var(--ease); }
 [data-collapsed] .chev { transform: rotate(-90deg); }
 .navitem { position: relative; display: flex; width: 100%; align-items: center; gap: 0.65rem; border-radius: 12px; padding: 0.5rem 0.7rem; text-align: left; font-size: 0.8rem; font-weight: 600; color: rgb(var(--muted)); border: 2px solid transparent; transition: color 0.2s, background 0.2s, transform 0.2s var(--pop); }

@@ -336,11 +336,11 @@ export function renderDocs(path) {
           <div class="relative">${icon('Search', 'pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-dim')}<input id="docs-search" placeholder="Cari endpoint…" aria-label="Search endpoints" class="input !h-10 !rounded-full !pl-10 !text-xs"></div>
           <div class="mt-3 flex items-center justify-between px-1 text-[11px] font-bold text-dim"><span>${categories.length} kategori · ${apiDefinitions.length} API</span><button id="toggle-all" class="text-gold hover:underline">${selected || uiState.docs.cat ? 'Tutup semua' : 'Buka semua'}</button></div>
         </div>
-        <nav id="docs-nav" class="flex-1 overflow-auto px-3 pb-4">${categories.map((c) => {
+        <nav id="docs-nav" class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-4">${categories.map((c) => {
           const open = selected ? c.id === selected.categoryId : c.id === uiState.docs.cat;
           return `<div class="mb-1.5" data-category="${esc(c.id)}" data-init-collapsed="${open ? '0' : '1'}" ${open ? '' : 'data-collapsed'}><button data-category-toggle class="catrow" aria-label="Buka atau tutup ${esc(c.label)}">${catTile(c, 'h-7 w-7 !rounded-lg', 'h-3.5 w-3.5')}<span class="flex-1 truncate text-left text-[13px] font-extrabold">${esc(c.label)}</span><span class="text-[11px] font-bold text-dim">${c.count}</span>${icon('ChevronDown', 'chev h-3.5 w-3.5 text-dim')}</button><div class="fold"><div data-category-items class="pb-1 pl-2">${c.apis.map((api) => docNavItem(api, selected)).join('')}</div></div></div>`;
         }).join('')}<p id="docs-nav-empty" class="hidden px-3 py-6 text-center text-xs text-dim">Tidak ada endpoint yang cocok.</p></nav>
-        <div class="border-t hair p-4"><button data-nav="/snippet" class="btn btn-ghost btn-sm mb-3 w-full">${icon('Code', 'h-4 w-4')} Snippet kode</button><div class="flex items-center gap-2.5 px-1 py-1"><span class="h-1.5 w-1.5 rounded-full bg-ok"></span><div><div class="text-xs font-bold">All systems operational</div><div class="text-[10px] text-dim">Last checked just now</div></div></div></div>
+        <div class="border-t hair p-4"><div class="flex items-center gap-2.5 px-1 py-1"><span class="h-1.5 w-1.5 rounded-full bg-ok"></span><div><div class="text-xs font-bold">All systems operational</div><div class="text-[10px] text-dim">Last checked just now</div></div></div></div>
       </div>
     </aside>
     <div id="fab" class="fab pointer-events-none fixed inset-x-0 bottom-5 z-30 flex justify-center lg:hidden" style="padding-bottom:env(safe-area-inset-bottom,0px)"><button id="open-sidebar" class="btn btn-gold btn-sm pointer-events-auto shadow-2xl">${icon('Menu', 'h-4 w-4')} API menu</button></div>
