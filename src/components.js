@@ -57,7 +57,11 @@ export function renderNavbar(path) {
     </div>
 
     <div id="mobile-menu" class="md:hidden" aria-hidden="true">
-      <div class="mx-auto flex max-w-md flex-col gap-2.5">
+      <div class="mbackdrop" data-mclose></div>
+      <div class="msheet" role="dialog" aria-modal="true" aria-label="Menu navigasi">
+      <div class="mgrip" data-mclose aria-hidden="true"></div>
+      <div class="flex items-center justify-between px-[18px] pb-2 pt-3"><span class="font-display text-xl">Menu</span><button data-mclose class="iconbtn" aria-label="Tutup menu">${icon('X', 'h-[17px] w-[17px]')}</button></div>
+      <div class="msheet-body"><div class="flex flex-col gap-2.5">
         ${[['/', 'Home', 'House', 'rgb(var(--gold2))', '#fff', '', ''], ['/docs', 'Documentation', 'BookOpen', 'rgb(var(--yellow))', '#14102b', '', ''], ['/snippet', 'Snippet', 'Code', 'rgb(var(--green))', '#14102b', '', 'Script siap pakai, tinggal salin'], ['/status', 'Status Server', 'Activity', '#5bc0ff', '#14102b', 'live', 'CPU, RAM & request secara live'], ['/contact', 'Contact', 'MessageCircle', '#ff7eb6', '#14102b', '', '']]
           .map(([to, label, ic, tile, fg, badge, caption], i) => `<button data-nav="${to}" style="--i:${i}" class="m-item mrow ${badge ? 'mrow-live' : ''}"><span class="iconbox h-10 w-10 shrink-0" style="--tile:${tile};--tile-fg:${fg}">${icon(ic, 'h-5 w-5')}</span><span class="min-w-0 flex-1 text-left"><span class="block text-[15px] font-extrabold leading-5">${label}</span>${caption ? `<span class="mt-0.5 block text-[11px] font-semibold leading-4 text-muted">${caption}</span>` : ''}</span>${badge ? '<span class="livepill"><i class="live-dot"></i>LIVE</span>' : ''}${icon('ChevronRight', 'h-4 w-4 shrink-0 text-dim')}</button>`).join('')}
 
@@ -71,6 +75,7 @@ export function renderNavbar(path) {
           <button id="mobile-theme-btn" class="inline-flex items-center gap-2 rounded-full border-2 border-ink bg-yellow px-3.5 py-1.5 text-xs font-extrabold text-[rgb(20_16_43)]">${icon(themeIcon, 'h-3.5 w-3.5')} ${getTheme() === 'dark' ? 'Mode terang' : 'Mode gelap'}</button>
         </div>
         <button data-nav="/docs" data-docs-cat="" style="--i:16" class="m-item btn btn-gold mt-1 w-full">Get started</button>
+      </div></div>
       </div>
     </div>
   </header>`;
@@ -102,7 +107,8 @@ export function bindNavbar() {
   };
   mmBtn?.addEventListener('click', () => setMobile(!mm.hasAttribute('data-open')));
   // setelah memilih tujuan, tutup menu (termasuk saat tujuannya halaman yang sedang dibuka)
-  mm?.addEventListener('click', (e) => { if (e.target.closest('[data-nav]')) setMobile(false); });
+  mm?.addEventListener('click', (e) => { if (e.target.closest('[data-nav], [data-mclose]')) setMobile(false); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && mm?.hasAttribute('data-open')) setMobile(false); });
 }
 
 export function renderFooter() {

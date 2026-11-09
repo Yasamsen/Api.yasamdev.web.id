@@ -131,7 +131,6 @@ export function renderHome() {
         <div class="seq mt-9 flex flex-col gap-3 sm:flex-row" style="--d:.75s">
           <button data-scroll="cats" class="btn btn-gold">Explore the APIs ${icon('ArrowRight', 'arr h-4 w-4')}</button>
           <button data-nav="/docs" class="btn btn-ghost">Read documentation</button>
-          <button data-nav="/snippet" class="btn btn-ghost">${icon('Code', 'h-4 w-4')} Snippet</button>
         </div>
       </div>
 

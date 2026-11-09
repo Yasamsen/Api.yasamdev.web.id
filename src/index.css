@@ -134,8 +134,8 @@ button:hover > .logo-mark { transform: rotate(-10deg) scale(1.08); }
 .navlink.is-active { color: rgb(var(--on-light)); background: rgb(var(--yellow)); border-color: rgb(var(--ink)); }
 .menu-panel { opacity: 0; visibility: hidden; transform: translateY(-6px) scale(0.98); transform-origin: top left; transition: all 0.3s var(--pop); background: rgb(var(--surface)); border: var(--bw) solid rgb(var(--ink)); border-radius: 18px; box-shadow: 4px 4px 0 rgb(var(--shadow)); }
 .menu-panel[data-open] { opacity: 1; visibility: visible; transform: none; }
-#mobile-menu { position: fixed; inset: 0; z-index: 45; padding: calc(var(--nav-h) + 16px) 24px 32px; background: rgb(var(--bg) / 0.99); opacity: 0; visibility: hidden; transition: opacity 0.35s var(--ease), visibility 0.35s; overflow-y: auto; }
-#mobile-menu[data-open] { opacity: 1; visibility: visible; }
+#mobile-menu { position: fixed; inset: 0; z-index: 60; visibility: hidden; transition: visibility 0s linear 0.45s; }
+#mobile-menu[data-open] { visibility: visible; transition-delay: 0s; }
 #mobile-menu .m-item { opacity: 0; }
 #mobile-menu[data-open] .m-item { animation: menuItem 0.6s var(--ease) both; animation-delay: calc(var(--i) * 60ms + 80ms); }
 html.menu-open { overflow: hidden; }
@@ -334,7 +334,12 @@ pre, code { overflow-wrap: normal; }
 }
 
 /* ============ MENU MOBILE ============ */
-#mobile-menu { padding: calc(var(--nav-h) + 18px) 18px 36px; background-color: rgb(var(--bg)); background-image: radial-gradient(circle, rgb(var(--dot)) 1.6px, transparent 1.8px); background-size: 22px 22px; }
+.mbackdrop { position: absolute; inset: 0; background: rgb(0 0 0 / 0.55); opacity: 0; transition: opacity 0.35s var(--ease); }
+#mobile-menu[data-open] .mbackdrop { opacity: 1; }
+.msheet { position: absolute; left: 0; right: 0; bottom: 0; margin: 0 auto; display: flex; flex-direction: column; width: 100%; max-width: 34rem; max-height: min(88vh, 44rem); padding-bottom: env(safe-area-inset-bottom, 0px); background-color: rgb(var(--bg)); background-image: radial-gradient(circle, rgb(var(--dot)) 1.6px, transparent 1.8px); background-size: 22px 22px; border: var(--bw) solid rgb(var(--ink)); border-bottom: 0; border-radius: 28px 28px 0 0; box-shadow: 0 -5px 0 rgb(var(--shadow)); transform: translateY(105%); transition: transform 0.45s var(--ease); }
+#mobile-menu[data-open] .msheet { transform: none; }
+.mgrip { flex-shrink: 0; width: 46px; height: 5px; margin: 10px auto 0; border-radius: 99px; background: rgb(var(--ink) / 0.35); cursor: pointer; }
+.msheet-body { overflow-y: auto; overscroll-behavior: contain; padding: 6px 18px 24px; }
 .mrow { display: flex; width: 100%; align-items: center; gap: 0.85rem; padding: 0.7rem 0.85rem; border-radius: 18px; color: rgb(var(--fg)); background: rgb(var(--surface)); border: var(--bw) solid rgb(var(--ink)); box-shadow: 3px 3px 0 rgb(var(--shadow)); transition: transform 0.2s var(--pop), box-shadow 0.2s var(--pop); }
 .mrow:active, .mcat:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 rgb(var(--shadow)); }
 .mcat { display: flex; align-items: center; gap: 0.6rem; min-width: 0; padding: 0.55rem 0.65rem; border-radius: 16px; color: rgb(var(--fg)); background: rgb(var(--surface)); border: 2px solid rgb(var(--ink)); box-shadow: 2px 2px 0 rgb(var(--shadow)); transition: transform 0.2s var(--pop), box-shadow 0.2s var(--pop); }
