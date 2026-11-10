@@ -392,3 +392,25 @@ pre, code { overflow-wrap: normal; }
 .sn-act-pri:hover { background: #ffd86b; }
 .code-url code { display: block; }
 @media (max-width: 479px) { .code-head .sn-act { height: 36px; } }
+
+/* ============ AKUN (login, profil, toast) ============ */
+.acct { display: grid; place-items: center; width: 42px; height: 42px; padding: 2px; border-radius: 999px; border: var(--bw) solid rgb(var(--ink)); background: rgb(var(--surface)); box-shadow: 3px 3px 0 rgb(var(--shadow)); transition: transform 0.2s var(--pop), box-shadow 0.2s; overflow: hidden; }
+.acct:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 rgb(var(--shadow)); }
+.acct img, .acct span { border: 0 !important; }
+.meter { height: 18px; overflow: hidden; border-radius: 999px; border: var(--bw) solid rgb(var(--ink)); background: rgb(var(--fg) / 0.08); }
+.meter > span { display: block; height: 100%; min-width: 4px; border-radius: 999px; background: rgb(var(--green)); border-right: 2px solid rgb(var(--ink)); transition: width 0.7s var(--ease); }
+.meter-warn > span { background: rgb(var(--yellow)); }
+.meter-bad > span { background: rgb(var(--red)); }
+.toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); z-index: 90; max-width: min(92vw, 26rem); padding: 0.75rem 1.1rem; border-radius: 16px; border: var(--bw) solid rgb(var(--ink)); background: rgb(var(--yellow)); color: rgb(20 16 43); font-size: 0.8rem; font-weight: 800; box-shadow: 4px 4px 0 rgb(var(--shadow)); text-align: center; transform: translate(-50%, 24px); opacity: 0; transition: transform 0.4s var(--pop), opacity 0.3s; pointer-events: none; }
+.toast.in { transform: translate(-50%, 0); opacity: 1; }
+.amodal { position: fixed; inset: 0; z-index: 85; display: flex; align-items: flex-end; justify-content: center; padding: 0; visibility: hidden; }
+.amodal.in { visibility: visible; }
+.amodal-bg { position: absolute; inset: 0; background: rgb(0 0 0 / 0.55); opacity: 0; transition: opacity 0.3s var(--ease); }
+.amodal.in .amodal-bg { opacity: 1; }
+.amodal-box { max-height: 92vh; overflow-y: auto; border-bottom-left-radius: 0 !important; border-bottom-right-radius: 0 !important; padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px)); transform: translateY(105%); transition: transform 0.45s var(--ease); }
+.amodal.in .amodal-box { transform: none; }
+@media (min-width: 640px) {
+  .amodal { align-items: center; padding: 1.5rem; }
+  .amodal-box { border-radius: 24px !important; transform: translateY(24px) scale(0.97); opacity: 0; transition: transform 0.4s var(--pop), opacity 0.3s; }
+  .amodal.in .amodal-box { transform: none; opacity: 1; }
+}

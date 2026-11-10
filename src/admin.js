@@ -29,7 +29,7 @@ async function call(path, body) {
   if (!r.ok) throw new Error(d.message || 'Permintaan gagal (' + r.status + ')');
   return d;
 }
-function logout() { token = ''; sessionStorage.removeItem('admin_token'); S = null; SN = null; editing = null; render(); }
+function logout() { token = ''; sessionStorage.removeItem('admin_token'); S = null; SN = null; UL = null; editing = null; render(); }
 
 const UNITS = { second: 'detik', minute: 'menit', hour: 'jam', day: 'hari' };
 const tile = (c, fg = '#14102b') => `style="--tile:rgb(var(--${c}));--tile-fg:${fg}"`;
@@ -96,11 +96,11 @@ function render() {
     <div class="flex items-center gap-2">${themeBtn()}<a class="chip !inline-flex items-center" href="/">${icon('ExternalLink', 'h-3.5 w-3.5')}Lihat situs</a><button class="chip" id="out">${icon('LogOut', 'h-3.5 w-3.5')}Keluar</button></div></header>
   ${S.persistent ? '' : `<div class="card page-enter mb-5 flex items-start gap-3 p-4" style="background:rgb(var(--yellow));color:rgb(var(--on-light))">${icon('TriangleAlert', 'mt-0.5 h-5 w-5 shrink-0')}<p class="text-sm font-bold">URLDATABASE belum diatur, jadi pengaturan hanya tersimpan di memori dan bisa hilang saat server restart. Isi URLDATABASE (MongoDB) di Vercel agar permanen.</p></div>`}
   <section class="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">${statCard('Total endpoint', LIST.length, 'Layers', 'gold2')}${statCard('Sedang error', nErr, 'ShieldAlert', 'red')}${statCard('Dikunci', nLck, 'Lock', 'yellow')}${statCard('API key', S.keys.length, 'KeyRound', 'green')}</section>
-  <nav class="mb-4 flex gap-2" aria-label="Bagian admin"><button class="chip ${tab === 'endpoint' ? 'is-active' : ''}" data-tab="endpoint">Endpoint</button><button class="chip ${tab === 'keys' ? 'is-active' : ''}" data-tab="keys">API key</button><button class="chip ${tab === 'snippet' ? 'is-active' : ''}" data-tab="snippet">Snippet</button></nav>
+  <nav class="mb-4 flex gap-2" aria-label="Bagian admin"><button class="chip ${tab === 'endpoint' ? 'is-active' : ''}" data-tab="endpoint">Endpoint</button><button class="chip ${tab === 'keys' ? 'is-active' : ''}" data-tab="keys">API key</button><button class="chip ${tab === 'snippet' ? 'is-active' : ''}" data-tab="snippet">Snippet</button><button class="chip ${tab === 'users' ? 'is-active' : ''}" data-tab="users">Pengguna</button></nav>
   ${tab === 'endpoint' ? `
   <div class="mb-4 grid gap-3 sm:grid-cols-[1fr_14rem]"><input class="input" type="search" id="q" placeholder="Cari endpoint" value="${esc(q)}" aria-label="Cari endpoint"><select class="input" id="cat" aria-label="Kategori"><option value="">Semua kategori</option>${cats.map((c) => `<option ${c === cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
   <section class="card" id="list">${shown.map(rowHtml).join('') || '<p class="p-6 text-sm text-muted">Tidak ada endpoint yang cocok. Ubah kata kunci atau kategori.</p>'}</section>
-  <p class="mt-3 text-xs leading-5 text-muted">Perubahan tersimpan otomatis. Endpoint berstatus Error menjawab pengguna dengan HTTP 503 dan pesan di atas. Endpoint yang dikunci butuh API key. Batas permintaan dihitung per alamat IP, atau per API key kalau pengguna memakai key; lewat batas, pengguna mendapat HTTP 429. Admin yang login tetap bisa mengakses semuanya.</p>` : tab === 'snippet' ? snippetTab() : `
+  <p class="mt-3 text-xs leading-5 text-muted">Perubahan tersimpan otomatis. Endpoint berstatus Error menjawab pengguna dengan HTTP 503 dan pesan di atas. Endpoint yang dikunci butuh API key. Batas permintaan dihitung per alamat IP, atau per API key kalau pengguna memakai key; lewat batas, pengguna mendapat HTTP 429. Admin yang login tetap bisa mengakses semuanya.</p>` : tab === 'snippet' ? snippetTab() : tab === 'users' ? usersTab() : `
   <section class="card mb-5 p-5"><h2 class="font-display text-lg">Buat API key</h2>
     <div class="mt-3 grid gap-3 sm:grid-cols-[1fr_16rem_auto]"><input class="input" type="text" id="kn" maxlength="60" placeholder="Nama key, mis. Aplikasi Budi" aria-label="Nama key"><select class="input" id="ks" aria-label="Cakupan"><option value="*">Semua endpoint terkunci</option><option value="pick">Pilih endpoint tertentu</option></select><button class="btn btn-gold" id="kc">${icon('Plus', 'h-4 w-4')}Buat key</button></div>
     <div id="pick" hidden class="mt-3 max-h-48 overflow-auto rounded-2xl border-[2.5px] border-ink p-3">${lockedList.length ? lockedList.map((e) => `<label class="flex items-center gap-2 py-1 text-sm font-bold"><input type="checkbox" class="h-4 w-4 accent-[rgb(var(--gold2))]" value="${esc(e.key)}">${esc(e.name)}</label>`).join('') : '<p class="text-sm text-muted">Belum ada endpoint yang dikunci. Kunci dulu di tab Endpoint.</p>'}</div>
@@ -111,6 +111,7 @@ function render() {
   </main>`;
   bind(); bindTheme(); refreshIcons();
   if (tab === 'snippet' && SN === null && !snBusy) loadSnippets();
+  if (tab === 'users' && UL === null && !ulBusy) loadUsers();
 }
 
 function bindTheme() { document.getElementById('th').onclick = () => { toggleTheme(); S && token ? render() : renderLogin(); }; }
@@ -145,6 +146,8 @@ function bind() {
     });
   } else if (tab === 'snippet') {
     bindSnippet();
+  } else if (tab === 'users') {
+    bindUsers();
   } else {
     document.getElementById('ks').onchange = (e) => { document.getElementById('pick').hidden = e.target.value !== 'pick'; };
     document.getElementById('kc').onclick = () => {
@@ -265,6 +268,64 @@ function bindSnippet() {
       editing = null; snSaving = false; resetSnippetCache(); SN = null; await loadSnippets();
     } catch (err) { snSaving = false; toast(err.message); render(); }
   };
+}
+
+
+/* =========================================================
+   TAB PENGGUNA — daftar akun Google, limit harian, blokir
+   ========================================================= */
+let UL = null; let ulBusy = false; let ulErr = ''; let ulQ = ''; let ulDefault = 100;
+
+async function ulCall(path, { method = 'GET', body } = {}) {
+  const r = await fetch('/api/auth/' + path, { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: body ? JSON.stringify(body) : undefined });
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401 && token) logout();
+  if (!r.ok || d.status === false) throw new Error(d.message || 'Permintaan gagal (' + r.status + ')');
+  return d;
+}
+async function loadUsers() {
+  ulBusy = true; ulErr = '';
+  try { const d = await ulCall('admin-users'); UL = d.data || []; ulDefault = d.defaultLimit || 100; } catch (e) { UL = []; ulErr = e.message; }
+  ulBusy = false;
+  if (tab === 'users' && S) render();
+}
+
+function usersTab() {
+  const list = (UL || []).filter((u) => !ulQ || `${u.name} ${u.email}`.toLowerCase().includes(ulQ.toLowerCase()));
+  const rows = list.map((u) => {
+    const pct = Math.min(100, Math.round((u.used / u.limit) * 100));
+    return `<div class="grid items-center gap-3 border-b-2 hair px-4 py-3 last:border-0 sm:grid-cols-[minmax(0,1fr)_auto]">
+      <div class="flex min-w-0 items-center gap-3">${u.picture ? `<img src="${esc(u.picture)}" alt="" referrerpolicy="no-referrer" class="h-10 w-10 shrink-0 rounded-full border-2 border-ink object-cover">` : `<span class="iconbox h-10 w-10 shrink-0" ${tile('lilac')}>${icon('User', 'h-4 w-4')}</span>`}
+        <div class="min-w-0"><b class="block truncate text-sm">${esc(u.name)}${u.banned ? ' <span class="badge" style="background:rgb(var(--red));color:#fff">diblokir</span>' : ''}</b>
+        <span class="block truncate text-[11px] text-dim">${esc(u.email)}</span>
+        <span class="mt-1 block text-[11px] text-muted">${u.used} / ${u.limit} hari ini (${pct}%) · total ${u.total}${u.customLimit ? ' · limit khusus' : ''}</span></div></div>
+      <div class="flex gap-2"><button class="chip" data-ulimit="${esc(u.id)}" data-cur="${u.customLimit || 0}">${icon('Gauge', 'h-3.5 w-3.5')}Limit</button><button class="chip" data-uban="${esc(u.id)}" data-banned="${u.banned ? 1 : 0}" ${u.banned ? '' : 'style="background:rgb(var(--red));color:#fff"'}>${u.banned ? 'Buka blokir' : 'Blokir'}</button></div></div>`;
+  }).join('');
+  const empty = UL === null || ulBusy ? '<p class="p-6 text-sm text-muted">Memuat pengguna…</p>'
+    : ulErr ? `<p class="p-6 text-sm font-bold text-red">${esc(ulErr)}</p>`
+    : `<p class="p-6 text-sm text-muted">${UL.length ? 'Tidak ada pengguna yang cocok.' : 'Belum ada yang login.'}</p>`;
+  return `<div class="mb-4 grid gap-3 sm:grid-cols-[1fr_auto]"><input class="input" type="search" id="uq" placeholder="Cari nama atau email" value="${esc(ulQ)}" aria-label="Cari pengguna"><button class="btn btn-ghost" id="urefresh">${icon('RefreshCw', 'h-4 w-4')}Muat ulang</button></div>
+  <section class="card" id="ulist">${rows || empty}</section>
+  <p class="mt-3 text-xs leading-5 text-muted">${UL ? UL.length : 0} pengguna · limit bawaan <b>${ulDefault}</b> request/hari (env <code class="font-mono">USER_DAILY_LIMIT</code>). “Limit” mengatur batas khusus per user; isi 0 untuk kembali ke bawaan.</p>`;
+}
+
+function bindUsers() {
+  const $ = (id) => document.getElementById(id);
+  const qi = $('uq');
+  if (qi) qi.oninput = () => { ulQ = qi.value; const pos = qi.selectionStart; render(); const n = $('uq'); n.focus(); n.setSelectionRange(pos, pos); };
+  $('urefresh')?.addEventListener('click', () => { UL = null; render(); });
+  document.querySelectorAll('[data-ulimit]').forEach((b) => (b.onclick = async () => {
+    const v = prompt('Limit request per hari untuk user ini (0 = pakai bawaan ' + ulDefault + '):', b.dataset.cur);
+    if (v === null) return;
+    try { await ulCall('admin-user', { method: 'POST', body: { id: b.dataset.ulimit, limit: Number(v) } }); toast('Limit diperbarui'); UL = null; render(); }
+    catch (err) { toast(err.message); }
+  }));
+  document.querySelectorAll('[data-uban]').forEach((b) => (b.onclick = async () => {
+    const ban = b.dataset.banned !== '1';
+    if (ban && !confirm('Blokir user ini? Dia tidak bisa memakai endpoint sampai dibuka kembali.')) return;
+    try { await ulCall('admin-user', { method: 'POST', body: { id: b.dataset.uban, banned: ban } }); toast(ban ? 'User diblokir' : 'Blokir dibuka'); UL = null; render(); }
+    catch (err) { toast(err.message); }
+  }));
 }
 
 if (token) load(); else renderLogin();

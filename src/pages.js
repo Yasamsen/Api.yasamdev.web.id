@@ -5,6 +5,7 @@ import { renderApiCard } from './components.js';
 import { observeReveals } from './motion.js';
 import { uiState, ALL, categoryById, catTile, matchApi, adultNotice } from './categories.js';
 import { extractMedia, mediaFromBlob, renderResponse } from './response-view.js';
+import { auth, authHeaders, isLoggedIn, openLogin, refreshUser, hooks, tryAuthHtml, toast } from './auth.js';
 
 /* =========================================================
    HELPERS
@@ -307,6 +308,7 @@ function tryPanel(api) {
 
   return `<section id="try-panel" class="card mt-14 !overflow-visible p-4 sm:p-8">
     <div class="mb-6 flex items-center gap-3"><span class="iconbox h-10 w-10">${icon('Play', 'h-4 w-4')}</span><div><h3 class="text-base font-extrabold">Try this API</h3><p class="text-xs text-muted">Send a real request and inspect the response.</p></div></div>
+    <div id="try-auth">${tryAuthHtml()}</div>
     <div class="grid grid-cols-[minmax(0,1fr)] gap-4 ${api.parameters.length > 1 ? 'sm:grid-cols-2' : ''}">${inputs || '<p class="text-xs text-muted">This endpoint takes no parameters.</p>'}</div>
     ${api.slug === 'add-subdomain' ? '<label class="mt-4 block"><span class="mb-2 block text-xs font-bold">API key <span class="text-red-400">*</span></span><input data-api-key type="password" autocomplete="off" placeholder="Masukkan ADD_SUBDOMAIN_API_KEY" class="input font-mono !text-xs"></label>' : ''}
     <div class="mt-6 flex flex-col gap-2.5 sm:flex-row">
@@ -314,6 +316,7 @@ function tryPanel(api) {
       <button id="copy-url" class="btn btn-ghost btn-sm">${icon('Copy', 'h-3.5 w-3.5')}<span>Copy URL</span></button>
     </div>
     <div id="try-url" class="code-url mt-4 break-all px-4 py-3">${esc(api.method)} ${esc(initialUrl)}</div>
+    <p id="try-hint" class="mt-2 text-[11px] leading-5 text-dim"></p>
     <div id="try-response" class="mt-4 hidden"></div>
   </section>`;
 }
@@ -548,6 +551,16 @@ export function bindDocs(api) {
     const query = api.parameters.filter((p) => fieldValue(p.name)).map((p) => `${p.name}=${encodeURIComponent(fieldValue(p.name))}`).join('&');
     return `${window.location.origin}${api.endpoint}${query ? '?' + query : ''}`;
   };
+  // URL untuk bot: sertakan ?apikey= (key asli jika sudah login, placeholder jika belum)
+  const withKey = (url) => `${url}${url.includes('?') ? '&' : '?'}apikey=${isLoggedIn() ? auth.user.apikey : 'YOUR_APIKEY'}`;
+  hooks.tryRefresh = () => {
+    const h = document.getElementById('try-hint');
+    if (!h) return;
+    h.innerHTML = isLoggedIn()
+      ? 'Di website, request memakai akunmu otomatis. “Copy URL” menyertakan API key kamu, siap dipakai di bot.'
+      : 'Untuk bot: tambahkan <code class="font-mono font-bold text-fg">?apikey=KEY</code>. Key didapat setelah login (menu Profil).';
+  };
+  hooks.tryRefresh();
   const buildBody = () => Object.fromEntries(api.parameters
     .filter((p) => p.type !== 'file' && fieldValue(p.name) !== undefined && fieldValue(p.name) !== '')
     .map((p) => [p.name, p.type === 'number' ? Number(fieldValue(p.name)) : fieldValue(p.name)]));
@@ -561,7 +574,7 @@ export function bindDocs(api) {
 
   document.getElementById('copy-url')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget;
-    try { await copyText(buildUrl()); } catch { return; }
+    try { await copyText(withKey(buildUrl())); } catch { return; }
     const old = btn.innerHTML;
     btn.innerHTML = `${icon('Check', 'h-3.5 w-3.5')}<span>Copied</span>`;
     refreshIcons();
@@ -569,6 +582,7 @@ export function bindDocs(api) {
   });
 
   document.getElementById('send-request')?.addEventListener('click', async () => {
+    if (!isLoggedIn()) { openLogin('Login dulu untuk mencoba endpoint ini. Gratis dan hanya butuh beberapa detik.'); return; }
     const btn = document.getElementById('send-request');
     const box = document.getElementById('try-response');
     const requestUrl = buildUrl();
@@ -587,7 +601,7 @@ export function bindDocs(api) {
     };
 
     try {
-      const requestOptions = { method: api.method, headers: { Accept: 'application/json' } };
+      const requestOptions = { method: api.method, headers: { Accept: 'application/json', ...authHeaders() } };
       const apiKey = document.querySelector('[data-api-key]')?.value;
       if (apiKey) requestOptions.headers['x-api-key'] = apiKey;
       if (api.method !== 'GET') {
@@ -620,6 +634,7 @@ export function bindDocs(api) {
       }
 
       btn.innerHTML = `${icon(response.ok ? 'Check' : 'AlertCircle', 'h-3.5 w-3.5')}<span>${response.ok ? 'Request sent' : 'Request failed'}</span>`;
+      refreshUser(); // perbarui sisa kuota (atau tangani sesi yang sudah habis)
     } catch (error) {
       showText(JSON.stringify({ status: false, message: error?.message || 'Request failed' }, null, 2), { ok: false, label: 'Network error' });
       btn.innerHTML = `${icon('AlertCircle', 'h-3.5 w-3.5')}<span>Request failed</span>`;

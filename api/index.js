@@ -15021,17 +15021,220 @@ async function handleSnippet(req, res, routeKey, idOverride = "") {
   }
 }
 
+
+// ===============================
+// AKUN PENGGUNA — login Google, API key per user, kuota harian
+// Env: GOOGLE_CLIENT_ID (wajib), URLDATABASE (wajib), USER_SECRET (opsional; default memakai ADMIN_SECRET/ADMIN_PASSWORD),
+//      USER_DAILY_LIMIT (default 100 request/hari/user), REQUIRE_LOGIN=0 untuk mematikan gerbang login.
+//   GET  /api/auth/config           -> {enabled, clientId, dailyLimit}
+//   POST /api/auth/google           -> tukar Google ID token dengan sesi
+//   GET  /api/auth/me               -> profil + pemakaian (header x-user-token)
+//   POST /api/auth/regenerate       -> buat ulang API key
+//   GET  /api/auth/admin-users      -> daftar user (admin)
+//   POST /api/auth/admin-user       -> ubah limit / blokir user (admin)
+// Cara akses endpoint: website -> header x-user-token otomatis; bot -> ?apikey=sam_xxx atau header x-api-key.
+// ===============================
+const USER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const userSecret = () => String(process.env.USER_SECRET || process.env.ADMIN_SECRET || process.env.ADMIN_PASSWORD || "");
+const authReady = () => !!(process.env.GOOGLE_CLIENT_ID && process.env.URLDATABASE && userSecret());
+const userDefaultLimit = () => Math.max(1, parseInt(process.env.USER_DAILY_LIMIT, 10) || 100);
+const WIB_MS = 7 * 3600 * 1000;
+const userDay = () => new Date(Date.now() + WIB_MS).toISOString().slice(0, 10); // reset tengah malam WIB
+const userResetSecs = () => Math.max(1, Math.ceil((86_400_000 - ((Date.now() + WIB_MS) % 86_400_000)) / 1000));
+const userNewKey = () => "sam_" + crypto.randomBytes(18).toString("base64url");
+
+const userMac = (msg) => crypto.createHmac("sha256", userSecret()).update(msg).digest("hex");
+function userMakeToken(sub) {
+  const exp = Date.now() + USER_TTL_MS;
+  const id = Buffer.from(String(sub)).toString("base64url");
+  return `${id}.${exp}.${userMac(`u.${id}.${exp}`)}`;
+}
+function userTokenSub(token) {
+  const [id, exp, sig] = String(token || "").split(".");
+  if (!id || !/^\d+$/.test(exp || "") || Number(exp) < Date.now() || !sig) return null;
+  const want = Buffer.from(userMac(`u.${id}.${exp}`)); const got = Buffer.from(sig);
+  if (want.length !== got.length || !crypto.timingSafeEqual(want, got)) return null;
+  try { return Buffer.from(id, "base64url").toString(); } catch { return null; }
+}
+
+let usersIndexed = false;
+async function usersCol() {
+  const m = await getStatsMongo();
+  if (!m) return null;
+  const col = m.db.collection("users");
+  if (!usersIndexed) {
+    usersIndexed = true;
+    col.createIndex({ apikey: 1 }, { unique: true, sparse: true }).catch(() => { usersIndexed = false; });
+  }
+  return col;
+}
+
+function userPublic(u) {
+  const today = userDay();
+  return {
+    id: String(u._id), name: u.name || "", email: u.email || "", picture: u.picture || "",
+    apikey: u.apikey, limit: u.limit || userDefaultLimit(), used: u.usageDay === today ? (u.used || 0) : 0,
+    total: u.total || 0, resetIn: userResetSecs(), createdAt: u.createdAt, banned: !!u.banned
+  };
+}
+
+async function userFromReq(req, col) {
+  const sub = userTokenSub(req.headers["x-user-token"]);
+  return sub ? col.findOne({ _id: sub }) : null;
+}
+
+async function googleVerify(idToken) {
+  const { data } = await axios.get("https://oauth2.googleapis.com/tokeninfo", { params: { id_token: idToken }, timeout: 8000 });
+  const okIss = data.iss === "accounts.google.com" || data.iss === "https://accounts.google.com";
+  const verified = data.email_verified === true || data.email_verified === "true";
+  if (data.aud !== process.env.GOOGLE_CLIENT_ID || !okIss || !verified || Number(data.exp) * 1000 < Date.now() || !data.sub) throw new Error("Token Google tidak valid.");
+  return { sub: String(data.sub), email: String(data.email || ""), name: String(data.name || data.email || "Pengguna"), picture: String(data.picture || "") };
+}
+
+const USER_GATE_SKIP = /^(stats|endpoint-status|admin|snippet|raw|auth|add-subdomain)(\/|$)/; // add-subdomain memakai ADD_SUBDOMAIN_API_KEY sendiri
+
+// Dipanggil sebelum endpoint dijalankan. true = request dihentikan.
+async function userGate(req, res, routeKey) {
+  if (req.method === "OPTIONS" || !routeKey || USER_GATE_SKIP.test(routeKey)) return false;
+  if (!authReady() || process.env.REQUIRE_LOGIN === "0") return false;
+  if (adminTokenOk(adminBearer(req))) return false;
+  try {
+    const url = new URL(req.url, "http://x");
+    const supplied = String(req.headers["x-api-key"] || url.searchParams.get("apikey") || "").trim();
+    const sess = String(req.headers["x-user-token"] || "").trim();
+    const col = await usersCol();
+    if (!col) return false;
+    let user = null;
+    if (sess) {
+      const sub = userTokenSub(sess);
+      if (!sub) { res.status(401).json({ status: false, endpoint: routeKey, login_required: true, message: "Sesi login habis. Silakan login ulang." }); return true; }
+      user = await col.findOne({ _id: sub });
+    } else if (supplied.startsWith("sam_")) {
+      user = await col.findOne({ apikey: supplied });
+      if (!user) { res.status(401).json({ status: false, endpoint: routeKey, invalid_key: true, message: "API key tidak valid. Cek key kamu di halaman Profil." }); return true; }
+    } else if (supplied) {
+      const cfg = await adminLoad(); // key buatan admin (lama) tetap diterima
+      const h = adminSha(supplied);
+      if (cfg.keys.some((k) => k.active && k.hash === h)) return false;
+    }
+    if (!user) {
+      res.status(401).json({ status: false, endpoint: routeKey, login_required: true, message: "Login dulu untuk memakai endpoint. Di website: login dengan Google. Untuk bot: tambahkan ?apikey=KEY (lihat di halaman Profil)." });
+      return true;
+    }
+    if (user.banned) { res.status(403).json({ status: false, endpoint: routeKey, banned: true, message: "Akun ini diblokir oleh admin." }); return true; }
+
+    const limit = user.limit || userDefaultLimit();
+    const today = userDay();
+    const now = new Date();
+    const take = async (filter, update) => { // atomik: hanya satu penulis yang menang
+      const r = await col.findOneAndUpdate(filter, update, { returnDocument: "after" });
+      return r?.value ?? r ?? null;
+    };
+    const inc = { $inc: { used: 1, total: 1 }, $set: { lastUsedAt: now } };
+    const roll = { $set: { usageDay: today, used: 1, lastUsedAt: now }, $inc: { total: 1 } };
+    // 1) hari ini masih ada sisa  2) hari baru -> reset hitungan  3) coba ulang (request lain baru saja mereset hari)
+    let after = await take({ _id: user._id, usageDay: today, used: { $lt: limit } }, inc)
+      || await take({ _id: user._id, usageDay: { $ne: today } }, roll)
+      || await take({ _id: user._id, usageDay: today, used: { $lt: limit } }, inc);
+    const ok = !!after;
+    const used = after ? (after.used || 0) : limit;
+    const reset = userResetSecs();
+    res.setHeader("X-RateLimit-Limit", String(limit));
+    res.setHeader("X-RateLimit-Remaining", String(ok ? Math.max(0, limit - used) : 0));
+    res.setHeader("X-RateLimit-Reset", String(reset));
+    if (!ok) {
+      res.setHeader("Retry-After", String(reset));
+      res.status(429).json({ status: false, endpoint: routeKey, rate_limited: true, limit, retry_after: reset, message: `Kuota harian ${limit} request habis. Reset otomatis tengah malam WIB.` });
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.error("userGate:", e?.message || e);
+    res.status(503).json({ status: false, endpoint: routeKey, message: "Verifikasi akun gagal sementara. Coba lagi sebentar." });
+    return true;
+  }
+}
+
+async function handleAuth(req, res, routeKey) {
+  res.setHeader("Cache-Control", "no-store");
+  const sub = routeKey.replace(/^auth\/?/, "");
+  const fail = (code, message) => res.status(code).json({ status: false, message });
+  try {
+    if (sub === "config" && req.method === "GET") {
+      return res.status(200).json({ status: true, enabled: authReady(), clientId: authReady() ? process.env.GOOGLE_CLIENT_ID : "", dailyLimit: userDefaultLimit() });
+    }
+    if (!authReady()) return fail(503, "Login belum dikonfigurasi (GOOGLE_CLIENT_ID / URLDATABASE belum diatur).");
+    const col = await usersCol();
+    if (!col) return fail(503, "Database belum tersedia.");
+
+    if (sub === "google" && req.method === "POST") {
+      const { credential } = await adminBody(req);
+      if (!credential || typeof credential !== "string") return fail(400, "Token Google tidak ada.");
+      let g;
+      try { g = await googleVerify(credential); } catch { return fail(401, "Verifikasi Google gagal. Coba login lagi."); }
+      const now = new Date();
+      await col.updateOne({ _id: g.sub }, {
+        $set: { email: g.email, name: g.name, picture: g.picture, lastLoginAt: now },
+        $setOnInsert: { apikey: userNewKey(), createdAt: now, used: 0, usageDay: userDay(), total: 0 }
+      }, { upsert: true });
+      const u = await col.findOne({ _id: g.sub });
+      if (u.banned) return fail(403, "Akun ini diblokir oleh admin.");
+      return res.status(200).json({ status: true, token: userMakeToken(g.sub), user: userPublic(u) });
+    }
+
+    if (sub === "me" && req.method === "GET") {
+      const u = await userFromReq(req, col);
+      if (!u) return fail(401, "Sesi login habis. Silakan login ulang.");
+      if (u.banned) return fail(403, "Akun ini diblokir oleh admin.");
+      return res.status(200).json({ status: true, user: userPublic(u) });
+    }
+
+    if (sub === "regenerate" && req.method === "POST") {
+      const u = await userFromReq(req, col);
+      if (!u) return fail(401, "Sesi login habis. Silakan login ulang.");
+      if (u.banned) return fail(403, "Akun ini diblokir oleh admin.");
+      const apikey = userNewKey();
+      await col.updateOne({ _id: u._id }, { $set: { apikey } });
+      return res.status(200).json({ status: true, user: userPublic({ ...u, apikey }) });
+    }
+
+    if (sub === "admin-users" || sub === "admin-user") {
+      if (!adminTokenOk(adminBearer(req))) return fail(401, "Sesi admin habis. Login ulang.");
+      if (sub === "admin-users" && req.method === "GET") {
+        const docs = await col.find({}).sort({ lastUsedAt: -1, createdAt: -1 }).limit(500).toArray();
+        return res.status(200).json({ status: true, defaultLimit: userDefaultLimit(), data: docs.map((u) => ({ ...userPublic(u), lastLoginAt: u.lastLoginAt, lastUsedAt: u.lastUsedAt, customLimit: u.limit || 0, apikey: undefined })) });
+      }
+      if (sub === "admin-user" && req.method === "POST") {
+        const b = await adminBody(req);
+        const set = {};
+        if (b.limit !== undefined) { const n = Math.floor(Number(b.limit)); if (!Number.isFinite(n) || n < 0 || n > 1_000_000) return fail(400, "Limit harus angka 0–1.000.000 (0 = pakai default)."); set.limit = n; }
+        if (b.banned !== undefined) set.banned = !!b.banned;
+        if (!Object.keys(set).length) return fail(400, "Tidak ada perubahan.");
+        const r = await col.updateOne({ _id: String(b.id || "") }, { $set: set });
+        return r.matchedCount ? res.status(200).json({ status: true }) : fail(404, "User tidak ditemukan.");
+      }
+    }
+    res.setHeader("Allow", "GET, POST");
+    return fail(404, "Endpoint auth tidak ditemukan.");
+  } catch (e) {
+    console.error("auth:", e?.message || e);
+    return fail(500, "Terjadi kesalahan server.");
+  }
+}
+
 export default async function handler(req, res) {
   const routeKey = getRouteKey(req);
 
   if (routeKey === "admin" || routeKey.startsWith("admin/")) return handleAdmin(req, res, routeKey);
   if (routeKey === "endpoint-status") return handleEndpointStatus(req, res);
   if (routeKey === "snippet" || routeKey.startsWith("snippet/")) return handleSnippet(req, res, routeKey);
+  if (routeKey === "auth" || routeKey.startsWith("auth/")) return handleAuth(req, res, routeKey);
   if (routeKey.startsWith("raw/")) { // /raw/<slug> (rewrite di vercel.json) -> curl -sL https://domain/raw/<slug>
     let rawId = routeKey.slice(4).split("/")[0];
     try { rawId = decodeURIComponent(rawId); } catch { /* pakai apa adanya */ }
     return handleSnippet(req, res, "snippet/raw", rawId);
   }
+  if (await userGate(req, res, routeKey)) return;
   try { if (await adminGate(req, res, routeKey)) return; } catch (e) { console.error("adminGate:", e?.message); }
 
   // hitung statistik untuk halaman /status (endpoint /api/stats sendiri tidak dihitung)

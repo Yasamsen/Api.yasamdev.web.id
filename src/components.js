@@ -1,4 +1,5 @@
 import { toggleTheme, getTheme } from './theme.js';
+import { accountBtnHtml, mobileAccountHtml } from './auth.js';
 import { apiDefinitions, getCategories } from './apis/registry.js';
 import { categoryById, catTile } from './categories.js';
 import { BASE_URL, esc, icon } from './utils.js';
@@ -49,7 +50,8 @@ export function renderNavbar(path) {
 
         <div class="flex items-center gap-1">
           <div class="mr-3 hidden items-center gap-2 lg:flex"><span class="h-1.5 w-1.5 rounded-full bg-ok"></span><span class="text-xs font-semibold text-muted">API online</span></div>
-          <button id="theme-btn" class="iconbtn" aria-label="Toggle color theme">${icon(themeIcon, 'h-[17px] w-[17px]')}</button>
+          <span data-acct-slot class="flex items-center gap-1">${accountBtnHtml()}</span>
+          <button id="theme-btn" class="iconbtn max-sm:hidden" aria-label="Toggle color theme">${icon(themeIcon, 'h-[17px] w-[17px]')}</button>
           <button data-nav="/docs" class="btn btn-gold btn-sm ml-1 hidden md:inline-flex">Get started</button>
           <button id="mobile-menu-btn" class="menubtn md:hidden" aria-label="Buka menu" aria-expanded="false" aria-controls="mobile-menu"><span></span><span></span><span></span></button>
         </div>
@@ -62,6 +64,7 @@ export function renderNavbar(path) {
       <div class="mgrip" data-mclose aria-hidden="true"></div>
       <div class="flex items-center justify-between px-[18px] pb-2 pt-3"><span class="font-display text-xl">Menu</span><button data-mclose class="iconbtn" aria-label="Tutup menu">${icon('X', 'h-[17px] w-[17px]')}</button></div>
       <div class="msheet-body"><div class="flex flex-col gap-2.5">
+        <div data-macct-slot class="m-item" style="--i:0">${mobileAccountHtml()}</div>
         ${[['/', 'Home', 'House', 'rgb(var(--gold2))', '#fff', '', ''], ['/docs', 'Documentation', 'BookOpen', 'rgb(var(--yellow))', '#14102b', '', ''], ['/snippet', 'Snippet', 'Code', 'rgb(var(--green))', '#14102b', '', 'Script siap pakai, tinggal salin'], ['/status', 'Status Server', 'Activity', '#5bc0ff', '#14102b', 'live', 'CPU, RAM & request secara live'], ['/contact', 'Contact', 'MessageCircle', '#ff7eb6', '#14102b', '', '']]
           .map(([to, label, ic, tile, fg, badge, caption], i) => `<button data-nav="${to}" style="--i:${i}" class="m-item mrow ${badge ? 'mrow-live' : ''}"><span class="iconbox h-10 w-10 shrink-0" style="--tile:${tile};--tile-fg:${fg}">${icon(ic, 'h-5 w-5')}</span><span class="min-w-0 flex-1 text-left"><span class="block text-[15px] font-extrabold leading-5">${label}</span>${caption ? `<span class="mt-0.5 block text-[11px] font-semibold leading-4 text-muted">${caption}</span>` : ''}</span>${badge ? '<span class="livepill"><i class="live-dot"></i>LIVE</span>' : ''}${icon('ChevronRight', 'h-4 w-4 shrink-0 text-dim')}</button>`).join('')}
 
@@ -107,7 +110,7 @@ export function bindNavbar() {
   };
   mmBtn?.addEventListener('click', () => setMobile(!mm.hasAttribute('data-open')));
   // setelah memilih tujuan, tutup menu (termasuk saat tujuannya halaman yang sedang dibuka)
-  mm?.addEventListener('click', (e) => { if (e.target.closest('[data-nav], [data-mclose]')) setMobile(false); });
+  mm?.addEventListener('click', (e) => { if (e.target.closest('[data-nav], [data-mclose], [data-login]')) setMobile(false); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && mm?.hasAttribute('data-open')) setMobile(false); });
 }
 
