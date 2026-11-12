@@ -15091,7 +15091,7 @@ async function googleVerify(idToken) {
   return { sub: String(data.sub), email: String(data.email || ""), name: String(data.name || data.email || "Pengguna"), picture: String(data.picture || "") };
 }
 
-const USER_GATE_SKIP = /^(stats|endpoint-status|admin|snippet|raw|auth|add-subdomain)(\/|$)/; // add-subdomain memakai ADD_SUBDOMAIN_API_KEY sendiri
+const USER_GATE_SKIP = /^(stats|endpoint-status|admin|snippet|raw|auth|add-subdomain|cek-limit|check-limit)(\/|$)/; // add-subdomain memakai ADD_SUBDOMAIN_API_KEY sendiri
 
 // Dipanggil sebelum endpoint dijalankan. true = request dihentikan.
 async function userGate(req, res, routeKey) {
@@ -15222,6 +15222,60 @@ async function handleAuth(req, res, routeKey) {
   }
 }
 
+
+// ===============================
+// CEK LIMIT — /api/cek-limit?apikey=sam_xxx
+// Menampilkan nama pemilik key + pemakaian kuota. Endpoint ini TIDAK memakai / menghabiskan kuota.
+// ===============================
+async function handleCekLimit(req, res) {
+  res.setHeader("Cache-Control", "no-store");
+  const fail = (code, message, extra = {}) => res.status(code).json({ status: false, message, ...extra });
+  try {
+    if (req.method !== "GET" && req.method !== "POST") { res.setHeader("Allow", "GET, POST"); return fail(405, "Gunakan metode GET."); }
+    if (!authReady()) return fail(503, "Sistem akun belum aktif (GOOGLE_CLIENT_ID / URLDATABASE belum diatur).");
+    const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "").split(",")[0].trim();
+    const { n, reset } = await adminRateHit(`cek-limit|ip:${ip}`, 60_000); // anti tebak-tebak key
+    if (n > 30) {
+      const secs = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
+      res.setHeader("Retry-After", String(secs));
+      return fail(429, `Terlalu banyak pengecekan. Coba lagi dalam ${secs} detik.`, { retry_after: secs });
+    }
+    const url = new URL(req.url, "http://x");
+    const body = req.method === "POST" ? await adminBody(req) : {};
+    const key = String(url.searchParams.get("apikey") || req.headers["x-api-key"] || body.apikey || "").trim();
+    if (!key) return fail(400, "Parameter apikey wajib diisi. Contoh: /api/cek-limit?apikey=sam_xxxxxxxx");
+    const col = await usersCol();
+    if (!col) return fail(503, "Database belum tersedia.");
+    const u = key.startsWith("sam_") ? await col.findOne({ apikey: key }) : null;
+    if (!u) return fail(404, "API key tidak ditemukan. Cek key kamu di halaman Profil.");
+
+    const p = userPublic(u);
+    const [mail, host] = String(u.email || "").split("@");
+    return res.status(200).json({
+      status: true,
+      data: {
+        username: p.name,
+        email: mail ? `${mail.slice(0, 2)}${"*".repeat(Math.max(2, mail.length - 2))}@${host || ""}` : "",
+        banned: p.banned,
+        limit: {
+          daily: p.limit,
+          used: p.used,
+          remaining: Math.max(0, p.limit - p.used),
+          percent_used: Math.min(100, Math.round((p.used / p.limit) * 100)),
+          reset_in_seconds: p.resetIn,
+          reset_at: new Date(Date.now() + p.resetIn * 1000).toISOString(),
+          timezone: "Asia/Jakarta"
+        },
+        total_requests: p.total,
+        member_since: p.createdAt || null
+      }
+    });
+  } catch (e) {
+    console.error("cek-limit:", e?.message || e);
+    return fail(500, "Terjadi kesalahan server.");
+  }
+}
+
 export default async function handler(req, res) {
   const routeKey = getRouteKey(req);
 
@@ -15271,6 +15325,9 @@ export default async function handler(req, res) {
     case "iplookup":
     case "ip-lookup":
       return handleIplookup(req, res);
+    case "cek-limit":
+    case "check-limit":
+      return handleCekLimit(req, res);
     case "weather":
       return handleWeather(req, res);
     case "qrcode":

@@ -308,7 +308,7 @@ function tryPanel(api) {
 
   return `<section id="try-panel" class="card mt-14 !overflow-visible p-4 sm:p-8">
     <div class="mb-6 flex items-center gap-3"><span class="iconbox h-10 w-10">${icon('Play', 'h-4 w-4')}</span><div><h3 class="text-base font-extrabold">Try this API</h3><p class="text-xs text-muted">Send a real request and inspect the response.</p></div></div>
-    <div id="try-auth">${tryAuthHtml()}</div>
+    ${api.public ? '' : `<div id="try-auth">${tryAuthHtml()}</div>`}
     <div class="grid grid-cols-[minmax(0,1fr)] gap-4 ${api.parameters.length > 1 ? 'sm:grid-cols-2' : ''}">${inputs || '<p class="text-xs text-muted">This endpoint takes no parameters.</p>'}</div>
     ${api.slug === 'add-subdomain' ? '<label class="mt-4 block"><span class="mb-2 block text-xs font-bold">API key <span class="text-red-400">*</span></span><input data-api-key type="password" autocomplete="off" placeholder="Masukkan ADD_SUBDOMAIN_API_KEY" class="input font-mono !text-xs"></label>' : ''}
     <div class="mt-6 flex flex-col gap-2.5 sm:flex-row">
@@ -552,13 +552,13 @@ export function bindDocs(api) {
     return `${window.location.origin}${api.endpoint}${query ? '?' + query : ''}`;
   };
   // URL untuk bot: sertakan ?apikey= (key asli jika sudah login, placeholder jika belum)
-  const withKey = (url) => `${url}${url.includes('?') ? '&' : '?'}apikey=${isLoggedIn() ? auth.user.apikey : 'YOUR_APIKEY'}`;
+  const withKey = (url) => api.public ? url : `${url}${url.includes('?') ? '&' : '?'}apikey=${isLoggedIn() ? auth.user.apikey : 'YOUR_APIKEY'}`;
   hooks.tryRefresh = () => {
     const h = document.getElementById('try-hint');
     if (!h) return;
     h.innerHTML = isLoggedIn()
-      ? 'Di website, request memakai akunmu otomatis. “Copy URL” menyertakan API key kamu, siap dipakai di bot.'
-      : 'Untuk bot: tambahkan <code class="font-mono font-bold text-fg">?apikey=KEY</code>. Key didapat setelah login (menu Profil).';
+      ? (api.public ? 'Endpoint ini terbuka: tidak perlu login dan tidak memakai kuota.' : 'Di website, request memakai akunmu otomatis. “Copy URL” menyertakan API key kamu, siap dipakai di bot.')
+      : api.public ? 'Endpoint ini terbuka: tidak perlu login dan tidak memakai kuota.' : 'Untuk bot: tambahkan <code class="font-mono font-bold text-fg">?apikey=KEY</code>. Key didapat setelah login (menu Profil).';
   };
   hooks.tryRefresh();
   const buildBody = () => Object.fromEntries(api.parameters
@@ -582,7 +582,7 @@ export function bindDocs(api) {
   });
 
   document.getElementById('send-request')?.addEventListener('click', async () => {
-    if (!isLoggedIn()) { openLogin('Login dulu untuk mencoba endpoint ini. Gratis dan hanya butuh beberapa detik.'); return; }
+    if (!api.public && !isLoggedIn()) { openLogin('Login dulu untuk mencoba endpoint ini. Gratis dan hanya butuh beberapa detik.'); return; }
     const btn = document.getElementById('send-request');
     const box = document.getElementById('try-response');
     const requestUrl = buildUrl();

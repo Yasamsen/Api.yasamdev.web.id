@@ -29,6 +29,7 @@ function normalizeApi(api) {
     parameters: Array.isArray(api.parameters) ? api.parameters : [],
     responseExample: api.responseExample || { success: true, data: {} },
     responseFields: Array.isArray(api.responseFields) ? api.responseFields : [],
+    public: !!api.public, // true = endpoint tanpa login & tanpa kuota
     exampleRequest: api.exampleRequest || `${api.method || 'GET'} https://samapi.example.com${api.endpoint || `/api/${fallbackSlug}`}`,
   };
 }
