@@ -3030,7 +3030,7 @@ async function handleFreeconvertVideoToMp3(req, res) {
     const authHeaders = { Authorization: `Bearer ${token}`, Accept: "application/json" };
     const jobPayload = {
       tasks: {
-        "import-video": { operation: "import/upload", filename },
+        "import-video": { operation: "import/upload" }, // filename ditolak validasi FreeConvert; nama file ikut di langkah upload
         "convert-mp3": {
           operation: "convert",
           input: "import-video",
@@ -3195,7 +3195,8 @@ async function handleFcConvert(req, res, key) {
       headers: { ...authHeaders, "Content-Type": "application/json", ...headersBase },
       body: JSON.stringify({
         tasks: {
-          "import-file": { operation: "import/upload", filename },
+          // import/upload tidak punya parameter apa pun (filename ditolak FreeConvert); nama file dikirim di langkah upload
+          "import-file": { operation: "import/upload" },
           "convert-file": { operation: "convert", input: "import-file", output_format: format, ...(withOptions && Object.keys(options).length ? { options } : {}) },
           "export-file": { operation: "export/url", input: "convert-file" }
         }
