@@ -3195,6 +3195,7 @@ async function handleFcConvert(req, res, key) {
 
     const format = (pick("format") || P.def).toLowerCase();
     if (!P.output.includes(format)) return bad(400, "Format output tidak didukung.", `Pilihan: ${P.output.join(", ")}`);
+    const inputFormat = !hasFile && override ? ({ jpeg: "jpg", tif: "tiff", heif: "heic" }[ext] || ext) : "";
     const options = {};
     if (P.bitrate && FCV_LOSSY.has(format)) {
       const bitrate = pick("bitrate") || "192k";
@@ -3215,8 +3216,9 @@ async function handleFcConvert(req, res, key) {
       headers: { ...authHeaders, "Content-Type": "application/json", ...headersBase },
       body: JSON.stringify({
         tasks: {
-          "import-file": hasFile ? { operation: "import/upload", filename } : { operation: "import/url", url: srcUrl, filename },
-          "convert-file": { operation: "convert", input: "import-file", output_format: format, ...(withOptions && Object.keys(options).length ? { options } : {}) },
+          // import/url TIDAK menerima field filename (ditolak FreeConvert); format dibaca dari URL, atau lewat input_format bila URL tanpa ekstensi
+          "import-file": hasFile ? { operation: "import/upload", filename } : { operation: "import/url", url: srcUrl },
+          "convert-file": { operation: "convert", input: "import-file", ...(inputFormat ? { input_format: inputFormat } : {}), output_format: format, ...(withOptions && Object.keys(options).length ? { options } : {}) },
           "export-file": { operation: "export/url", input: "convert-file" }
         }
       })
