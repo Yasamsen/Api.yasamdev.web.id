@@ -3125,6 +3125,170 @@ async function handleFreeconvertVideoToMp3(req, res) {
   }
 }
 
+
+// ===============================
+// KONVERTER UMUM (FreeConvert guest) — video/audio/gambar
+// Sama dengan alur freeconvert-video-to-mp3: sesi guest -> job (import -> convert -> export/url).
+// Sumber file: upload multipart field "file" (maks 4 MB) ATAU parameter "url" (tanpa batas 4 MB,
+// FreeConvert yang mengunduh sendiri). GET hanya untuk "url".
+// ===============================
+const FCV_VIDEO = ["mp4", "mov", "webm", "mkv", "avi", "m4v", "flv", "wmv", "3gp", "mpg", "mpeg"];
+const FCV_AUDIO = ["mp3", "wav", "ogg", "m4a", "aac", "flac", "opus", "wma", "amr"];
+const FCV_IMAGE = ["jpg", "jpeg", "png", "webp", "heic", "heif", "jfif", "bmp", "tiff", "tif", "gif", "avif"];
+const FCV_AUDIO_OUT = ["mp3", "wav", "ogg", "m4a", "aac", "flac"];
+const FCV_PRESETS = {
+  "to-gif": { name: "Video to GIF", input: FCV_VIDEO, output: ["gif"], def: "gif" },
+  "gif-to-mp4": { name: "GIF to MP4", input: ["gif"], output: ["mp4"], def: "mp4" },
+  "video-to-audio": { name: "Video to Audio", input: FCV_VIDEO, output: FCV_AUDIO_OUT, def: "mp3", bitrate: true },
+  "audio-converter": { name: "Audio Converter", input: FCV_AUDIO, output: FCV_AUDIO_OUT, def: "mp3", bitrate: true },
+  "audio-to-video": { name: "Audio to Video", input: FCV_AUDIO, output: ["mp4"], def: "mp4", note: "Hasil berupa file MP4 berisi audio (tanpa gambar)." },
+  "video-converter": { name: "Video Converter", input: FCV_VIDEO, output: ["mp4", "webm", "mov", "avi", "mkv"], def: "mp4" },
+  "image-converter": { name: "Image Converter", input: FCV_IMAGE, output: ["jpg", "png", "webp", "gif", "bmp", "tiff"], def: "png" },
+  "image-to-pdf": { name: "Image to PDF", input: ["jpg", "jpeg", "png", "webp", "heic", "bmp", "tiff", "tif"], output: ["pdf"], def: "pdf" }
+};
+const FCV_BITRATES = ["64k", "128k", "192k", "256k", "320k"];
+const FCV_LOSSY = new Set(["mp3", "ogg", "m4a", "aac"]);
+
+async function handleFcConvert(req, res, key) {
+  const P = FCV_PRESETS[key];
+  const t0 = Date.now();
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept, x-user-token, x-api-key");
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "GET" && req.method !== "POST") {
+    res.setHeader("Allow", "GET, POST, OPTIONS");
+    return res.status(405).json({ status: false, message: "Gunakan GET dengan parameter url, atau POST dengan file / url." });
+  }
+  const bad = (code, message, error) => res.status(code).json({ status: false, message, ...(error ? { error } : {}) });
+
+  try {
+    const q = new URL(req.url, "http://x").searchParams;
+    let file = null; let fields = {};
+    const ct = req.headers["content-type"] || "";
+    if (req.method === "POST" && /multipart\/form-data/i.test(ct)) {
+      if (Number(req.headers["content-length"] || 0) > 4_200_000) return bad(413, "File terlalu besar.", "Maksimal 4 MB untuk upload. Untuk file besar gunakan parameter url.");
+      ({ file, fields } = await freeconvertMp3ParseMultipart(req, 4_000_000));
+    } else if (req.method === "POST") {
+      fields = await adminBody(req);
+    }
+    const pick = (k) => String(fields[k] ?? q.get(k) ?? "").trim();
+
+    const srcUrl = pick("url");
+    const hasFile = !!(file && file.buffer?.length);
+    if (!hasFile && !srcUrl) return bad(400, "Sumber file wajib diisi.", 'Kirim file pada field "file" (POST, maks 4 MB) atau parameter "url" ke file publik.');
+
+    let filename = "";
+    if (hasFile) filename = String(file.filename || "");
+    else {
+      let u;
+      try { u = new URL(srcUrl); } catch { return bad(400, "URL tidak valid."); }
+      if (!/^https?:$/.test(u.protocol) || u.username || u.password || srcUrl.length > 2048) return bad(400, "URL harus http/https publik tanpa kredensial.");
+      try { filename = decodeURIComponent(u.pathname.split("/").pop() || ""); } catch { filename = u.pathname.split("/").pop() || ""; }
+    }
+    const override = pick("filename");
+    if (override) filename = override;
+    filename = filename.split(/[\\/]/).pop().replace(/[^\w.\-]+/g, "_").slice(0, 100);
+    const ext = (filename.toLowerCase().match(/\.([a-z0-9]+)$/) || [])[1] || "";
+    if (!ext) return bad(400, "Format file tidak bisa ditentukan.", 'Pastikan URL berakhiran ekstensi (mis. .mp4) atau isi parameter "filename" (mis. video.mp4).');
+    if (!P.input.includes(ext)) return bad(415, `Format .${ext} tidak didukung untuk ${P.name}.`, `Format input: ${P.input.join(", ")}`);
+
+    const format = (pick("format") || P.def).toLowerCase();
+    if (!P.output.includes(format)) return bad(400, "Format output tidak didukung.", `Pilihan: ${P.output.join(", ")}`);
+    const options = {};
+    if (P.bitrate && FCV_LOSSY.has(format)) {
+      const bitrate = pick("bitrate") || "192k";
+      if (!FCV_BITRATES.includes(bitrate)) return bad(400, "Bitrate tidak didukung.", `Pilihan: ${FCV_BITRATES.join(", ")}`);
+      options.audio_bitrate = bitrate;
+    }
+
+    const headersBase = { Origin: "https://www.freeconvert.com", Referer: "https://www.freeconvert.com/" };
+    const session = await freeconvertMp3Request("https://api.freeconvert.com/v1/account/guest", { method: "GET", headers: { Accept: "application/json, text/plain, */*", ...headersBase } });
+    if (!session.ok) throw new Error(`Gagal membuat guest session FreeConvert (HTTP ${session.status}).`);
+    const sp = session.data;
+    const token = typeof sp === "string" ? sp.trim() : sp?.access_token || sp?.token || sp?.accessToken || "";
+    if (typeof token !== "string" || !token || token.length > 4096 || /[\r\n]/.test(token)) throw new Error("Token guest FreeConvert tidak dikenali; format respons mungkin berubah.");
+    const authHeaders = { Authorization: `Bearer ${token}`, Accept: "application/json" };
+
+    const makeJob = (withOptions) => freeconvertMp3Request("https://api.freeconvert.com/v1/process/jobs", {
+      method: "POST",
+      headers: { ...authHeaders, "Content-Type": "application/json", ...headersBase },
+      body: JSON.stringify({
+        tasks: {
+          "import-file": hasFile ? { operation: "import/upload", filename } : { operation: "import/url", url: srcUrl, filename },
+          "convert-file": { operation: "convert", input: "import-file", output_format: format, ...(withOptions && Object.keys(options).length ? { options } : {}) },
+          "export-file": { operation: "export/url", input: "convert-file" }
+        }
+      })
+    });
+    let created = await makeJob(true);
+    if (!created.ok && Object.keys(options).length && created.status >= 400 && created.status < 500) created = await makeJob(false); // opsi ditolak -> pakai bawaan
+    const job = created.data;
+    if (!created.ok || !job?.id) {
+      const detail = typeof job === "object" ? JSON.stringify(job) : String(job || "Respons kosong");
+      throw new Error(`Gagal membuat job konversi (HTTP ${created.status}): ${detail.slice(0, 400)}`);
+    }
+
+    if (hasFile) {
+      const importTask = freeconvertMp3Tasks(job.tasks).find((t) => t.name === "import-file" || t.operation === "import/upload");
+      const form = importTask?.result?.form || importTask?.result?.upload_form || job.result?.form;
+      if (!form?.url || !form?.parameters || typeof form.parameters !== "object") throw new Error("FreeConvert tidak mengembalikan form upload. Endpoint guest mungkin berubah.");
+      const body = new globalThis.FormData();
+      for (const [k, v] of Object.entries(form.parameters)) body.append(k, String(v));
+      body.append("file", new globalThis.Blob([file.buffer], { type: file.mimetype || "application/octet-stream" }), filename);
+      const up = await freeconvertMp3Request(form.url, { method: "POST", body, timeout: 25000 });
+      if (!up.ok) throw new Error(`Upload ke penyimpanan FreeConvert gagal (HTTP ${up.status}).`);
+    }
+
+    let done = null; let last = job.status || "processing";
+    while (Date.now() - t0 < 52000) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const poll = await freeconvertMp3Request(`https://api.freeconvert.com/v1/process/jobs/${encodeURIComponent(job.id)}`, { method: "GET", headers: authHeaders, timeout: 8000 }).catch(() => null);
+      if (!poll?.ok || !poll.data) continue;
+      last = poll.data.status || "unknown";
+      if (last === "completed") { done = poll.data; break; }
+      if (last === "failed") {
+        const f = freeconvertMp3Tasks(poll.data.tasks).find((t) => t.status === "failed");
+        throw new Error(poll.data.result?.msg || f?.result?.msg || "Konversi gagal diproses FreeConvert.");
+      }
+    }
+    if (!done) return bad(504, "Konversi belum selesai dalam batas waktu (file mungkin terlalu besar).", `Status terakhir: ${last}; job: ${job.id}`);
+
+    const tasks = freeconvertMp3Tasks(done.tasks);
+    const exp = tasks.find((t) => t.name === "export-file" || t.operation === "export/url");
+    const conv = tasks.find((t) => t.name === "convert-file" || t.operation === "convert");
+    const downloadUrl = exp?.result?.url || conv?.result?.url || "";
+    if (!downloadUrl) throw new Error("Konversi selesai tetapi URL hasil tidak ditemukan.");
+    const dl = new URL(downloadUrl);
+    if (!/^https?:$/.test(dl.protocol) || dl.username || dl.password) throw new Error("URL hasil unduhan tidak valid.");
+    const size = Number(exp?.result?.size || conv?.result?.size || 0) || 0;
+    return res.status(200).json({
+      status: true,
+      source: "FreeConvert",
+      data: {
+        job_id: done.id || job.id,
+        type: P.name,
+        input_filename: filename,
+        output_filename: filename.replace(/\.[^.]+$/, "") + "." + format,
+        format,
+        ...(options.audio_bitrate ? { bitrate: options.audio_bitrate } : {}),
+        file_size_bytes: size,
+        file_size_formatted: (size / (1024 * 1024)).toFixed(2) + " MB",
+        download_url: downloadUrl,
+        ...(P.note ? { note: P.note } : {})
+      }
+    });
+  } catch (error) {
+    const tooLarge = error.code === "TOO_LARGE" || /file terlalu besar/i.test(error.message || "");
+    const timedOut = error.name === "TimeoutError" || /timeout|timed out/i.test(error.message || "");
+    return res.status(tooLarge ? 413 : timedOut ? 504 : 502).json({
+      status: false,
+      message: tooLarge ? "File terlalu besar (maks 4 MB untuk upload). Gunakan parameter url." : timedOut ? "Proses konversi melewati batas waktu." : `Gagal mengonversi (${P.name}).`,
+      error: error.message || "Kesalahan tidak diketahui"
+    });
+  }
+}
+
 // ===============================
 // TOURL (UPLOAD FILE -> URL)
 // ===============================
@@ -14451,6 +14615,11 @@ async function adminGate(req, res, routeKey) {
 
 async function adminBody(req) {
   if (req.body && typeof req.body === "object") return req.body;
+  // bodyParser dimatikan global: baca stream sendiri bila belum ada yang mem-parse
+  if (req.method === "POST" && !req.readableEnded && !/multipart\/form-data/i.test(req.headers["content-type"] || "")) {
+    try { await ensureJsonBody(req); } catch { /* lanjut dengan {} */ }
+    if (req.body && typeof req.body === "object") return req.body;
+  }
   try { return JSON.parse(typeof req.body === "string" ? req.body : "{}"); } catch { return {}; }
 }
 
@@ -15433,6 +15602,15 @@ case "video-to-prompt":
   return handleTourl(req, res);
   case "freeconvert-video-to-mp3":
   return handleFreeconvertVideoToMp3(req, res);
+  case "to-gif":
+  case "gif-to-mp4":
+  case "video-to-audio":
+  case "audio-converter":
+  case "audio-to-video":
+  case "video-converter":
+  case "image-converter":
+  case "image-to-pdf":
+  return handleFcConvert(req, res, routeKey);
   case "bgremover":
   return handleBgremover(req, res);
   case "brat":
