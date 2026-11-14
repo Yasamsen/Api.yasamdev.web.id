@@ -10,23 +10,9 @@ export default {
     {
       "name": "file",
       "type": "file",
-      "required": false,
-      "description": "Upload file dari perangkat (maks 4 MB). Format: gif. Kosongkan jika memakai url.",
+      "required": true,
+      "description": "Pilih file dari perangkat. Maksimal 4 MB. Format: gif.",
       "example": "contoh"
-    },
-    {
-      "name": "url",
-      "type": "string",
-      "required": false,
-      "description": "Link langsung ke file publik (http/https). Tanpa batas 4 MB. Alternatif dari upload.",
-      "example": "https://example.com/file"
-    },
-    {
-      "name": "filename",
-      "type": "string",
-      "required": false,
-      "description": "Nama file beserta ekstensi. Isi jika url tidak berakhiran ekstensi (mis. video.mp4).",
-      "example": "video.mp4"
     }
   ],
   "responseExample": {
@@ -95,5 +81,5 @@ export default {
       "description": "Link unduh hasil (kedaluwarsa dalam beberapa jam)."
     }
   ],
-  "exampleRequest": "GET https://api.yasamdev.web.id/api/gif-to-mp4?url=https://example.com/anim.gif&apikey=KEY_KAMU"
+  "exampleRequest": "POST https://api.yasamdev.web.id/api/gif-to-mp4 (multipart/form-data, field \"file\")"
 };

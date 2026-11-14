@@ -10,23 +10,9 @@ export default {
     {
       "name": "file",
       "type": "file",
-      "required": false,
-      "description": "Upload file dari perangkat (maks 4 MB). Format: mp3, wav, ogg, m4a, aac, flac, opus, wma, amr. Kosongkan jika memakai url.",
+      "required": true,
+      "description": "Pilih file dari perangkat. Maksimal 4 MB. Format: mp3, wav, ogg, m4a, aac, flac, opus, wma, amr.",
       "example": "contoh"
-    },
-    {
-      "name": "url",
-      "type": "string",
-      "required": false,
-      "description": "Link langsung ke file publik (http/https). Tanpa batas 4 MB. Alternatif dari upload.",
-      "example": "https://example.com/file"
-    },
-    {
-      "name": "filename",
-      "type": "string",
-      "required": false,
-      "description": "Nama file beserta ekstensi. Isi jika url tidak berakhiran ekstensi (mis. video.mp4).",
-      "example": "video.mp4"
     }
   ],
   "responseExample": {
@@ -101,5 +87,5 @@ export default {
       "description": "Catatan tambahan."
     }
   ],
-  "exampleRequest": "GET https://api.yasamdev.web.id/api/audio-to-video?url=https://example.com/lagu.mp3&apikey=KEY_KAMU"
+  "exampleRequest": "POST https://api.yasamdev.web.id/api/audio-to-video (multipart/form-data, field \"file\")"
 };
