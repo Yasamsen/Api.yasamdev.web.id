@@ -1923,6 +1923,242 @@ async function handleHentaiRandom(req, res) {
     return res.status(502).json({ status: false, message: "Gagal mengambil media", error: error.message });
   }
 }
+//live
+const LIVE3D_BASE_URL = "https://live3d.io";
+const LIVE3D_CDN_PATH = "https://live3d-global.zingfront.com/";
+const LIVE3D_CATEGORIES = ["all", "models", "assets", "backgrounds", "animations", "ai-tools"];
+const LIVE3D_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9,id;q=0.8"
+};
+
+function live3dCleanPreviewUrl(url) {
+  if (!url) return "";
+  if (url.includes("cdn_path +")) {
+    const sub = url.replace("cdn_path +", "").replace(/['"\s]/g, "");
+    return `${LIVE3D_CDN_PATH}${sub}`;
+  }
+  return url.replace(/['"]/g, "").trim();
+}
+
+function live3dParseJsArray(str) {
+  const items = [];
+  const objRegex = /\{([^{}]+)\}/g;
+  let match;
+  while ((match = objRegex.exec(str)) !== null) {
+    const obj = {};
+    const pairs = match[1].split(",");
+    for (const p of pairs) {
+      const parts = p.split(":");
+      if (parts.length >= 2) {
+        const k = parts[0].trim().replace(/['"]/g, "");
+        const v = parts.slice(1).join(":").trim();
+        obj[k] = isNaN(v) ? live3dCleanPreviewUrl(v) : Number(v);
+      }
+    }
+    if (Object.keys(obj).length > 0) items.push(obj);
+  }
+  return items;
+}
+
+async function live3dGetHtml(path) {
+  const { data } = await axios.get(`${LIVE3D_BASE_URL}${path}`, {
+    headers: LIVE3D_HEADERS,
+    timeout: 8000
+  });
+  return data;
+}
+
+async function live3dScrapeModels() {
+  const data = await live3dGetHtml("/vtuber-model");
+  const allMatch = data.match(/var\s+all_avatars_lists\s*=\s*(\[\s*\{[\s\S]*?\}\s*\]);/);
+  const userMatch = data.match(/var\s+user_avatar_lists\s*=\s*(\[\s*\{[\s\S]*?\}\s*\]);/);
+  const chibiMatch = data.match(/var\s+chibi_avatar_list\s*=\s*(\[\s*\{[\s\S]*?\}\s*\]);/);
+
+  const official = allMatch ? live3dParseJsArray(allMatch[1]) : [];
+  const userCreations = userMatch ? live3dParseJsArray(userMatch[1]) : [];
+  const chibi = chibiMatch ? live3dParseJsArray(chibiMatch[1]) : [];
+
+  const mapModel = (m, type) => ({
+    name: m.name,
+    gender: m.sex === 1 ? "Female" : "Male",
+    preview: m.img_url,
+    type
+  });
+
+  return {
+    total: official.length + userCreations.length + chibi.length,
+    official_models: official.map((m) => mapModel(m, "3D Avatar Model (VRoid)")),
+    user_creations: userCreations.map((m) => mapModel(m, "Community Model")),
+    chibi_models: chibi.map((m) => mapModel(m, "Chibi Model"))
+  };
+}
+
+async function live3dScrapeAssets() {
+  const data = await live3dGetHtml("/vtuber_asset");
+  const $ = cheerio.load(data);
+  const assets = [];
+
+  $("img").each((_, el) => {
+    const src = $(el).attr("src") || $(el).attr("data-src");
+    const alt = $(el).attr("alt") || "";
+    if (src && src.includes("/saasbox/resources/png/") && alt.toLowerCase().includes("asset")) {
+      assets.push({
+        title: alt || "VTuber Asset",
+        category: alt.replace("VTuber", "").replace("Asset", "").trim() || "Accessory",
+        image: src
+      });
+    }
+  });
+
+  return { total: assets.length, items: assets };
+}
+
+async function live3dScrapeBackgrounds() {
+  const data = await live3dGetHtml("/vtuber_background");
+  const $ = cheerio.load(data);
+  const backgrounds = [];
+
+  $("img").each((_, el) => {
+    const src = $(el).attr("src") || $(el).attr("data-src");
+    const alt = $(el).attr("alt") || "";
+    if (src && src.includes("/saasbox/resources/gif/") && alt.toLowerCase().includes("background")) {
+      backgrounds.push({
+        title: alt,
+        type: "Animated Stream Background (GIF)",
+        url: src
+      });
+    }
+  });
+
+  return { total: backgrounds.length, items: backgrounds };
+}
+
+async function live3dScrapeAnimations() {
+  const data = await live3dGetHtml("/vtuber_animation");
+  const $ = cheerio.load(data);
+  const animations = [];
+
+  $("img").each((_, el) => {
+    const src = $(el).attr("src") || $(el).attr("data-src");
+    const alt = $(el).attr("alt") || "";
+    if (src && src.includes("/saasbox/resources/gif/") && alt.toLowerCase().includes("animation")) {
+      animations.push({
+        title: alt,
+        type: "Motion Emote / Animation (GIF)",
+        url: src
+      });
+    }
+  });
+
+  return { total: animations.length, items: animations };
+}
+
+async function live3dScrapeAiTools() {
+  const data = await live3dGetHtml("/ai-face-swap");
+  const $ = cheerio.load(data);
+  const tools = [];
+
+  $("a").each((_, el) => {
+    const href = $(el).attr("href");
+    const text = $(el).text().trim();
+    if (
+      href &&
+      (href.startsWith("/ai-") ||
+        href.startsWith("/multiple-") ||
+        href.startsWith("/batch-") ||
+        href.startsWith("/nano-") ||
+        href.startsWith("/flux-"))
+    ) {
+      if (text && !tools.some((t) => t.endpoint === `${LIVE3D_BASE_URL}${href}`)) {
+        tools.push({
+          name: text,
+          endpoint: `${LIVE3D_BASE_URL}${href}`,
+          slug: href.replace(/^\//, "")
+        });
+      }
+    }
+  });
+
+  return {
+    total: tools.length,
+    software_suite: [
+      {
+        name: "VTuber Maker",
+        description: "Webcam-based motion tracking & 3D avatar streaming software for OBS / Twitch / YouTube",
+        download_url: "https://animegenius-global.live3d.io/vtuber/product/VTuber%20Maker_v1.11.14.zip"
+      },
+      {
+        name: "VTuber Editor",
+        description: "VRM 3D model editor & accessorizer"
+      }
+    ],
+    tools
+  };
+}
+
+async function handleLive3dEndpoint(req, res) {
+  try {
+    if (req.method !== "GET") {
+      return res.status(405).json({
+        status: false,
+        message: "Method tidak diizinkan. Gunakan GET.",
+        error: "Method Not Allowed"
+      });
+    }
+
+    const category = String(req.query?.category || "all").trim().toLowerCase();
+
+    if (!LIVE3D_CATEGORIES.includes(category)) {
+      return res.status(400).json({
+        status: false,
+        message: `Parameter category tidak valid. Pilihan: ${LIVE3D_CATEGORIES.join(", ")}.`,
+        example: "/api/live3d?category=models"
+      });
+    }
+
+    let result;
+
+    if (category === "models") {
+      result = await live3dScrapeModels();
+    } else if (category === "assets") {
+      result = await live3dScrapeAssets();
+    } else if (category === "backgrounds") {
+      result = await live3dScrapeBackgrounds();
+    } else if (category === "animations") {
+      result = await live3dScrapeAnimations();
+    } else if (category === "ai-tools") {
+      result = await live3dScrapeAiTools();
+    } else {
+      const [models, assets, backgrounds, animations, aiTools] = await Promise.all([
+        live3dScrapeModels(),
+        live3dScrapeAssets(),
+        live3dScrapeBackgrounds(),
+        live3dScrapeAnimations(),
+        live3dScrapeAiTools()
+      ]);
+      result = { models, assets, backgrounds, animations, ai_suite: aiTools };
+    }
+
+    return res.status(200).json({
+      status: true,
+      source: "Live3D",
+      data: {
+        category,
+        scraped_at: new Date().toISOString(),
+        result
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: false,
+      message: "Gagal mengambil data dari Live3D.",
+      error: error.message
+    });
+  }
+}
 //taiv1
 async function handleHentaivid1Random(req, res) {
   const API_JSON = "https://raw.githubusercontent.com/Yasamsen/media-repo/main/hentaivid/api.json";
@@ -15695,6 +15931,7 @@ case "video-to-prompt":
   case "ocr":
   return handleOcr(req, res);
   case "favorite-random": return handleFavoriteRandom(req, res);
+  case "live3d": return handleLive3dEndpoint(req, res);
   case "imgbb":
   return handleImgbb(req, res);
   case "ringtone":
