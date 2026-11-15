@@ -414,3 +414,8 @@ pre, code { overflow-wrap: normal; }
   .amodal-box { border-radius: 24px !important; transform: translateY(24px) scale(0.97); opacity: 0; transition: transform 0.4s var(--pop), opacity 0.3s; }
   .amodal.in .amodal-box { transform: none; opacity: 1; }
 }
+
+/* progres tanpa persentase (Web2APK) */
+.meter.indet > span { width: 38%; border-right: 0; animation: indet 1.4s var(--ease) infinite; }
+@keyframes indet { 0% { margin-left: -38%; } 100% { margin-left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .meter.indet > span { animation: none; margin-left: 31%; } }

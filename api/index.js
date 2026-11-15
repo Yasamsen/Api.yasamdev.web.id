@@ -15241,6 +15241,27 @@ async function googleVerify(idToken) {
   return { sub: String(data.sub), email: String(data.email || ""), name: String(data.name || data.email || "Pengguna"), picture: String(data.picture || "") };
 }
 
+// Biaya kuota harian per request:
+//   1 = endpoint biasa | 2 = endpoint gambar & endpoint berat (IMAGE_QUOTA_COST / HEAVY_QUOTA_COST) | 3 = endpoint 18+ (ADULT_QUOTA_COST) & Web2APK (BUILD_QUOTA_COST)
+const ADULT_ROUTES = new Set(["nsfw-random", "nsfw-random1", "tai", "tai1", "imgviral"]);
+const BUILD_ROUTES = new Set(["web2apk"]); // hanya langkah build; status/unduh gratis
+const IMAGE_ROUTES = new Set([
+  "alya", "waifuimg", "zerochan", "alphacoders-random", "deviantart-random", // anime & wallpaper
+  "to-anime", "bgremover", "brat", "unblur-img", "unwatermark-nano-banana", "upscale-image", "crop-image", "compress-image", // olah gambar
+  "ai-image", "editimg", "photoeditor-ai" // AI gambar
+]);
+const HEAVY_ROUTES = new Set([
+  "to-gif", "gif-to-mp4", "video-to-audio", "audio-converter", "audio-to-video", "video-converter", "image-converter", "image-to-pdf", "freeconvert-video-to-mp3", // konverter file
+  "youtube-mp3", "ytplay", "terabox", "capcut", "motionbgs", // download berat
+  "video-to-prompt", "autoai", "ssweb", "text-to-speech" // proses berat
+]);
+const costEnv = (name, def) => { const n = parseInt(process.env[name], 10); return Number.isFinite(n) && n >= 1 ? n : def; };
+const adultQuotaCost = () => costEnv("ADULT_QUOTA_COST", 3);
+const buildQuotaCost = () => costEnv("BUILD_QUOTA_COST", 3);
+const imageQuotaCost = () => costEnv("IMAGE_QUOTA_COST", 2);
+const heavyQuotaCost = () => costEnv("HEAVY_QUOTA_COST", 2);
+const routeCost = (routeKey) => (ADULT_ROUTES.has(routeKey) ? adultQuotaCost() : BUILD_ROUTES.has(routeKey) ? buildQuotaCost() : IMAGE_ROUTES.has(routeKey) ? imageQuotaCost() : HEAVY_ROUTES.has(routeKey) ? heavyQuotaCost() : 1);
+
 const USER_GATE_SKIP = /^(stats|endpoint-status|admin|snippet|raw|auth|add-subdomain|cek-limit|check-limit)(\/|$)/; // add-subdomain memakai ADD_SUBDOMAIN_API_KEY sendiri
 
 // Dipanggil sebelum endpoint dijalankan. true = request dihentikan.
@@ -15250,6 +15271,10 @@ async function userGate(req, res, routeKey) {
   if (adminTokenOk(adminBearer(req))) return false;
   try {
     const url = new URL(req.url, "http://x");
+    if (routeKey === "web2apk") { // status / halaman / unduh tidak butuh login & tidak memakan kuota; hanya build (POST)
+      const act = String(url.searchParams.get("action") || "build").toLowerCase();
+      if (req.method !== "POST" || act !== "build") return false;
+    }
     const supplied = String(req.headers["x-api-key"] || url.searchParams.get("apikey") || "").trim();
     const sess = String(req.headers["x-user-token"] || "").trim();
     const col = await usersCol();
@@ -15280,21 +15305,26 @@ async function userGate(req, res, routeKey) {
       const r = await col.findOneAndUpdate(filter, update, { returnDocument: "after" });
       return r?.value ?? r ?? null;
     };
-    const inc = { $inc: { used: 1, total: 1 }, $set: { lastUsedAt: now } };
-    const roll = { $set: { usageDay: today, used: 1, lastUsedAt: now }, $inc: { total: 1 } };
-    // 1) hari ini masih ada sisa  2) hari baru -> reset hitungan  3) coba ulang (request lain baru saja mereset hari)
-    let after = await take({ _id: user._id, usageDay: today, used: { $lt: limit } }, inc)
-      || await take({ _id: user._id, usageDay: { $ne: today } }, roll)
-      || await take({ _id: user._id, usageDay: today, used: { $lt: limit } }, inc);
+
+    // kuota harian umum — endpoint gambar & 18+ memakan lebih dari 1 kuota
+    const cost = routeCost(routeKey);
+    const inc = { $inc: { used: cost, total: 1 }, $set: { lastUsedAt: now } };
+    const roll = { $set: { usageDay: today, used: cost, lastUsedAt: now }, $inc: { total: 1 } };
+    const hasRoom = { _id: user._id, usageDay: today, used: { $lte: limit - cost } };
+    // a) masih ada sisa  b) hari baru -> reset hitungan  c) coba ulang (request lain baru saja mereset hari)
+    let after = await take(hasRoom, inc)
+      || (cost <= limit && await take({ _id: user._id, usageDay: { $ne: today } }, roll))
+      || await take(hasRoom, inc);
     const ok = !!after;
     const used = after ? (after.used || 0) : limit;
     const reset = userResetSecs();
     res.setHeader("X-RateLimit-Limit", String(limit));
+    if (cost > 1) res.setHeader("X-RateLimit-Cost", String(cost));
     res.setHeader("X-RateLimit-Remaining", String(ok ? Math.max(0, limit - used) : 0));
     res.setHeader("X-RateLimit-Reset", String(reset));
     if (!ok) {
       res.setHeader("Retry-After", String(reset));
-      res.status(429).json({ status: false, endpoint: routeKey, rate_limited: true, limit, retry_after: reset, message: `Kuota harian ${limit} request habis. Reset otomatis tengah malam WIB.` });
+      res.status(429).json({ status: false, endpoint: routeKey, rate_limited: true, limit, retry_after: reset, ...(cost > 1 ? { cost } : {}), message: cost > 1 ? `Sisa kuota tidak cukup: endpoint ini memakai ${cost} kuota per request (kuota harian ${limit}). Reset otomatis tengah malam WIB.` : `Kuota harian ${limit} request habis. Reset otomatis tengah malam WIB.` });
       return true;
     }
     return false;
@@ -15416,6 +15446,7 @@ async function handleCekLimit(req, res) {
           reset_at: new Date(Date.now() + p.resetIn * 1000).toISOString(),
           timezone: "Asia/Jakarta"
         },
+        quota_cost: { normal: 1, image: imageQuotaCost(), heavy: heavyQuotaCost(), build: buildQuotaCost(), adult: adultQuotaCost() },
         total_requests: p.total,
         member_since: p.createdAt || null
       }
