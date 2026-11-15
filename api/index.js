@@ -15320,7 +15320,7 @@ const HEAVY_ROUTES = new Set([
   "video-to-prompt", "autoai", "ssweb", "text-to-speech" // proses berat
 ]);
 const costEnv = (name, def) => { const n = parseInt(process.env[name], 10); return Number.isFinite(n) && n >= 1 ? n : def; };
-const adultQuotaCost = () => costEnv("ADULT_QUOTA_COST", 3);
+const adultQuotaCost = () => costEnv("ADULT_QUOTA_COST", 5);
 const buildQuotaCost = () => costEnv("BUILD_QUOTA_COST", 3);
 const imageQuotaCost = () => costEnv("IMAGE_QUOTA_COST", 2);
 const heavyQuotaCost = () => costEnv("HEAVY_QUOTA_COST", 2);
