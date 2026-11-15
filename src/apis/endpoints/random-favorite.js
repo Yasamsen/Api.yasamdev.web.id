@@ -1,35 +1,57 @@
 export default {
-  slug: "random-favorite",
-  name: "Random Favorite",
+  slug: "favorite-random",
+  name: "Favorite Random",
   description:
-    "Menampilkan gambar favorit secara acak langsung sebagai media (image), bukan JSON. Tambahkan format=json jika hanya ingin URL gambarnya.",
-  category: "Random",
+    "Mengambil gambar secara acak dari media repository Favorite.",
+
+  category: "Media",
   method: "GET",
-  endpoint: "/api/random-favorite",
-  icon: "Shuffle",
-  parameters: [
-    {
-      name: "format",
-      type: "string",
-      required: false,
-      description:
-        "Isi dengan 'json' untuk menerima URL media dalam bentuk JSON. Kosongkan untuk langsung menampilkan gambar.",
-      example: "json"
-    }
-  ],
+  endpoint: "/api/favorite-random",
+  icon: "Images",
+
+  parameters: [],
+
   responseExample: {
     status: true,
-    source: "Yasamsen/media-repo",
-    data: {
-      url: "https://raw.githubusercontent.com/Yasamsen/media-repo/main/favorite/001.jpg",
-      total: 60
-    }
+    creator: "yasamDev",
+    source:
+      "https://raw.githubusercontent.com/Yasamsen/media-repo/main/favorite/api.json",
+    total: 60,
+    type: "image",
+    url:
+      "https://raw.githubusercontent.com/Yasamsen/media-repo/main/favorite/001.jpg"
   },
+
   responseFields: [
-    { name: "status", type: "boolean", description: "Status keberhasilan request (hanya pada format=json)" },
-    { name: "source", type: "string", description: "Sumber data media" },
-    { name: "data.url", type: "string", description: "URL gambar yang dipilih secara acak" },
-    { name: "data.total", type: "number", description: "Total media yang tersedia" }
-  ],
-  exampleRequest: "https://samapi.example.com/api/random-favorite"
+    {
+      name: "status",
+      type: "boolean",
+      description: "Status request."
+    },
+    {
+      name: "creator",
+      type: "string",
+      description: "Creator media."
+    },
+    {
+      name: "source",
+      type: "string",
+      description: "Sumber api.json."
+    },
+    {
+      name: "total",
+      type: "number",
+      description: "Jumlah media."
+    },
+    {
+      name: "type",
+      type: "string",
+      description: "Tipe media: image atau video."
+    },
+    {
+      name: "url",
+      type: "string",
+      description: "URL media yang dipilih secara acak."
+    }
+  ]
 };
