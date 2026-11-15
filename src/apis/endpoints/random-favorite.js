@@ -1,23 +1,57 @@
 export default {
-  slug: "random-favorite",
-  name: "Random Favorite",
-  description: "Mengambil satu URL gambar favorit secara acak dari repository media.",
-  category: "Random",
+  slug: "nsfw-random1",
+  name: "random-favorite",
+  description:
+    "Mengambil gambar atau video secara acak dari media repository Hentai.",
+
+  category: "Media",
   method: "GET",
   endpoint: "/api/random-favorite",
-  icon: "Shuffle",
+  icon: "Images",
+
   parameters: [],
+
   responseExample: {
     status: true,
-    source: "Random Favorite",
-    data: {
-      url: "https://raw.githubusercontent.com/Yasamsen/media-repo/main/favorite/001.jpg"
-    }
+    creator: "yasamDev",
+    source:
+      "https:///Xxxxxxx",
+    total: 33,
+    type: "image",
+    url:
+      "https:///Xxxxxxx"
   },
+
   responseFields: [
-    { name: "status", type: "boolean", description: "Status keberhasilan request" },
-    { name: "source", type: "string", description: "Nama sumber data" },
-    { name: "data.url", type: "string", description: "URL gambar yang dipilih secara acak" }
-  ],
-  exampleRequest: "https://samapi.example.com/api/random-favorite"
+    {
+      name: "status",
+      type: "boolean",
+      description: "Status request."
+    },
+    {
+      name: "creator",
+      type: "string",
+      description: "Creator media."
+    },
+    {
+      name: "source",
+      type: "string",
+      description: "Sumber api.json."
+    },
+    {
+      name: "total",
+      type: "number",
+      description: "Jumlah media."
+    },
+    {
+      name: "type",
+      type: "string",
+      description: "Tipe media: image atau video."
+    },
+    {
+      name: "url",
+      type: "string",
+      description: "URL media yang dipilih secara acak."
+    }
+  ]
 };
