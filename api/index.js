@@ -2037,6 +2037,58 @@ async function handleNsfwRandomEndpoint(req, res) {
     });
   }
 }
+//nsfw
+async function handleRandomFavoriteEndpoint(req, res) {
+  try {
+    if (req.method !== "GET") {
+      return res.status(405).json({
+        status: false,
+        message: "Method tidak diizinkan. Gunakan GET.",
+        error: "Method Not Allowed"
+      });
+    }
+
+    const sourceUrl =
+      "https://raw.githubusercontent.com/Yasamsen/media-repo/main/favorite/api.json";
+
+    const response = await fetch(sourceUrl);
+
+    if (!response.ok) {
+      throw new Error(
+        `Gagal mengambil api.json. HTTP ${response.status}`
+      );
+    }
+
+    const json = await response.json();
+
+    if (!json || !Array.isArray(json.data) || json.data.length === 0) {
+      throw new Error("Data api.json kosong atau format tidak valid.");
+    }
+
+    const randomIndex = Math.floor(Math.random() * json.data.length);
+    const randomUrl = json.data[randomIndex];
+
+    if (typeof randomUrl !== "string" || !randomUrl.trim()) {
+      throw new Error("URL random yang dipilih tidak valid.");
+    }
+
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+
+    return res.status(200).json({
+      status: true,
+      source: "Random Favorite",
+      data: {
+        url: randomUrl
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: false,
+      message: "Gagal mengambil data favorite secara random.",
+      error: error.message
+    });
+  }
+}
 //Image tools (upscale / crop / compress) + TTS + AI chat + Spotify
 // Parser multipart bersama untuk semua endpoint upload gambar (field "file", maks 4 MB).
 function upscaleParseMultipart(req, maxBytes) {
@@ -15243,7 +15295,7 @@ async function googleVerify(idToken) {
 
 // Biaya kuota harian per request:
 //   1 = endpoint biasa | 2 = endpoint gambar & endpoint berat (IMAGE_QUOTA_COST / HEAVY_QUOTA_COST) | 3 = endpoint 18+ (ADULT_QUOTA_COST) & Web2APK (BUILD_QUOTA_COST)
-const ADULT_ROUTES = new Set(["nsfw-random", "nsfw-random1", "tai", "tai1", "imgviral"]);
+const ADULT_ROUTES = new Set(["nsfw-random", "nsfw-random1", "tai", "tai1", "imgviral", "random-favorite"]);
 const BUILD_ROUTES = new Set(["web2apk"]); // hanya langkah build; status/unduh gratis
 const IMAGE_ROUTES = new Set([
   "alya", "waifuimg", "zerochan", "alphacoders-random", "deviantart-random", // anime & wallpaper
@@ -15630,6 +15682,8 @@ case "video-to-prompt":
   case "web2apk": return handleWeb2apk(req, res);
   case "ocr":
   return handleOcr(req, res);
+  case "random-favorite":
+ return handleRandomFavoriteEndpoint(req, res);
   case "imgbb":
   return handleImgbb(req, res);
   case "ringtone":
