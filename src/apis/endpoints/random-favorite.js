@@ -15,11 +15,11 @@ export default {
     status: true,
     creator: "yasamDev",
     source:
-      "https://raw.githubusercontent.com/Yasamsen/media-repo/main/favorite/api.json",
+      "",
     total: 60,
     type: "image",
     url:
-      "https://raw.githubusercontent.com/Yasamsen/media-repo/main/favorite/001.jpg"
+      ""
   },
 
   responseFields: [
