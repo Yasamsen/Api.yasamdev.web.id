@@ -2037,55 +2037,90 @@ async function handleNsfwRandomEndpoint(req, res) {
     });
   }
 }
-//nsfw
-async function handleRandomFavoriteEndpoint(req, res) {
+//nsfw random 
+const RANDOM_FAVORITE_SOURCE =
+  "https://raw.githubusercontent.com/Yasamsen/media-repo/main/favorite/api.json";
+
+const RANDOM_FAVORITE_MIME = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+  mp4: "video/mp4",
+};
+
+async function randomFavoriteFetchList() {
+  const response = await fetch(RANDOM_FAVORITE_SOURCE, {
+    headers: { Accept: "application/json" },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gagal mengambil daftar media (HTTP ${response.status})`);
+  }
+
+  const json = await response.json();
+  const list = Array.isArray(json?.data) ? json.data.filter(Boolean) : [];
+
+  if (!list.length) {
+    throw new Error("Daftar media kosong");
+  }
+
+  return list;
+}
+
+async function handleRandomFavorite(req, res) {
   try {
     if (req.method !== "GET") {
       return res.status(405).json({
         status: false,
-        message: "Method tidak diizinkan. Gunakan GET.",
-        error: "Method Not Allowed"
+        message: "Method tidak diizinkan, gunakan GET",
+        error: `Method ${req.method} not allowed`,
       });
     }
 
-    const sourceUrl =
-      "https://raw.githubusercontent.com/Yasamsen/media-repo/main/favorite/api.json";
+    const format = String(req.query?.format || "").toLowerCase();
+    const list = await randomFavoriteFetchList();
+    const mediaUrl = list[Math.floor(Math.random() * list.length)];
 
-    const response = await fetch(sourceUrl);
-
-    if (!response.ok) {
-      throw new Error(
-        `Gagal mengambil api.json. HTTP ${response.status}`
-      );
+    // Mode JSON (opsional): /api/random-favorite?format=json
+    if (format === "json") {
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(200).json({
+        status: true,
+        source: "Yasamsen/media-repo",
+        data: {
+          url: mediaUrl,
+          total: list.length,
+        },
+      });
     }
 
-    const json = await response.json();
+    // Mode default: tampilkan sebagai media
+    const mediaResponse = await fetch(mediaUrl);
 
-    if (!json || !Array.isArray(json.data) || json.data.length === 0) {
-      throw new Error("Data api.json kosong atau format tidak valid.");
+    if (!mediaResponse.ok) {
+      throw new Error(`Gagal mengambil file media (HTTP ${mediaResponse.status})`);
     }
 
-    const randomIndex = Math.floor(Math.random() * json.data.length);
-    const randomUrl = json.data[randomIndex];
+    const ext = mediaUrl.split("?")[0].split(".").pop().toLowerCase();
+    const contentType =
+      mediaResponse.headers.get("content-type")?.startsWith("image/") ||
+      mediaResponse.headers.get("content-type")?.startsWith("video/")
+        ? mediaResponse.headers.get("content-type")
+        : RANDOM_FAVORITE_MIME[ext] || "image/jpeg";
 
-    if (typeof randomUrl !== "string" || !randomUrl.trim()) {
-      throw new Error("URL random yang dipilih tidak valid.");
-    }
+    const buffer = Buffer.from(await mediaResponse.arrayBuffer());
 
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Length", buffer.length);
     res.setHeader("Cache-Control", "no-store, max-age=0");
-
-    return res.status(200).json({
-      status: true,
-      source: "Random Favorite",
-      data: {
-        url: randomUrl
-      }
-    });
+    return res.status(200).send(buffer);
   } catch (error) {
     return res.status(500).json({
       status: false,
-      message: "Gagal mengambil data favorite secara random.",
-      error: error.message
+      message: "Gagal mengambil media acak",
+      error: error.message,
     });
   }
 }
