@@ -46,7 +46,7 @@ function loggedIn(u) {
 
       <section class="card mt-5 p-6 sm:p-7" aria-labelledby="pf-usage">
         <div class="mb-4 flex items-end justify-between gap-3">
-          <div><h2 id="pf-usage" class="text-lg">Kuota hari ini</h2><p class="mt-0.5 text-xs text-muted">Reset otomatis tengah malam WIB · ${resetText(u.resetIn)}</p><p class="mt-0.5 text-[11px] font-bold text-dim">Biasa 1 kuota · gambar & proses berat 2 · 18+ dan Web2APK 3 per request.</p></div>
+          <div><h2 id="pf-usage" class="text-lg">Kuota hari ini</h2><p class="mt-0.5 text-xs text-muted">Reset otomatis tengah malam WIB · ${resetText(u.resetIn)}</p><p class="mt-0.5 text-[11px] font-bold text-dim">Biaya kuota per request tertera di setiap endpoint.</p></div>
           <p class="font-display text-3xl leading-none sm:text-4xl"><span id="pf-used">${fmtNum(u.used)}</span><span class="text-lg text-dim"> / ${fmtNum(u.limit)}</span></p>
         </div>
         <div class="meter ${tone}" role="progressbar" aria-valuenow="${u.used}" aria-valuemin="0" aria-valuemax="${u.limit}" aria-label="Pemakaian kuota harian"><span style="width:${pct}%"></span></div>

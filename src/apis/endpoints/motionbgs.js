@@ -1,5 +1,6 @@
 export default {
   slug: "motionbgs",
+  cost: 2,
   name: "MotionBGs Live Wallpaper",
   description:
     "Mengambil detail live wallpaper dari motionbgs.com: judul, thumbnail, video preview, tag, link download 4K/HD, dan wallpaper terkait.",

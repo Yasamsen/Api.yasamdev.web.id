@@ -1,5 +1,6 @@
 export default {
   slug: "nsfw-random",
+  cost: 3,
   name: "Nsfw Random",
   description: "Mengambil satu URL media secara acak dari koleksi Nsfw.json.",
   category: "Media",

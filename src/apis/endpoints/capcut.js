@@ -1,5 +1,6 @@
 export default {
   slug: "capcut",
+  cost: 2,
 
   name: "CapCut Downloader",
 

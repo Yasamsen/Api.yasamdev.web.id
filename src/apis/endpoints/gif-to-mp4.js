@@ -1,5 +1,6 @@
 export default {
   "slug": "gif-to-mp4",
+  "cost": 2,
   "name": "GIF to MP4",
   "description": "Ubah GIF menjadi video MP4 yang lebih ringan.",
   "category": "Converter",

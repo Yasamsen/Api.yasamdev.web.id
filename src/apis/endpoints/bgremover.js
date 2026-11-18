@@ -1,6 +1,7 @@
 // Simpan sebagai: src/apis/endpoints/bgremover.js
 export default {
   slug: "bgremover",
+  cost: 2,
   name: "Background Remover",
   description:
     "Unggah gambar langsung dari perangkat kamu (maksimal 4MB) dan dapatkan link PNG tanpa background.",

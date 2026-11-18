@@ -1,5 +1,6 @@
 export default {
   slug: "terabox",
+  cost: 2,
 
   name: "TeraBox Downloader",
 

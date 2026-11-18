@@ -23,6 +23,7 @@ function normalizeApi(api) {
     description: api.description || `API endpoint for ${titleFromSlug(fallbackSlug)}.`,
     category: cat.label,
     categoryId: cat.id,
+    cost: Number.isInteger(api.cost) && api.cost >= 1 ? api.cost : 1, // biaya kuota per request (metadata endpoint)
     method: api.method || 'GET',
     endpoint: api.endpoint || `/api/${fallbackSlug}`,
     icon: api.icon || 'Activity',

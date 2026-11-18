@@ -1,5 +1,6 @@
 export default {
   slug: "ssweb",
+  cost: 2,
   name: "Screenshot Web",
   description: "Mengambil screenshot dari sebuah website menggunakan ScreenshotMachine.",
   category: "Tools",

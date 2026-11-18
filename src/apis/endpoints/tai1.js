@@ -1,5 +1,6 @@
 export default {
   slug: "tai1",
+  cost: 3,
   name: "Tai Random V1",
   description:
     "Mengambil gambar atau video secara acak dari media repository Hentai.",

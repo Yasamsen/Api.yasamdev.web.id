@@ -1,5 +1,6 @@
 export default {
   slug: "web2apk",
+  cost: 3,
   name: "Web2APK",
   description:
     "Ubah website HTTPS menjadi APK Android (WebView). Kirim POST berisi url, appName, dan iconUrl. Package ID dibuat otomatis, lalu buka statusUrl dari hasilnya sampai selesai dan unduh APK lewat downloadUrl.",

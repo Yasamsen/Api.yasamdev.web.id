@@ -1,5 +1,6 @@
 export default {
   slug: "photoeditor-ai",
+  cost: 2,
 
   name: "PhotoEditor AI",
 
