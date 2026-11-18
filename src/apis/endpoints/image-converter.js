@@ -1,6 +1,5 @@
 export default {
   "slug": "image-converter",
-  "cost": 2,
   "name": "Image Converter",
   "description": "Konversi gambar antar format: HEIC, WEBP, JFIF, JPG, PNG, GIF, BMP, TIFF.",
   "category": "Converter",

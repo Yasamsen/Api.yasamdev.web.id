@@ -1,6 +1,5 @@
 export default {
   "slug": "video-converter",
-  "cost": 2,
   "name": "Video Converter",
   "description": "Konversi antar format video: MP4, WEBM, MOV, AVI, MKV.",
   "category": "Converter",

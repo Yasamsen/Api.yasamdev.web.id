@@ -149,7 +149,7 @@ export function renderApiCard(api, i = 0) {
     <h3 class="mb-1.5 text-base font-bold tracking-[-0.01em]">${esc(api.name)}</h3>
     <p class="mb-6 min-h-[48px] text-sm leading-6 text-muted">${esc(api.description)}</p>
     <div class="mt-auto flex items-center justify-between gap-2 border-t hair pt-4">
-      <div class="flex min-w-0 items-center gap-2"><span class="badge ${get ? 'badge-get' : 'badge-post'}">${esc(api.method)}</span>${api.cost > 1 ? `<span class="badge" style="background:rgb(var(--yellow));color:#14102b" title="Memakai ${api.cost} kuota per request">${api.cost} kuota</span>` : ''}<code class="truncate font-mono text-[11px] text-dim">${esc(api.endpoint)}</code></div>
+      <div class="flex min-w-0 items-center gap-2"><span class="badge ${get ? 'badge-get' : 'badge-post'}">${esc(api.method)}</span><code class="truncate font-mono text-[11px] text-dim">${esc(api.endpoint)}</code></div>
       <button data-copy="${esc(BASE_URL + api.endpoint)}" class="iconbtn !h-8 !w-8 shrink-0" aria-label="Copy endpoint">${icon('Copy', 'h-3.5 w-3.5')}</button>
     </div>
     <div class="mt-4 flex items-center gap-2">

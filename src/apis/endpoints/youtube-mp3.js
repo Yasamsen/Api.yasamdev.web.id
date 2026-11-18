@@ -1,6 +1,5 @@
 export default {
   slug: "youtube-mp3",
-  cost: 2,
   name: "YouTube MP3",
   description: "Mengubah video YouTube menjadi audio MP3.",
   category: "Downloader",

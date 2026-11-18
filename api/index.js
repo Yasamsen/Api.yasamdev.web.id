@@ -20,7 +20,6 @@ import nodeOs from "node:os";
 import http from "node:http";
 import tls from "node:tls";
 import zlib from "node:zlib";
-import { QUOTA_MAP } from "./_quota-map.js";
 // Semua endpoint digabung ke 1 file supaya hanya dihitung 1 Serverless
 // Function oleh Vercel (Hobby plan cuma boleh maksimal 12 function).
 // Body parser dimatikan secara global karena nano-banana butuh raw stream
@@ -2036,6 +2035,70 @@ async function handleNsfwRandomEndpoint(req, res) {
       message: "Gagal mengambil data NSFW secara random.",
       error: error.message
     });
+  }
+}
+//nsfw random 
+async function handleFavoriteRandom(req, res) {
+  const API_JSON = "https://raw.githubusercontent.com/Yasamsen/media-repo/main/favorite/api.json";
+  const MIME_TYPES = {
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    webp: "image/webp",
+    avif: "image/avif",
+    mp4: "video/mp4",
+    webm: "video/webm",
+    mov: "video/quicktime",
+    m4v: "video/x-m4v"
+  };
+
+  if (req.method !== "GET") {
+    return res.status(405).json({ status: false, message: "Method not allowed" });
+  }
+
+  try {
+    const listResponse = await fetch(API_JSON, { cache: "no-store" });
+
+    if (!listResponse.ok) {
+      return res.status(502).json({ status: false, message: "Gagal mengambil api.json" });
+    }
+
+    const json = await listResponse.json();
+
+    if (!Array.isArray(json.data) || json.data.length === 0) {
+      return res.status(404).json({ status: false, message: "Media tidak ditemukan" });
+    }
+
+    const media = json.data[Math.floor(Math.random() * json.data.length)];
+
+    if (typeof media !== "string") {
+      return res.status(500).json({ status: false, message: "URL media tidak valid" });
+    }
+
+    const cleanUrl = media.split("?")[0].toLowerCase();
+    const extension = cleanUrl.split(".").pop();
+    const contentType = MIME_TYPES[extension];
+
+    if (!contentType) {
+      return res.status(415).json({ status: false, message: "Format media tidak didukung", url: media });
+    }
+
+    const mediaResponse = await fetch(media);
+
+    if (!mediaResponse.ok) {
+      return res.status(502).json({ status: false, message: "Gagal mengambil media", http_status: mediaResponse.status });
+    }
+
+    const buffer = Buffer.from(await mediaResponse.arrayBuffer());
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+
+    return res.status(200).send(buffer);
+  } catch (error) {
+    console.error("Favorite MEDIA ERROR:", error);
+    return res.status(502).json({ status: false, message: "Gagal mengambil media", error: error.message });
   }
 }
 //Image tools (upscale / crop / compress) + TTS + AI chat + Spotify
@@ -15242,10 +15305,26 @@ async function googleVerify(idToken) {
   return { sub: String(data.sub), email: String(data.email || ""), name: String(data.name || data.email || "Pengguna"), picture: String(data.picture || "") };
 }
 
-// Biaya kuota harian per request dibaca dari field `cost` di metadata tiap endpoint (src/apis/endpoints/**/*.js).
-// Peta rute -> biaya dibuat otomatis (api/_quota-map.js) oleh scripts/gen-quota-map.mjs saat `npm run build`.
-// Rute yang tidak punya `cost` berbiaya 1.
-const routeCost = (routeKey) => QUOTA_MAP[routeKey] || 1;
+// Biaya kuota harian per request:
+//   1 = endpoint biasa | 2 = endpoint gambar & endpoint berat (IMAGE_QUOTA_COST / HEAVY_QUOTA_COST) | 3 = endpoint 18+ (ADULT_QUOTA_COST) & Web2APK (BUILD_QUOTA_COST)
+const ADULT_ROUTES = new Set(["nsfw-random", "nsfw-random1", "tai", "tai1", "imgviral", "favorite-random"]);
+const BUILD_ROUTES = new Set(["web2apk"]); // hanya langkah build; status/unduh gratis
+const IMAGE_ROUTES = new Set([
+  "alya", "waifuimg", "zerochan", "alphacoders-random", "deviantart-random", // anime & wallpaper
+  "to-anime", "bgremover", "brat", "unblur-img", "unwatermark-nano-banana", "upscale-image", "crop-image", "compress-image", // olah gambar
+  "ai-image", "editimg", "photoeditor-ai" // AI gambar
+]);
+const HEAVY_ROUTES = new Set([
+  "to-gif", "gif-to-mp4", "video-to-audio", "audio-converter", "audio-to-video", "video-converter", "image-converter", "image-to-pdf", "freeconvert-video-to-mp3", // konverter file
+  "youtube-mp3", "ytplay", "terabox", "capcut", "motionbgs", // download berat
+  "video-to-prompt", "autoai", "ssweb", "text-to-speech" // proses berat
+]);
+const costEnv = (name, def) => { const n = parseInt(process.env[name], 10); return Number.isFinite(n) && n >= 1 ? n : def; };
+const adultQuotaCost = () => costEnv("ADULT_QUOTA_COST", 5);
+const buildQuotaCost = () => costEnv("BUILD_QUOTA_COST", 3);
+const imageQuotaCost = () => costEnv("IMAGE_QUOTA_COST", 2);
+const heavyQuotaCost = () => costEnv("HEAVY_QUOTA_COST", 2);
+const routeCost = (routeKey) => (ADULT_ROUTES.has(routeKey) ? adultQuotaCost() : BUILD_ROUTES.has(routeKey) ? buildQuotaCost() : IMAGE_ROUTES.has(routeKey) ? imageQuotaCost() : HEAVY_ROUTES.has(routeKey) ? heavyQuotaCost() : 1);
 
 const USER_GATE_SKIP = /^(stats|endpoint-status|admin|snippet|raw|auth|add-subdomain|cek-limit|check-limit)(\/|$)/; // add-subdomain memakai ADD_SUBDOMAIN_API_KEY sendiri
 
@@ -15431,7 +15510,7 @@ async function handleCekLimit(req, res) {
           reset_at: new Date(Date.now() + p.resetIn * 1000).toISOString(),
           timezone: "Asia/Jakarta"
         },
-        quota_cost: { default: 1, endpoints: Object.fromEntries(Object.entries(QUOTA_MAP).filter(([, c]) => c > 1)) },
+        quota_cost: { normal: 1, image: imageQuotaCost(), heavy: heavyQuotaCost(), build: buildQuotaCost(), adult: adultQuotaCost() },
         total_requests: p.total,
         member_since: p.createdAt || null
       }
@@ -15615,6 +15694,7 @@ case "video-to-prompt":
   case "web2apk": return handleWeb2apk(req, res);
   case "ocr":
   return handleOcr(req, res);
+  case "favorite-random": return handleFavoriteRandom(req, res);
   case "imgbb":
   return handleImgbb(req, res);
   case "ringtone":

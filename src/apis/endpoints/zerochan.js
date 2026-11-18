@@ -1,6 +1,5 @@
 export default {
   slug: "zerochan",
-  cost: 2,
   name: "Zerochan",
   description: "Mencari gambar anime dan karakter dari Zerochan.",
   category: "Anime",

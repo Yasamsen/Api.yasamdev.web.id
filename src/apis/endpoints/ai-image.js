@@ -1,6 +1,5 @@
 export default {
   slug: "ai-image",
-  cost: 2,
   name: "AI Image",
   description: "Generate gambar AI berdasarkan prompt dan negative prompt.",
   category: "AI",

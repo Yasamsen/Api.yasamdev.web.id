@@ -1,6 +1,5 @@
 export default {
   "slug": "ytplay",
-  "cost": 2,
   "name": "YouTube Play",
   "description": "Search YouTube videos and return audio information with lyrics when available.",
   "category": "YouTube",

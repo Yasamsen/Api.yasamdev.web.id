@@ -1,6 +1,5 @@
 export default {
   slug: "crop-image",
-  cost: 2,
   name: "Crop Image",
   description:
     "Unggah gambar (maksimal 4MB) lalu potong berdasarkan rasio (1:1, 16:9, dst.) atau koordinat piksel manual. Hasilnya berupa link gambar.",

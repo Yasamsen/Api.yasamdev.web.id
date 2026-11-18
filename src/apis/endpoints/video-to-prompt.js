@@ -1,6 +1,5 @@
 export default {
   slug: "video-to-prompt",
-  cost: 2,
   name: "Video to Prompt AI",
   description:
     "Mengekstrak prompt AI dari URL video menggunakan StarLabs Video to Prompt API. Mendukung prompt untuk model seperti Veo, Sora, Kling, Runway, dan Seedance.",

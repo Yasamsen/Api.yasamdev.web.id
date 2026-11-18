@@ -1,7 +1,6 @@
 
 export default {
   slug: "brat",
-  cost: 2,
   name: "Brat Generator",
   description:
     "Membuat gambar teks bergaya Brat melalui layanan Lumi Base.",

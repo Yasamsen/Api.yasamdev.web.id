@@ -426,7 +426,7 @@ function renderApiDetail(api) {
       </div>
     </div>
     <p class="seq mb-8 text-[15px] leading-8 text-muted" style="--d:.4s">${esc(api.description)}</p>
-    <div class="seq glass mb-12 flex items-center gap-3 rounded-xl px-4 py-3" style="--d:.5s">${methodBadge(api.method)}${api.cost > 1 ? `<span class="badge shrink-0" style="background:rgb(var(--yellow));color:#14102b" title="Memakai ${api.cost} kuota per request">${api.cost} kuota</span>` : ''}<code class="flex-1 overflow-x-auto whitespace-nowrap font-mono text-xs text-muted">${esc(currentEndpoint)}</code><button data-copy="${esc(currentEndpoint)}" class="iconbtn !h-8 !w-8" aria-label="Copy endpoint">${icon('Copy', 'h-3.5 w-3.5')}</button></div>
+    <div class="seq glass mb-12 flex items-center gap-3 rounded-xl px-4 py-3" style="--d:.5s">${methodBadge(api.method)}<code class="flex-1 overflow-x-auto whitespace-nowrap font-mono text-xs text-muted">${esc(currentEndpoint)}</code><button data-copy="${esc(currentEndpoint)}" class="iconbtn !h-8 !w-8" aria-label="Copy endpoint">${icon('Copy', 'h-3.5 w-3.5')}</button></div>
 
     ${reveal(`${h2('Parameters')}<div class="card"><div class="hidden grid-cols-[1fr_100px_2fr] border-b hair px-5 py-3 text-xs font-semibold text-dim sm:grid"><span>Name</span><span>Type</span><span>Description</span></div>${params}</div>`, 0, 'section', 'mb-12')}
     ${reveal(`${h2('Example request')}${codeBlock(getCurrentApiUrl(api.exampleRequest), api.method === 'POST' ? 'http' : 'url')}`, 0, 'section', 'mb-12')}
@@ -557,10 +557,9 @@ export function bindDocs(api) {
   hooks.tryRefresh = () => {
     const h = document.getElementById('try-hint');
     if (!h) return;
-    const costNote = api.cost > 1 ? ` Endpoint ini memakai <b class="text-fg">${api.cost} kuota</b> per request.` : '';
-    h.innerHTML = (isLoggedIn()
+    h.innerHTML = isLoggedIn()
       ? (api.public ? 'Endpoint ini terbuka: tidak perlu login dan tidak memakai kuota.' : 'Di website, request memakai akunmu otomatis. “Copy URL” menyertakan API key kamu, siap dipakai di bot.')
-      : api.public ? 'Endpoint ini terbuka: tidak perlu login dan tidak memakai kuota.' : 'Untuk bot: tambahkan <code class="font-mono font-bold text-fg">?apikey=KEY</code>. Key didapat setelah login (menu Profil).') + (api.public ? '' : costNote);
+      : api.public ? 'Endpoint ini terbuka: tidak perlu login dan tidak memakai kuota.' : 'Untuk bot: tambahkan <code class="font-mono font-bold text-fg">?apikey=KEY</code>. Key didapat setelah login (menu Profil).';
   };
   hooks.tryRefresh();
   const buildBody = () => Object.fromEntries(api.parameters

@@ -1,6 +1,5 @@
 export default {
   "slug": "video-to-audio",
-  "cost": 2,
   "name": "Video to Audio",
   "description": "Ambil audio dari video dan simpan sebagai MP3, WAV, OGG, M4A, AAC, atau FLAC.",
   "category": "Converter",

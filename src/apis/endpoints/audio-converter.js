@@ -1,6 +1,5 @@
 export default {
   "slug": "audio-converter",
-  "cost": 2,
   "name": "Audio Converter",
   "description": "Konversi antar format audio: MP3, WAV, OGG, M4A, AAC, FLAC.",
   "category": "Converter",

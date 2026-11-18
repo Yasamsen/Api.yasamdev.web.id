@@ -1,6 +1,5 @@
 export default {
   "slug": "image-to-pdf",
-  "cost": 2,
   "name": "Image to PDF",
   "description": "Ubah gambar (JPG, PNG, WEBP, HEIC, dll) menjadi file PDF.",
   "category": "Converter",

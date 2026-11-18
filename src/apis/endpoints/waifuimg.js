@@ -1,6 +1,5 @@
 export default {
   slug: "waifuimg",
-  cost: 2,
   name: "Waifu-Ku",
   description: "Mengambil gambar waifu secara random.",
   category: "Anime",

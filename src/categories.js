@@ -69,7 +69,7 @@ const SLUGS = {
   tools: ['ssweb', 'qrcode', 'tempmail', 'tourl', 'imgbb', 'web2apk', 'check-host', 'ip-lookup', 'add-subdomain'],
   social: ['reaction-wa', 'alight-send', 'alight-verify'],
   fun: ['alya', 'quotes-anime', 'waifuimg', 'zerochan', 'alphacoders-random', 'deviantart-random'],
-  adult: ['nsfw-random', 'nsfw-random1', 'tai1', 'tai', 'imgviral'],
+  adult: ['favorite-random', 'nsfw-random', 'nsfw-random1', 'tai1', 'tai', 'imgviral'],
 };
 const SLUG_TO_ID = Object.fromEntries(Object.entries(SLUGS).flatMap(([id, list]) => list.map((slug) => [slug, id])));
 
@@ -132,7 +132,7 @@ export function catTile(c, size = 'h-10 w-10', iconSize = 'h-4 w-4') {
   return `<span class="iconbox ${size} shrink-0" style="--tile:${c.tile};--tile-fg:${c.fg}">${icon(c.icon, iconSize)}</span>`;
 }
 
-export const adultNotice = '<div class="mb-4 flex items-start gap-2.5 rounded-2xl border-2 border-ink bg-red/15 px-4 py-3 text-xs font-bold leading-5"><span class="mt-0.5 shrink-0 rounded-md border-2 border-ink bg-red px-1.5 text-[10px] font-extrabold text-white">18+</span><span>Kategori ini berisi konten dewasa dan hanya boleh diakses oleh pengguna berusia 18 tahun ke atas. Endpoint 18+ memakan lebih banyak kuota harian; biayanya tertera di tiap endpoint.</span></div>';
+export const adultNotice = '<div class="mb-4 flex items-start gap-2.5 rounded-2xl border-2 border-ink bg-red/15 px-4 py-3 text-xs font-bold leading-5"><span class="mt-0.5 shrink-0 rounded-md border-2 border-ink bg-red px-1.5 text-[10px] font-extrabold text-white">18+</span><span>Kategori ini berisi konten dewasa dan hanya boleh diakses oleh pengguna berusia 18 tahun ke atas. Setiap request endpoint 18+ memakai 3 kuota harian.</span></div>';
 
 /* State filter yang bertahan saat tema diganti / halaman dirender ulang. */
 export const uiState = {
