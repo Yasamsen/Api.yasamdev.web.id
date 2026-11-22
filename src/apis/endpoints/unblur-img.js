@@ -1,5 +1,6 @@
 export default {
   slug: "unblur-img",
+  cost: 2,
 
   name: "Unblur Image",
 

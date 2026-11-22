@@ -1,5 +1,6 @@
 export default {
   slug: "alya",
+  cost: 2,
   name: "Alya Random Media",
   description:
     "Mengambil gambar atau video secara acak dari media repository Alya.",

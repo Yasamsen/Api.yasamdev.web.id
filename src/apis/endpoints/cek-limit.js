@@ -33,7 +33,10 @@ export default {
         reset_at: "2026-11-13T17:00:00.000Z",
         timezone: "Asia/Jakarta"
       },
-      quota_cost: { normal: 1, image: 2, heavy: 2, build: 3, adult: 3 },
+      quota_cost: {
+        default: 1,
+        endpoints: { waifuimg: 2, "nsfw-random": 3, web2apk: 3 }
+      },
       total_requests: 512,
       member_since: "2026-11-01T08:12:00.000Z"
     }
@@ -50,11 +53,8 @@ export default {
     { name: "data.limit.percent_used", type: "number", description: "Persentase kuota terpakai." },
     { name: "data.limit.reset_in_seconds", type: "number", description: "Detik sampai kuota di-reset (tengah malam WIB)." },
     { name: "data.limit.reset_at", type: "string", description: "Waktu reset kuota (ISO 8601)." },
-    { name: "data.quota_cost.normal", type: "number", description: "Kuota yang dipakai tiap request endpoint biasa." },
-    { name: "data.quota_cost.image", type: "number", description: "Kuota yang dipakai tiap request endpoint penghasil gambar." },
-    { name: "data.quota_cost.heavy", type: "number", description: "Kuota per request endpoint berat (konverter, download besar, dll)." },
-    { name: "data.quota_cost.build", type: "number", description: "Kuota per request Web2APK (hanya langkah build)." },
-    { name: "data.quota_cost.adult", type: "number", description: "Kuota yang dipakai tiap request endpoint 18+." },
+    { name: "data.quota_cost.default", type: "number", description: "Kuota per request untuk endpoint yang tidak disebut di bawah." },
+    { name: "data.quota_cost.endpoints", type: "object", description: "Endpoint yang memakan lebih dari 1 kuota (nama rute: biaya)." },
     { name: "data.total_requests", type: "number", description: "Total seluruh request sejak bergabung." },
     { name: "data.member_since", type: "string", description: "Tanggal akun dibuat." }
   ],

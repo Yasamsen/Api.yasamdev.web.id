@@ -20,6 +20,9 @@ import nodeOs from "node:os";
 import http from "node:http";
 import tls from "node:tls";
 import zlib from "node:zlib";
+import { QUOTA_MAP } from "./_quota-map.js";
+import { vectorizeImage } from "./_vectorize.js";
+import { svgToAlightXml } from "./_svg-to-am.js";
 // Semua endpoint digabung ke 1 file supaya hanya dihitung 1 Serverless
 // Function oleh Vercel (Hobby plan cuma boleh maksimal 12 function).
 // Body parser dimatikan secara global karena nano-banana butuh raw stream
@@ -2037,70 +2040,6 @@ async function handleNsfwRandomEndpoint(req, res) {
     });
   }
 }
-//nsfw random 
-async function handleFavoriteRandom(req, res) {
-  const API_JSON = "https://raw.githubusercontent.com/Yasamsen/media-repo/main/favorite/api.json";
-  const MIME_TYPES = {
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    png: "image/png",
-    gif: "image/gif",
-    webp: "image/webp",
-    avif: "image/avif",
-    mp4: "video/mp4",
-    webm: "video/webm",
-    mov: "video/quicktime",
-    m4v: "video/x-m4v"
-  };
-
-  if (req.method !== "GET") {
-    return res.status(405).json({ status: false, message: "Method not allowed" });
-  }
-
-  try {
-    const listResponse = await fetch(API_JSON, { cache: "no-store" });
-
-    if (!listResponse.ok) {
-      return res.status(502).json({ status: false, message: "Gagal mengambil api.json" });
-    }
-
-    const json = await listResponse.json();
-
-    if (!Array.isArray(json.data) || json.data.length === 0) {
-      return res.status(404).json({ status: false, message: "Media tidak ditemukan" });
-    }
-
-    const media = json.data[Math.floor(Math.random() * json.data.length)];
-
-    if (typeof media !== "string") {
-      return res.status(500).json({ status: false, message: "URL media tidak valid" });
-    }
-
-    const cleanUrl = media.split("?")[0].toLowerCase();
-    const extension = cleanUrl.split(".").pop();
-    const contentType = MIME_TYPES[extension];
-
-    if (!contentType) {
-      return res.status(415).json({ status: false, message: "Format media tidak didukung", url: media });
-    }
-
-    const mediaResponse = await fetch(media);
-
-    if (!mediaResponse.ok) {
-      return res.status(502).json({ status: false, message: "Gagal mengambil media", http_status: mediaResponse.status });
-    }
-
-    const buffer = Buffer.from(await mediaResponse.arrayBuffer());
-
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
-
-    return res.status(200).send(buffer);
-  } catch (error) {
-    console.error("Favorite MEDIA ERROR:", error);
-    return res.status(502).json({ status: false, message: "Gagal mengambil media", error: error.message });
-  }
-}
 //Image tools (upscale / crop / compress) + TTS + AI chat + Spotify
 // Parser multipart bersama untuk semua endpoint upload gambar (field "file", maks 4 MB).
 function upscaleParseMultipart(req, maxBytes) {
@@ -3189,6 +3128,114 @@ async function handleFreeconvertVideoToMp3(req, res) {
   }
 }
 
+
+
+// ===============================
+// VEKTOR: foto -> SVG (image-to-svg) dan SVG -> XML Alight Motion (svg-to-xml)
+// Logika ada di api/_vectorize.js dan api/_svg-to-am.js (tanpa layanan pihak ketiga).
+// ===============================
+const vecTruthy = (v) => /^(1|true|yes|ya|on)$/i.test(String(v ?? "").trim());
+const vecBaseName = (name, fallback) => String(name || fallback).replace(/\.[^.]+$/, "").replace(/[^\w\-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60) || fallback;
+
+async function vecReadInput(req) {
+  const q = new URL(req.url, "http://x").searchParams;
+  const ct = req.headers["content-type"] || "";
+  let file = null; let fields = {};
+  if (/multipart\/form-data/i.test(ct)) {
+    if (Number(req.headers["content-length"] || 0) > 4_200_000) throw Object.assign(new Error("File terlalu besar. Maksimal 4 MB."), { status: 413 });
+    ({ file, fields } = await freeconvertMp3ParseMultipart(req, 4_000_000));
+  } else if (req.method === "POST") {
+    fields = await adminBody(req);
+  }
+  return { file: file && file.buffer?.length ? file : null, pick: (k) => String(fields[k] ?? q.get(k) ?? "").trim() };
+}
+
+function vecPreflight(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept, x-user-token, x-api-key");
+  res.setHeader("Access-Control-Expose-Headers", "Content-Disposition, X-Vector-Width, X-Vector-Height, X-Vector-Colors, X-Vector-Paths, X-Shapes, X-Warnings");
+  if (req.method === "OPTIONS") { res.status(204).end(); return true; }
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST, OPTIONS");
+    res.status(405).json({ status: false, message: "Metode tidak diizinkan. Gunakan POST dengan multipart/form-data." });
+    return true;
+  }
+  return false;
+}
+
+async function handleImageToSvg(req, res) {
+  if (vecPreflight(req, res)) return;
+  try {
+    const { file, pick } = await vecReadInput(req);
+    if (!file) return res.status(400).json({ status: false, message: "File gambar wajib diunggah.", error: 'Kirim multipart/form-data dengan field "file" (PNG, JPG, atau WebP, maks 4 MB).' });
+    const output = pick("output").toLowerCase() || "file";
+    if (output !== "file" && output !== "json") return res.status(400).json({ status: false, message: 'Parameter output harus "file" atau "json".' });
+    const detail = pick("detail").toLowerCase() || "medium";
+    if (!["low", "medium", "high"].includes(detail)) return res.status(400).json({ status: false, message: 'Parameter detail harus "low", "medium", atau "high".' });
+    const colors = pick("colors") ? Number(pick("colors")) : 12;
+    const size = pick("size") ? Number(pick("size")) : 640;
+    if (!Number.isInteger(colors) || colors < 2 || colors > 32) return res.status(400).json({ status: false, message: "Parameter colors harus bilangan bulat 2 sampai 32." });
+    if (!Number.isInteger(size) || size < 100 || size > 1200) return res.status(400).json({ status: false, message: "Parameter size harus bilangan bulat 100 sampai 1200." });
+
+    const r = await vectorizeImage(file.buffer, { colors, size, detail, removeBackground: vecTruthy(pick("remove_background")) });
+    const name = vecBaseName(file.filename, "vector");
+    res.setHeader("Cache-Control", "no-store");
+    if (output === "json") {
+      return res.status(200).json({ status: true, data: { width: r.width, height: r.height, colors: r.colors, paths: r.paths, has_transparency: r.hasTransparency, size_bytes: Buffer.byteLength(r.svg), filename: `${name}.svg`, svg: r.svg } });
+    }
+    res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
+    res.setHeader("Content-Disposition", `inline; filename="${name}.svg"`);
+    res.setHeader("X-Vector-Width", String(r.width)); res.setHeader("X-Vector-Height", String(r.height));
+    res.setHeader("X-Vector-Colors", String(r.colors)); res.setHeader("X-Vector-Paths", String(r.paths));
+    return res.status(200).send(r.svg);
+  } catch (e) {
+    const code = e.status || (e.code === "NO_SHARP" ? 503 : e.code === "BAD_IMAGE" ? 415 : e.code === "TOO_LARGE" ? 413 : 500);
+    if (code === 500) console.error("image-to-svg:", e?.message || e);
+    return res.status(code).json({ status: false, message: code === 500 ? "Gagal membuat vektor dari gambar." : e.message, ...(code === 500 ? { error: e?.message } : {}) });
+  }
+}
+
+async function handleSvgToXml(req, res) {
+  if (vecPreflight(req, res)) return;
+  try {
+    const { file, pick } = await vecReadInput(req);
+    const text = file ? file.buffer.toString("utf8") : pick("svg");
+    if (!text) return res.status(400).json({ status: false, message: "SVG wajib diisi.", error: 'Unggah file .svg pada field "file", atau kirim kode SVG pada field "svg".' });
+    const output = pick("output").toLowerCase() || "file";
+    if (output !== "file" && output !== "json") return res.status(400).json({ status: false, message: 'Parameter output harus "file" atau "json".' });
+    const order = pick("order").toLowerCase();
+    if (order && order !== "document" && order !== "area" && order !== "auto") return res.status(400).json({ status: false, message: 'Parameter order harus "auto", "document", atau "area".' });
+    const numOpt = (k, lo, hi) => {
+      if (!pick(k)) return undefined;
+      const n = Number(pick(k));
+      if (!Number.isFinite(n) || n < lo || n > hi) throw Object.assign(new Error(`Parameter ${k} harus angka ${lo} sampai ${hi}.`), { status: 400 });
+      return n;
+    };
+    const bg = pick("bgcolor");
+    if (bg && !/^#[0-9a-f]{8}$/i.test(bg)) return res.status(400).json({ status: false, message: "Parameter bgcolor harus berformat #AARRGGBB, contoh #ff000000." });
+
+    const name = vecBaseName(file?.filename || pick("title"), "vector");
+    const r = svgToAlightXml(text, {
+      width: numOpt("width", 16, 8192), height: numOpt("height", 16, 8192), fps: numOpt("fps", 1, 240), duration: numOpt("duration", 100, 600000),
+      scale: numOpt("scale", 0.05, 1), maxShapes: numOpt("max_shapes", 1, 3000), bgcolor: bg || undefined, order: order === "auto" ? undefined : order || undefined,
+      title: pick("title") || name,
+    });
+    res.setHeader("Cache-Control", "no-store");
+    if (output === "json") {
+      return res.status(200).json({ status: true, data: { filename: `${name}.xml`, shapes: r.shapes, width: r.width, height: r.height, order: r.order, dropped: r.dropped, warnings: r.warnings, xml: r.xml } });
+    }
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${name}.xml"`);
+    res.setHeader("X-Shapes", String(r.shapes));
+    if (r.warnings.length) res.setHeader("X-Warnings", encodeURIComponent(r.warnings.join(" | ")).slice(0, 1500));
+    return res.status(200).send(r.xml);
+  } catch (e) {
+    const code = e.status || (e.code === "BAD_SVG" || e.code === "EMPTY_SVG" ? 422 : e.code === "TOO_COMPLEX" ? 413 : e.code === "TOO_LARGE" ? 413 : 500);
+    if (code === 500) console.error("svg-to-xml:", e?.message || e);
+    return res.status(code).json({ status: false, message: code === 500 ? "Gagal mengonversi SVG ke XML." : e.message, ...(code === 500 ? { error: e?.message } : {}) });
+  }
+}
 
 // ===============================
 // KONVERTER UMUM (FreeConvert guest) — video/audio/gambar
@@ -15305,26 +15352,10 @@ async function googleVerify(idToken) {
   return { sub: String(data.sub), email: String(data.email || ""), name: String(data.name || data.email || "Pengguna"), picture: String(data.picture || "") };
 }
 
-// Biaya kuota harian per request:
-//   1 = endpoint biasa | 2 = endpoint gambar & endpoint berat (IMAGE_QUOTA_COST / HEAVY_QUOTA_COST) | 3 = endpoint 18+ (ADULT_QUOTA_COST) & Web2APK (BUILD_QUOTA_COST)
-const ADULT_ROUTES = new Set(["nsfw-random", "nsfw-random1", "tai", "tai1", "imgviral", "favorite-random"]);
-const BUILD_ROUTES = new Set(["web2apk"]); // hanya langkah build; status/unduh gratis
-const IMAGE_ROUTES = new Set([
-  "alya", "waifuimg", "zerochan", "alphacoders-random", "deviantart-random", // anime & wallpaper
-  "to-anime", "bgremover", "brat", "unblur-img", "unwatermark-nano-banana", "upscale-image", "crop-image", "compress-image", // olah gambar
-  "ai-image", "editimg", "photoeditor-ai" // AI gambar
-]);
-const HEAVY_ROUTES = new Set([
-  "to-gif", "gif-to-mp4", "video-to-audio", "audio-converter", "audio-to-video", "video-converter", "image-converter", "image-to-pdf", "freeconvert-video-to-mp3", // konverter file
-  "youtube-mp3", "ytplay", "terabox", "capcut", "motionbgs", // download berat
-  "video-to-prompt", "autoai", "ssweb", "text-to-speech" // proses berat
-]);
-const costEnv = (name, def) => { const n = parseInt(process.env[name], 10); return Number.isFinite(n) && n >= 1 ? n : def; };
-const adultQuotaCost = () => costEnv("ADULT_QUOTA_COST", 5);
-const buildQuotaCost = () => costEnv("BUILD_QUOTA_COST", 3);
-const imageQuotaCost = () => costEnv("IMAGE_QUOTA_COST", 2);
-const heavyQuotaCost = () => costEnv("HEAVY_QUOTA_COST", 2);
-const routeCost = (routeKey) => (ADULT_ROUTES.has(routeKey) ? adultQuotaCost() : BUILD_ROUTES.has(routeKey) ? buildQuotaCost() : IMAGE_ROUTES.has(routeKey) ? imageQuotaCost() : HEAVY_ROUTES.has(routeKey) ? heavyQuotaCost() : 1);
+// Biaya kuota harian per request dibaca dari field `cost` di metadata tiap endpoint (src/apis/endpoints/**/*.js).
+// Peta rute -> biaya dibuat otomatis (api/_quota-map.js) oleh scripts/gen-quota-map.mjs saat `npm run build`.
+// Rute yang tidak punya `cost` berbiaya 1.
+const routeCost = (routeKey) => QUOTA_MAP[routeKey] || 1;
 
 const USER_GATE_SKIP = /^(stats|endpoint-status|admin|snippet|raw|auth|add-subdomain|cek-limit|check-limit)(\/|$)/; // add-subdomain memakai ADD_SUBDOMAIN_API_KEY sendiri
 
@@ -15510,7 +15541,7 @@ async function handleCekLimit(req, res) {
           reset_at: new Date(Date.now() + p.resetIn * 1000).toISOString(),
           timezone: "Asia/Jakarta"
         },
-        quota_cost: { normal: 1, image: imageQuotaCost(), heavy: heavyQuotaCost(), build: buildQuotaCost(), adult: adultQuotaCost() },
+        quota_cost: { default: 1, endpoints: Object.fromEntries(Object.entries(QUOTA_MAP).filter(([, c]) => c > 1)) },
         total_requests: p.total,
         member_since: p.createdAt || null
       }
@@ -15678,6 +15709,10 @@ case "video-to-prompt":
   return handleTourl(req, res);
   case "freeconvert-video-to-mp3":
   return handleFreeconvertVideoToMp3(req, res);
+  case "image-to-svg":
+  return handleImageToSvg(req, res);
+  case "svg-to-xml":
+  return handleSvgToXml(req, res);
   case "to-gif":
   case "gif-to-mp4":
   case "video-to-audio":
@@ -15694,7 +15729,6 @@ case "video-to-prompt":
   case "web2apk": return handleWeb2apk(req, res);
   case "ocr":
   return handleOcr(req, res);
-  case "favorite-random": return handleFavoriteRandom(req, res);
   case "imgbb":
   return handleImgbb(req, res);
   case "ringtone":

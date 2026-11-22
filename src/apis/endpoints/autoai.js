@@ -1,5 +1,6 @@
 export default {
   slug: "autoai",
+  cost: 2,
   name: "AutoAI",
   description: "AI chat dengan dukungan analisis gambar menggunakan NeoSoft Gemini dan AskMe Vision.",
   category: "AI",

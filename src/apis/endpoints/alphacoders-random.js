@@ -1,5 +1,6 @@
 export default {
   slug: "alphacoders-random",
+  cost: 2,
   name: "Wallpaper Abyss Random",
   description:
     "Mengambil 1 wallpaper acak dari Wallpaper Abyss (Alpha Coders) berdasarkan kata kunci, dalam resolusi dan format asli (JPG/PNG) tanpa dikecilkan. Respons berupa file gambar langsung, bukan JSON. File yang sangat besar akan diarahkan (redirect) ke URL gambar aslinya.",

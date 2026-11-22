@@ -1,5 +1,6 @@
 export default {
   slug: "unwatermark-nano-banana",
+  cost: 2,
 
   name: "Unwatermark Nano Banana",
 
