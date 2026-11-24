@@ -1,6 +1,5 @@
 export default {
   slug: "compress-image",
-  cost: 2,
   name: "Compress Image",
   description:
     "Unggah gambar (maksimal 4MB) lalu kecilkan ukuran filenya. Pilih format hasil, mode kompresi, dan kualitas. Hasilnya berupa link gambar beserta persentase penghematan.",

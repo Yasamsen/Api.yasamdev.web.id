@@ -1,6 +1,5 @@
 export default {
   slug: "editimg",
-  cost: 2,
 
   name: "AI Image Editor",
 

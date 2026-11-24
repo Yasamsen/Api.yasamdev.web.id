@@ -1,6 +1,5 @@
 export default {
   "slug": "audio-to-video",
-  "cost": 2,
   "name": "Audio to Video",
   "description": "Ubah audio (MP3, WAV, dll) menjadi file MP4. Hasil berisi audio saja, tanpa gambar.",
   "category": "Converter",

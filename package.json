@@ -4,9 +4,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/gen-quota-map.mjs && vite",
-    "quota": "node scripts/gen-quota-map.mjs",
-    "build": "node scripts/gen-quota-map.mjs && vite build",
+    "dev": "vite",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "devDependencies": {

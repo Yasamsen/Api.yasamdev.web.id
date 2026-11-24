@@ -1,6 +1,5 @@
 export default {
   slug: "tai",
-  cost: 3,
   name: "Tai Random",
   description: "Mengambil satu data media secara acak dari halaman SFMCompile.",
   category: "Media",

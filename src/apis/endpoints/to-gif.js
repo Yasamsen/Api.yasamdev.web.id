@@ -1,6 +1,5 @@
 export default {
   "slug": "to-gif",
-  "cost": 2,
   "name": "Video to GIF",
   "description": "Ubah video (MP4, MOV, WEBM, AVI, dll) menjadi GIF animasi.",
   "category": "Converter",

@@ -1,6 +1,5 @@
 export default {
   slug: "freeconvert-video-to-mp3",
-  cost: 2,
   name: "Video to MP3",
   description: "Unggah video dari perangkat seperti ToURL, lalu konversi menjadi audio MP3.",
   category: "Converter",

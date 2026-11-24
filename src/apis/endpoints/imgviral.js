@@ -1,6 +1,5 @@
 export default {
   slug: "imgviral",
-  cost: 3,
   name: "Image-Viral",
   description: "Get a random viral image.",
   category: "Media",

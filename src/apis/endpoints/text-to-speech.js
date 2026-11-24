@@ -1,6 +1,5 @@
 export default {
   slug: "text-to-speech",
-  cost: 2,
   name: "Text to Speech",
   description:
     "Ubah teks (maksimal 1000 karakter) menjadi suara MP3 dalam berbagai bahasa. Hasilnya berupa link audio; tambahkan output=audio untuk mengunduh file langsung.",

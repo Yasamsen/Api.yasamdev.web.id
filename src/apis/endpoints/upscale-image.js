@@ -1,6 +1,5 @@
 export default {
   slug: "upscale-image",
-  cost: 2,
   name: "Upscale Image",
   description:
     "Unggah gambar dari perangkat kamu (maksimal 4MB) lalu perbesar resolusinya 2x atau 4x. Diproses langsung di server dengan resampling Lanczos3 + penajaman, hasilnya berupa link gambar.",

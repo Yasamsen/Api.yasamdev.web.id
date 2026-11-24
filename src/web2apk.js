@@ -1,5 +1,4 @@
 import { esc, icon, refreshIcons } from './utils.js';
-import { getApiBySlug } from './apis/registry.js';
 import { auth, authHeaders, isLoggedIn, openLogin, refreshUser } from './auth.js';
 
 /* =========================================================
@@ -57,7 +56,7 @@ function formHtml() {
       <button type="button" id="w2a-fav" class="mt-2 text-xs font-bold text-gold underline underline-offset-2">Pakai favicon dari website</button></div>
     <p id="w2a-err" class="min-h-[1.25rem] text-xs font-bold text-red-400" role="alert">${esc(W.error)}</p>
     <div class="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
-      <p class="text-xs leading-5 text-muted">${icon('Coins', 'mr-1 inline h-3.5 w-3.5 align-[-2px]')}Membuat APK memakai <b class="text-fg">${getApiBySlug('web2apk')?.cost || 1} kuota</b>${u ? ` · sisa kuota hari ini <b class="text-fg">${left}</b>` : ''}. Cek progres dan unduh gratis.</p>
+      <p class="text-xs leading-5 text-muted">${icon('Coins', 'mr-1 inline h-3.5 w-3.5 align-[-2px]')}Membuat APK memakai <b class="text-fg">3 kuota</b>${u ? ` · sisa kuota hari ini <b class="text-fg">${left}</b>` : ''}. Cek progres dan unduh gratis.</p>
       <button class="btn btn-gold w-full sm:w-auto" id="w2a-go">${icon('Smartphone', 'h-4 w-4')} Buat APK</button>
     </div>
   </form>`;

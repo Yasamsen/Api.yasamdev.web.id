@@ -1,6 +1,5 @@
 export default {
   slug: "deviantart-random",
-  cost: 2,
   name: "DeviantArt Random",
   description:
     "Mengambil 1 karya gambar acak dari DeviantArt berdasarkan kata kunci (karya dewasa dilewati). Respons berupa file gambar langsung, bukan JSON. File yang sangat besar akan diarahkan (redirect) ke URL gambar aslinya.",
