@@ -1,12 +1,12 @@
 export default {
-  slug: "nsfw-random1",
-  name: "random-favorite",
+  slug: "favorite-random",
+  name: "Favorite Random",
   description:
-    "Mengambil gambar atau video secara acak dari media repository Hentai.",
+    "Mengambil gambar secara acak dari media repository Favorite.",
 
   category: "Media",
   method: "GET",
-  endpoint: "/api/random-favorite",
+  endpoint: "/api/favorite-random",
   icon: "Images",
 
   parameters: [],
@@ -15,11 +15,11 @@ export default {
     status: true,
     creator: "yasamDev",
     source:
-      "https:///Xxxxxxx",
-    total: 33,
+      "",
+    total: 60,
     type: "image",
     url:
-      "https:///Xxxxxxx"
+      ""
   },
 
   responseFields: [

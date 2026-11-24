@@ -2037,56 +2037,68 @@ async function handleNsfwRandomEndpoint(req, res) {
     });
   }
 }
-//nsfw
-async function handleRandomFavoriteEndpoint(req, res) {
+//nsfw random 
+async function handleFavoriteRandom(req, res) {
+  const API_JSON = "https://raw.githubusercontent.com/Yasamsen/media-repo/main/favorite/api.json";
+  const MIME_TYPES = {
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    webp: "image/webp",
+    avif: "image/avif",
+    mp4: "video/mp4",
+    webm: "video/webm",
+    mov: "video/quicktime",
+    m4v: "video/x-m4v"
+  };
+
+  if (req.method !== "GET") {
+    return res.status(405).json({ status: false, message: "Method not allowed" });
+  }
+
   try {
-    if (req.method !== "GET") {
-      return res.status(405).json({
-        status: false,
-        message: "Method tidak diizinkan. Gunakan GET.",
-        error: "Method Not Allowed"
-      });
+    const listResponse = await fetch(API_JSON, { cache: "no-store" });
+
+    if (!listResponse.ok) {
+      return res.status(502).json({ status: false, message: "Gagal mengambil api.json" });
     }
 
-    const sourceUrl =
-      "https://raw.githubusercontent.com/Yasamsen/media-repo/main/favorite/api.json";
+    const json = await listResponse.json();
 
-    const response = await fetch(sourceUrl);
-
-    if (!response.ok) {
-      throw new Error(
-        `Gagal mengambil api.json. HTTP ${response.status}`
-      );
+    if (!Array.isArray(json.data) || json.data.length === 0) {
+      return res.status(404).json({ status: false, message: "Media tidak ditemukan" });
     }
 
-    const json = await response.json();
+    const media = json.data[Math.floor(Math.random() * json.data.length)];
 
-    if (!json || !Array.isArray(json.data) || json.data.length === 0) {
-      throw new Error("Data api.json kosong atau format tidak valid.");
+    if (typeof media !== "string") {
+      return res.status(500).json({ status: false, message: "URL media tidak valid" });
     }
 
-    const randomIndex = Math.floor(Math.random() * json.data.length);
-    const randomUrl = json.data[randomIndex];
+    const cleanUrl = media.split("?")[0].toLowerCase();
+    const extension = cleanUrl.split(".").pop();
+    const contentType = MIME_TYPES[extension];
 
-    if (typeof randomUrl !== "string" || !randomUrl.trim()) {
-      throw new Error("URL random yang dipilih tidak valid.");
+    if (!contentType) {
+      return res.status(415).json({ status: false, message: "Format media tidak didukung", url: media });
     }
 
-    res.setHeader("Cache-Control", "no-store, max-age=0");
+    const mediaResponse = await fetch(media);
 
-    return res.status(200).json({
-      status: true,
-      source: "Random Favorite",
-      data: {
-        url: randomUrl
-      }
-    });
+    if (!mediaResponse.ok) {
+      return res.status(502).json({ status: false, message: "Gagal mengambil media", http_status: mediaResponse.status });
+    }
+
+    const buffer = Buffer.from(await mediaResponse.arrayBuffer());
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+
+    return res.status(200).send(buffer);
   } catch (error) {
-    return res.status(500).json({
-      status: false,
-      message: "Gagal mengambil data favorite secara random.",
-      error: error.message
-    });
+    console.error("Favorite MEDIA ERROR:", error);
+    return res.status(502).json({ status: false, message: "Gagal mengambil media", error: error.message });
   }
 }
 //Image tools (upscale / crop / compress) + TTS + AI chat + Spotify
@@ -15295,7 +15307,7 @@ async function googleVerify(idToken) {
 
 // Biaya kuota harian per request:
 //   1 = endpoint biasa | 2 = endpoint gambar & endpoint berat (IMAGE_QUOTA_COST / HEAVY_QUOTA_COST) | 3 = endpoint 18+ (ADULT_QUOTA_COST) & Web2APK (BUILD_QUOTA_COST)
-const ADULT_ROUTES = new Set(["nsfw-random", "nsfw-random1", "tai", "tai1", "imgviral", "random-favorite"]);
+const ADULT_ROUTES = new Set(["nsfw-random", "nsfw-random1", "tai", "tai1", "imgviral", "favorite-random"]);
 const BUILD_ROUTES = new Set(["web2apk"]); // hanya langkah build; status/unduh gratis
 const IMAGE_ROUTES = new Set([
   "alya", "waifuimg", "zerochan", "alphacoders-random", "deviantart-random", // anime & wallpaper
@@ -15308,7 +15320,7 @@ const HEAVY_ROUTES = new Set([
   "video-to-prompt", "autoai", "ssweb", "text-to-speech" // proses berat
 ]);
 const costEnv = (name, def) => { const n = parseInt(process.env[name], 10); return Number.isFinite(n) && n >= 1 ? n : def; };
-const adultQuotaCost = () => costEnv("ADULT_QUOTA_COST", 3);
+const adultQuotaCost = () => costEnv("ADULT_QUOTA_COST", 5);
 const buildQuotaCost = () => costEnv("BUILD_QUOTA_COST", 3);
 const imageQuotaCost = () => costEnv("IMAGE_QUOTA_COST", 2);
 const heavyQuotaCost = () => costEnv("HEAVY_QUOTA_COST", 2);
@@ -15682,8 +15694,7 @@ case "video-to-prompt":
   case "web2apk": return handleWeb2apk(req, res);
   case "ocr":
   return handleOcr(req, res);
-  case "random-favorite":
- return handleRandomFavoriteEndpoint(req, res);
+  case "favorite-random": return handleFavoriteRandom(req, res);
   case "imgbb":
   return handleImgbb(req, res);
   case "ringtone":
